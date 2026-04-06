@@ -49,14 +49,19 @@ export async function GET(request: Request) {
     return NextResponse.json({ data: plain, count: c2, offset, limit })
   }
 
-  // 各投稿の最新インサイトを集約
+  // 各投稿・各メトリクスごとに snapshot_at が最も新しい行だけ採用（常に最新値）
   const enriched = posts?.map((post) => {
     const insights = post.ig_media_insight_fact as Array<{ metric_code: string; value: number | null; snapshot_at: string }>
-    const latest: Record<string, number | null> = {}
+    const newestByMetric: Record<string, { value: number | null; snapshot_at: string }> = {}
     for (const ins of (insights ?? [])) {
-      if (!(ins.metric_code in latest)) {
-        latest[ins.metric_code] = ins.value
+      const prev = newestByMetric[ins.metric_code]
+      if (!prev || ins.snapshot_at > prev.snapshot_at) {
+        newestByMetric[ins.metric_code] = { value: ins.value, snapshot_at: ins.snapshot_at }
       }
+    }
+    const latest: Record<string, number | null> = {}
+    for (const [code, row] of Object.entries(newestByMetric)) {
+      latest[code] = row.value
     }
     const { ig_media_insight_fact: _, ...rest } = post
     return { ...rest, insights: latest }
