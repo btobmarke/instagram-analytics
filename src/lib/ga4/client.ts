@@ -6,6 +6,7 @@
  */
 
 import { createSign } from 'crypto'
+import { validateRunReportMetrics } from '@/lib/ga4/metrics-validation'
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const GA4_API_BASE = 'https://analyticsdata.googleapis.com/v1beta'
@@ -96,6 +97,7 @@ export async function runReport(
   accessToken: string,
   params: Omit<ReportRequest, 'property'>
 ): Promise<ReportRow[]> {
+  validateRunReportMetrics(params.metrics, 'runReport')
   const body: ReportRequest = {
     property: `properties/${propertyId}`,
     ...params,
@@ -128,22 +130,31 @@ export async function runReport(
 // 各種レポート取得関数
 // ---------------------------------------------------------------------------
 
-/** 日次サマリー取得（プロパティ全体） */
+/** 日次サマリー取得（プロパティ全体）。Data API は1リクエストあたり最大10メトリクスのため2回に分割してマージする */
 export async function fetchDailySummary(
   propertyId: string,
   accessToken: string,
   reportDate: string
 ): Promise<ReportRow[]> {
-  return runReport(propertyId, accessToken, {
-    dimensions: [{ name: 'date' }],
+  const dateRanges = [{ startDate: reportDate, endDate: reportDate }]
+  const dimensions = [{ name: 'date' }]
+
+  const partA = await runReport(propertyId, accessToken, {
+    dimensions,
     metrics: [
       { name: 'sessions' },
       { name: 'totalUsers' },
       { name: 'newUsers' },
-      { name: 'returningUsers' },
       { name: 'engagedSessions' },
       { name: 'engagementRate' },
       { name: 'bounceRate' },
+    ],
+    dateRanges,
+  })
+
+  const partB = await runReport(propertyId, accessToken, {
+    dimensions,
+    metrics: [
       { name: 'averageSessionDuration' },
       { name: 'sessionsPerUser' },
       { name: 'screenPageViews' },
@@ -151,11 +162,26 @@ export async function fetchDailySummary(
       { name: 'conversions' },
       { name: 'totalRevenue' },
     ],
-    dateRanges: [{ startDate: reportDate, endDate: reportDate }],
+    dateRanges,
   })
+
+  const a = partA[0]
+  const b = partB[0]
+  if (!a && !b) return []
+  if (!a || !b) {
+    throw new Error(
+      'GA4 日次サマリー: 分割 runReport の片方のみ行が返りました（同一日付で再試行するか、プロパティのデータを確認してください）'
+    )
+  }
+
+  return [{ dims: a.dims, metrics: [...a.metrics, ...b.metrics] }]
 }
 
-/** ページ別メトリクス取得 */
+/**
+ * ページ別メトリクス取得
+ * - entrances/exits は Data API 未対応のため、DB 列 entrances に eventCount、exits に screenPageViewsPerSession を格納
+ * - keyEvents と conversions は API 上同一扱いで重複エラーになるため、ページでは conversions のみ使用
+ */
 export async function fetchPageMetrics(
   propertyId: string,
   accessToken: string,
@@ -170,8 +196,8 @@ export async function fetchPageMetrics(
       { name: 'engagedSessions' },
       { name: 'userEngagementDuration' },
       { name: 'bounceRate' },
-      { name: 'entrances' },
-      { name: 'exits' },
+      { name: 'eventCount' },
+      { name: 'screenPageViewsPerSession' },
       { name: 'conversions' },
     ],
     dateRanges: [{ startDate: reportDate, endDate: reportDate }],

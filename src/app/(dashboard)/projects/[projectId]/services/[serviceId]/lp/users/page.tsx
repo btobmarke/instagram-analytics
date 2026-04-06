@@ -146,7 +146,7 @@ export default function LpUsersPage({
                     </p>
                   </td>
                   <td className="px-5 py-4">
-                    {u.userTemperature === 'hot' ? (
+                    {u.userTemperature === 'HOT' ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 text-xs font-medium">
                         🔥 HOT
                       </span>
@@ -162,7 +162,7 @@ export default function LpUsersPage({
                       <span className="font-bold text-gray-900">{u.totalIntentScore}</span>
                       <div className="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                         <div
-                          className={`h-full rounded-full ${u.userTemperature === 'hot' ? 'bg-red-400' : 'bg-blue-300'}`}
+                          className={`h-full rounded-full ${u.userTemperature === 'HOT' ? 'bg-red-400' : 'bg-blue-300'}`}
                           style={{ width: `${Math.min(100, u.totalIntentScore)}%` }}
                         />
                       </div>

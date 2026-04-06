@@ -1,14 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { createClient } from '@supabase/supabase-js'
+import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { authenticateLpRequest } from '@/lib/lp-auth'
-
-function createAnonSupabaseClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
-}
 
 const EventSchema = z.object({
   lpCode: z.string().min(1),
@@ -31,7 +24,7 @@ const EventSchema = z.object({
  * 4. lp_users の total_intent_score 更新、ホット/コールド再判定
  */
 export async function POST(request: NextRequest) {
-  const supabase = createAnonSupabaseClient()
+  const supabase = createSupabaseAdminClient()
 
   const auth = await authenticateLpRequest(request, supabase)
   if (auth.error) return auth.error
@@ -49,10 +42,12 @@ export async function POST(request: NextRequest) {
 
   const { anonymousUserKey, sessionId, eventId, occurredAt, pageUrl, scrollPercent, meta } = parsed.data
 
+  console.log(`[LP-SDK] event  lpCode=${lpSite.lp_code} eventId=${eventId} url=${pageUrl ?? '-'}`)
+
   // セッション確認
   const { data: sessionRaw } = await supabase
     .from('lp_sessions')
-    .select('id, lp_user_id, session_intent_score, lp_users!inner(id, anonymous_key, lp_site_id, total_intent_score, user_temperature)')
+    .select('id, lp_user_id, session_intent_score, lp_users!inner(id, anonymous_user_key, lp_site_id, total_intent_score, user_temperature)')
     .eq('id', sessionId)
     .single()
 
@@ -61,7 +56,7 @@ export async function POST(request: NextRequest) {
 
   if (
     !session ||
-    sessionUser?.anonymous_key !== anonymousUserKey ||
+    sessionUser?.anonymous_user_key !== anonymousUserKey ||
     sessionUser?.lp_site_id !== lpSite.id
   ) {
     return NextResponse.json(
@@ -99,7 +94,7 @@ export async function POST(request: NextRequest) {
   })
 
   if (logError) {
-    console.error('[POST /api/public/lp/event] log insert error', logError)
+    console.error('[LP-SDK] event  ✗ DB error', logError)
     return NextResponse.json(
       { success: false, error: { code: 'DB_ERROR', message: 'イベントログ保存に失敗しました' } },
       { status: 500 }
@@ -128,7 +123,7 @@ export async function POST(request: NextRequest) {
     .single()
 
   const hotThreshold = scoringSettings?.hot_threshold ?? 100
-  const newTemperature = newTotalScore >= hotThreshold ? 'hot' : 'cold'
+  const newTemperature = newTotalScore >= hotThreshold ? 'HOT' : 'COLD'
 
   await supabase
     .from('lp_users')
@@ -138,6 +133,8 @@ export async function POST(request: NextRequest) {
       last_visited_at: now,
     })
     .eq('id', userId)
+
+  console.log(`[LP-SDK] event  → score=${intentScore} sessionTotal=${newSessionScore} userTotal=${newTotalScore} temp=${newTemperature}`)
 
   return NextResponse.json({
     success: true,

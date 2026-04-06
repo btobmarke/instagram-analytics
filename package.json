@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ga4-live": "vitest run src/lib/ga4/ga4-client.live.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.0",
@@ -16,18 +19,19 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "recharts": "^2.13.3",
-    "zod": "^3.24.0",
-    "swr": "^2.2.5"
+    "swr": "^2.2.5",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "autoprefixer": "^10",
     "eslint": "^9",
     "eslint-config-next": "15.1.0",
-    "tailwindcss": "^3.4.0",
     "postcss": "^8",
-    "autoprefixer": "^10",
-    "typescript": "^5"
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5",
+    "vitest": "^3.0.5"
   }
 }

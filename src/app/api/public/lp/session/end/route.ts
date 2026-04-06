@@ -1,14 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { createClient } from '@supabase/supabase-js'
+import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { authenticateLpRequest } from '@/lib/lp-auth'
-
-function createAnonSupabaseClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
-}
 
 const SessionEndSchema = z.object({
   sessionId: z.string().uuid(),
@@ -25,14 +18,15 @@ const SessionEndSchema = z.object({
  * - exit_page_url、duration_seconds を更新
  */
 export async function POST(request: NextRequest) {
-  const supabase = createAnonSupabaseClient()
+  const supabase = createSupabaseAdminClient()
 
   const auth = await authenticateLpRequest(request, supabase)
   if (auth.error) return auth.error
 
   const lpSite = auth.lpSite
 
-  const body = await request.json().catch(() => null)
+  // sendBeacon は text/plain で送るため text() → JSON.parse にフォールバック
+  const body = await request.text().then(t => { try { return JSON.parse(t) } catch { return null } }).catch(() => null)
   const parsed = SessionEndSchema.safeParse(body)
   if (!parsed.success) {
     return NextResponse.json(
@@ -42,6 +36,8 @@ export async function POST(request: NextRequest) {
   }
 
   const { sessionId, occurredAt, exitPageUrl, totalDurationSeconds } = parsed.data
+
+  console.log(`[LP-SDK] session/end  sessionId=${sessionId} exitUrl=${exitPageUrl ?? '-'}`)
   const now = occurredAt ? new Date(occurredAt).toISOString() : new Date().toISOString()
 
   // セッション取得
@@ -86,6 +82,8 @@ export async function POST(request: NextRequest) {
       duration_seconds: durationSeconds ?? null,
     })
     .eq('id', sessionId)
+
+  console.log(`[LP-SDK] session/end  → 終了記録 duration=${durationSeconds ?? '?'}秒`)
 
   return NextResponse.json({ success: true, data: null })
 }

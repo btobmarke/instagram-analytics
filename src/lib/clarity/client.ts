@@ -1,11 +1,15 @@
 /**
- * Microsoft Clarity Export API クライアント
+ * Microsoft Clarity Data Export API v1
  *
- * 認証方式: API キー（Bearer トークン）
- * ドキュメント: https://learn.microsoft.com/en-us/clarity/setup-and-installation/export-api
+ * 認証: プロジェクトの Settings → Data Export で発行した API トークン（Bearer）
+ * ドキュメント: https://learn.microsoft.com/en-us/clarity/setup-and-installation/clarity-data-export-api
+ *
+ * 注意:
+ * - URL にプロジェクト ID は含めない（トークンがプロジェクトに紐づく）
+ * - numOfDays は 1〜3 のみ（直近 24〜72 時間のローリング窓）。任意の過去日は取得不可
  */
 
-const CLARITY_API_BASE = 'https://www.clarity.ms/export'
+const LIVE_INSIGHTS_URL = 'https://www.clarity.ms/export-data/api/v1/project-live-insights'
 
 export interface ClarityDailyMetrics {
   totalSessionCount: number
@@ -41,20 +45,32 @@ export interface ClarityDeviceMetrics {
   userCount: number
 }
 
-// ---------------------------------------------------------------------------
-// API 呼び出しヘルパー
-// ---------------------------------------------------------------------------
+type LiveInsightBlock = { metricName?: string; information?: Record<string, unknown>[] }
 
-async function clarityFetch(
-  projectId: string,
+function num(v: unknown): number {
+  if (typeof v === 'number' && !isNaN(v)) return v
+  if (typeof v === 'string') {
+    const n = parseFloat(v.replace(/,/g, ''))
+    return isNaN(n) ? 0 : n
+  }
+  return 0
+}
+
+/** targetDate に対し API が許す numOfDays (1|2|3)（UTC 日付差の目安） */
+export function clarityNumOfDaysForTargetDate(targetDate: string): '1' | '2' | '3' {
+  const target = new Date(`${targetDate}T12:00:00.000Z`).getTime()
+  const diffDays = Math.floor((Date.now() - target) / (24 * 60 * 60 * 1000))
+  if (diffDays <= 1) return '1'
+  if (diffDays === 2) return '2'
+  return '3'
+}
+
+async function fetchLiveInsights(
   apiKey: string,
-  endpoint: string,
   params: Record<string, string>
-): Promise<unknown> {
+): Promise<LiveInsightBlock[]> {
   const qs = new URLSearchParams(params).toString()
-  const url = `${CLARITY_API_BASE}/${projectId}/${endpoint}?${qs}`
-
-  const res = await fetch(url, {
+  const res = await fetch(`${LIVE_INSIGHTS_URL}?${qs}`, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
@@ -63,99 +79,201 @@ async function clarityFetch(
 
   if (!res.ok) {
     const err = await res.text()
-    throw new Error(`Clarity API エラー [${endpoint}]: ${res.status} ${err}`)
+    throw new Error(`Clarity API エラー [project-live-insights]: ${res.status} ${err}`)
   }
 
-  return res.json()
+  const data = (await res.json()) as unknown
+  if (!Array.isArray(data)) {
+    throw new Error('Clarity API: レスポンスが配列ではありません')
+  }
+  return data as LiveInsightBlock[]
 }
 
-// ---------------------------------------------------------------------------
-// 日次サマリー取得
-// ---------------------------------------------------------------------------
+function findBlock(data: LiveInsightBlock[], re: RegExp): LiveInsightBlock | undefined {
+  return data.find((b) => re.test(b.metricName ?? ''))
+}
 
+/** 主に Traffic 用。名称の前後空白差を吸収 */
+function findTrafficBlock(data: LiveInsightBlock[]): LiveInsightBlock | undefined {
+  return data.find((b) => (b.metricName ?? '').trim().toLowerCase() === 'traffic')
+}
+
+/** ブロック内の行をセッション数で重み付け平均（valueKey）、なければ行の単純合計（sumKey） */
+function weightedAvgBySessions(
+  block: LiveInsightBlock | undefined,
+  valueKeys: string[],
+  sessionKeys: string[] = ['totalSessionCount']
+): number {
+  if (!block?.information?.length) return 0
+  let w = 0
+  let acc = 0
+  for (const row of block.information) {
+    let s = 0
+    for (const sk of sessionKeys) {
+      if (sk in row) s += num(row[sk])
+    }
+    if (s <= 0) continue
+    w += s
+    let val = 0
+    for (const vk of valueKeys) {
+      if (vk in row) {
+        val = num(row[vk])
+        break
+      }
+    }
+    acc += val * s
+  }
+  return w > 0 ? acc / w : 0
+}
+
+function sumMetricInBlock(
+  block: LiveInsightBlock | undefined,
+  keys: string[]
+): number {
+  if (!block?.information?.length) return 0
+  let t = 0
+  for (const row of block.information) {
+    for (const k of keys) {
+      if (k in row) t += num(row[k])
+    }
+  }
+  return t
+}
+
+/**
+ * 日次サマリー相当（ローリング窓）。projectId は互換のため受け取るが URL には使わない。
+ */
 export async function fetchClarityDailySummary(
-  projectId: string,
+  _projectId: string,
   apiKey: string,
-  reportDate: string // YYYY-MM-DD
+  targetDate: string
 ): Promise<ClarityDailyMetrics> {
-  const data = (await clarityFetch(projectId, apiKey, 'metrics', {
-    startDate: reportDate,
-    endDate: reportDate,
-    granularity: 'daily',
-  })) as Record<string, unknown>
+  const numDays = clarityNumOfDaysForTargetDate(targetDate)
+  const data = await fetchLiveInsights(apiKey, {
+    numOfDays: numDays,
+    dimension1: 'OS',
+  })
 
-  // Clarity API レスポンスを正規化
-  // レスポンス構造: { metrics: { totalSessionCount, totalUserCount, ... } }
-  const m = (data?.metrics ?? data) as Record<string, number>
+  const traffic = findTrafficBlock(data)
+  let totalSessions = 0
+  let totalBots = 0
+  let totalUsers = 0
+  let wPages = 0
+  for (const row of traffic?.information ?? []) {
+    const s = num(row.totalSessionCount)
+    totalSessions += s
+    totalBots += num(row.totalBotSessionCount)
+    totalUsers += num(row.distantUserCount)
+    wPages += num(row.PagesPerSessionPercentage) * s
+  }
+  const pagesPerSession = totalSessions > 0 ? wPages / totalSessions : 0
+
+  const scrollDepthAvgPct = weightedAvgBySessions(findBlock(data, /scroll/i), [
+    'ScrollDepth',
+    'scrollDepth',
+    'AvgScrollDepth',
+  ])
+
+  const activeTimeSecAvg = weightedAvgBySessions(findBlock(data, /engagement/i), [
+    'EngagementTime',
+    'engagementTime',
+    'ActiveTime',
+    'activeTime',
+  ])
+
+  const rageClickSessionCount = sumMetricInBlock(findBlock(data, /rage/i), [
+    'rageClickCount',
+    'RageClickCount',
+  ])
+  const deadClickSessionCount = sumMetricInBlock(findBlock(data, /dead/i), [
+    'deadClickCount',
+    'DeadClickCount',
+  ])
+  const quickBackSessionCount = sumMetricInBlock(findBlock(data, /quick/i), [
+    'quickBackCount',
+    'QuickBackCount',
+  ])
+  const excessiveScrollSessionCount = sumMetricInBlock(findBlock(data, /excessive/i), [
+    'excessiveScrollCount',
+    'ExcessiveScrollCount',
+  ])
+  const jsErrorSessionCount = sumMetricInBlock(findBlock(data, /script/i), [
+    'scriptErrorCount',
+    'ScriptErrorCount',
+    'jsErrorCount',
+  ])
 
   return {
-    totalSessionCount: Number(m.totalSessionCount ?? m.sessions ?? 0),
-    totalUserCount: Number(m.totalUserCount ?? m.users ?? 0),
-    pagesPerSession: Number(m.pagesPerSession ?? m.pageCount ?? 0),
-    activeTimeSecAvg: Number(m.activeTimePerSessionSec ?? m.activeTime ?? 0),
-    scrollDepthAvgPct: Number(m.scrollDepth ?? m.avgScrollDepth ?? 0),
-    rageClickSessionCount: Number(m.rageClickCount ?? m.rageclickCount ?? 0),
-    deadClickSessionCount: Number(m.deadClickCount ?? m.deadclickCount ?? 0),
-    quickBackSessionCount: Number(m.quickBackCount ?? m.quickbackCount ?? 0),
-    excessiveScrollSessionCount: Number(m.excessiveScrollCount ?? 0),
-    jsErrorSessionCount: Number(m.jsErrorCount ?? 0),
-    botSessionCount: Number(m.botSessionCount ?? m.bots ?? 0),
+    totalSessionCount: totalSessions,
+    totalUserCount: totalUsers,
+    pagesPerSession,
+    activeTimeSecAvg,
+    scrollDepthAvgPct,
+    rageClickSessionCount,
+    deadClickSessionCount,
+    quickBackSessionCount,
+    excessiveScrollSessionCount,
+    jsErrorSessionCount,
+    botSessionCount: totalBots,
   }
 }
 
-// ---------------------------------------------------------------------------
-// ページ別メトリクス取得
-// ---------------------------------------------------------------------------
-
 export async function fetchClarityPageMetrics(
-  projectId: string,
+  _projectId: string,
   apiKey: string,
-  reportDate: string
+  targetDate: string
 ): Promise<ClarityPageMetrics[]> {
-  const data = (await clarityFetch(projectId, apiKey, 'pages', {
-    startDate: reportDate,
-    endDate: reportDate,
-    granularity: 'daily',
-    pageSize: '500',
-  })) as Record<string, unknown>
+  const numDays = clarityNumOfDaysForTargetDate(targetDate)
+  const data = await fetchLiveInsights(apiKey, {
+    numOfDays: numDays,
+    dimension1: 'URL',
+  })
 
-  const pages = (data?.pages ?? data?.data ?? []) as Record<string, unknown>[]
+  const block =
+    findBlock(data, /popular/i) ??
+    findTrafficBlock(data) ??
+    data[0]
 
-  return pages.map((p) => ({
-    pageUrl: String(p.pageUrl ?? p.url ?? ''),
-    sessionCount: Number(p.sessionCount ?? p.sessions ?? 0),
-    userCount: Number(p.userCount ?? p.users ?? 0),
-    scrollDepthAvgPct: Number(p.scrollDepth ?? p.avgScrollDepth ?? 0),
-    activeTimeSecAvg: Number(p.activeTimePerSessionSec ?? p.activeTime ?? 0),
-    rageClicks: Number(p.rageClickCount ?? p.rageclickCount ?? 0),
-    deadClicks: Number(p.deadClickCount ?? p.deadclickCount ?? 0),
-    quickBacks: Number(p.quickBackCount ?? p.quickbackCount ?? 0),
-    jsErrors: Number(p.jsErrorCount ?? 0),
-  }))
+  const out: ClarityPageMetrics[] = []
+  for (const row of block?.information ?? []) {
+    const pageUrl = String(row.URL ?? row.url ?? row.pageUrl ?? '').trim()
+    if (!pageUrl) continue
+    out.push({
+      pageUrl,
+      sessionCount: num(row.totalSessionCount ?? row.sessionCount),
+      userCount: num(row.distantUserCount ?? row.userCount),
+      scrollDepthAvgPct: num(row.ScrollDepth ?? row.scrollDepth),
+      activeTimeSecAvg: num(row.EngagementTime ?? row.engagementTime),
+      rageClicks: num(row.rageClickCount ?? row.RageClickCount),
+      deadClicks: num(row.deadClickCount ?? row.DeadClickCount),
+      quickBacks: num(row.quickBackCount ?? row.QuickBackCount),
+      jsErrors: num(row.scriptErrorCount ?? row.ScriptErrorCount ?? row.jsErrorCount),
+    })
+  }
+  return out
 }
 
-// ---------------------------------------------------------------------------
-// デバイス別メトリクス取得
-// ---------------------------------------------------------------------------
-
 export async function fetchClarityDeviceMetrics(
-  projectId: string,
+  _projectId: string,
   apiKey: string,
-  reportDate: string
+  targetDate: string
 ): Promise<ClarityDeviceMetrics[]> {
-  const data = (await clarityFetch(projectId, apiKey, 'devices', {
-    startDate: reportDate,
-    endDate: reportDate,
-    granularity: 'daily',
-  })) as Record<string, unknown>
+  const numDays = clarityNumOfDaysForTargetDate(targetDate)
+  const data = await fetchLiveInsights(apiKey, {
+    numOfDays: numDays,
+    dimension1: 'Device',
+  })
 
-  const devices = (data?.devices ?? data?.data ?? []) as Record<string, unknown>[]
-
-  return devices.map((d) => ({
-    deviceType: String(d.deviceType ?? d.device ?? '(not set)'),
-    browser: String(d.browser ?? '(not set)'),
-    os: String(d.os ?? d.operatingSystem ?? '(not set)'),
-    sessionCount: Number(d.sessionCount ?? d.sessions ?? 0),
-    userCount: Number(d.userCount ?? d.users ?? 0),
-  }))
+  const traffic = findTrafficBlock(data)
+  const out: ClarityDeviceMetrics[] = []
+  for (const row of traffic?.information ?? []) {
+    out.push({
+      deviceType: String(row.Device ?? row.deviceType ?? '(not set)'),
+      browser: String(row.Browser ?? row.browser ?? '(not set)'),
+      os: String(row.OS ?? row.os ?? '(not set)'),
+      sessionCount: num(row.totalSessionCount),
+      userCount: num(row.distantUserCount),
+    })
+  }
+  return out
 }

@@ -15,6 +15,14 @@
     {
       "path": "/api/batch/ai-analysis",
       "schedule": "0 6 * * 1"
+    },
+    {
+      "path": "/api/batch/lp-session-cleanup",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/batch/lp-aggregate",
+      "schedule": "0 2 * * *"
     }
   ]
 }

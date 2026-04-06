@@ -16,12 +16,12 @@
 
   var STORAGE_KEY_ANON = 'lp_ma_anon_key';
   var HEARTBEAT_INTERVAL_MS = 60 * 1000; // 60秒
-  var SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30分
 
   var config = null;
   var anonymousUserKey = null;
   var sessionId = null;
   var heartbeatTimer = null;
+  var sessionEnded = false; // 二重送信防止フラグ
 
   function getStoredAnonKey() {
     try { return localStorage.getItem(STORAGE_KEY_ANON); } catch (e) { return null; }
@@ -31,6 +31,7 @@
     try { localStorage.setItem(STORAGE_KEY_ANON, key); } catch (e) {}
   }
 
+  // 通常の通信（レスポンスが必要な場合）
   function post(path, body) {
     return fetch(config.apiBase + path, {
       method: 'POST',
@@ -42,6 +43,24 @@
     })
       .then(function (res) { return res.json(); })
       .catch(function () { return null; });
+  }
+
+  // 離脱時専用: sendBeacon でブラウザを閉じても確実に送信
+  // - text/plain Blob を使用 → CORS preflight 不要（simple request）
+  // - x-api-key ヘッダーが使えないため URL クエリパラメータで認証
+  function beacon(path, body) {
+    if (!config || !sessionId) return;
+    var url = config.apiBase + path + '?apiKey=' + encodeURIComponent(config.apiKey);
+    // text/plain にすることで cross-origin でも preflight なしで送れる
+    var blob = new Blob([JSON.stringify(body)], { type: 'text/plain' });
+    var sent = false;
+    try {
+      sent = navigator.sendBeacon(url, blob);
+    } catch (e) {}
+    // sendBeacon が失敗 or 非対応ブラウザはフォールバック
+    if (!sent) {
+      post(path, body);
+    }
   }
 
   function identify() {
@@ -70,23 +89,10 @@
     }).then(function (res) {
       if (res && res.success) {
         sessionId = res.data.sessionId;
+        sessionEnded = false;
         startHeartbeat();
       }
       return res;
-    });
-  }
-
-  function sendPageView(pageUrl, pageTitle, scrollPercentMax, staySeconds) {
-    if (!sessionId) return Promise.resolve(null);
-    return post('/page-view', {
-      lpCode: config.lpCode,
-      anonymousUserKey: anonymousUserKey,
-      sessionId: sessionId,
-      occurredAt: new Date().toISOString(),
-      pageUrl: pageUrl || location.href,
-      pageTitle: pageTitle || document.title,
-      scrollPercentMax: scrollPercentMax,
-      staySeconds: staySeconds,
     });
   }
 
@@ -109,17 +115,6 @@
       sessionId: sessionId,
       occurredAt: new Date().toISOString(),
     });
-  }
-
-  function endSession() {
-    if (!sessionId) return;
-    stopHeartbeat();
-    post('/session/end', {
-      sessionId: sessionId,
-      occurredAt: new Date().toISOString(),
-      exitPageUrl: location.href,
-    });
-    sessionId = null;
   }
 
   function startHeartbeat() {
@@ -146,6 +141,52 @@
   // 滞在時間追跡
   var pageEnteredAt = Date.now();
 
+  // ページビュー + セッション終了を beacon で送信（二重送信防止付き）
+  function flushAndEnd() {
+    if (!sessionId || sessionEnded) return;
+    sessionEnded = true;
+    stopHeartbeat();
+
+    var staySeconds = Math.round((Date.now() - pageEnteredAt) / 1000);
+
+    beacon('/page-view', {
+      lpCode: config.lpCode,
+      anonymousUserKey: anonymousUserKey,
+      sessionId: sessionId,
+      occurredAt: new Date().toISOString(),
+      pageUrl: location.href,
+      pageTitle: document.title,
+      scrollPercentMax: maxScrollPercent,
+      staySeconds: staySeconds,
+    });
+
+    beacon('/session/end', {
+      sessionId: sessionId,
+      occurredAt: new Date().toISOString(),
+      exitPageUrl: location.href,
+    });
+
+    sessionId = null;
+  }
+
+  function sendPageView(pageUrl, pageTitle, scrollPercentMax, staySeconds) {
+    if (!sessionId) return Promise.resolve(null);
+    return post('/page-view', {
+      lpCode: config.lpCode,
+      anonymousUserKey: anonymousUserKey,
+      sessionId: sessionId,
+      occurredAt: new Date().toISOString(),
+      pageUrl: pageUrl || location.href,
+      pageTitle: pageTitle || document.title,
+      scrollPercentMax: scrollPercentMax,
+      staySeconds: staySeconds,
+    });
+  }
+
+  function endSession() {
+    flushAndEnd();
+  }
+
   function init(options) {
     if (!options || !options.apiBase || !options.apiKey || !options.lpCode) {
       console.error('[LpMA] init options required: apiBase, apiKey, lpCode');
@@ -157,23 +198,30 @@
     identify().then(function () {
       return startSession();
     }).then(function () {
-      // 初回ページビュー（DOMContentLoaded後）
       window.addEventListener('scroll', trackScroll, { passive: true });
     });
 
-    // ページアンロード時にセッション終了
+    // ブラウザ閉じ・タブ閉じ・ページ遷移時（デスクトップ）
     window.addEventListener('beforeunload', function () {
-      var staySeconds = Math.round((Date.now() - pageEnteredAt) / 1000);
-      sendPageView(location.href, document.title, maxScrollPercent, staySeconds);
-      endSession();
+      flushAndEnd();
     });
 
-    // visibilitychange でバックグラウンド移行時もハートビート停止
+    // pagehide: モバイルのスワイプ閉じ対策（beforeunload が発火しないケース）
+    window.addEventListener('pagehide', function (e) {
+      if (!e.persisted) {
+        flushAndEnd();
+      }
+    });
+
+    // visibilitychange: ハートビート管理 + バックグラウンド時間を滞在時間に含めない
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) {
         stopHeartbeat();
       } else {
-        startHeartbeat();
+        // フォアグラウンド復帰時：バックグラウンド中の時間をリセット
+        pageEnteredAt = Date.now();
+        maxScrollPercent = 0;
+        if (!sessionEnded) startHeartbeat();
       }
     });
   }

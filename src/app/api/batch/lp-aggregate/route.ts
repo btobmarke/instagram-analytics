@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { logBatchAuthFailure, validateBatchRequest } from '@/lib/utils/batch-auth'
 
 // バッチは service_role キーで実行（RLS bypass）
 function createServiceRoleClient() {
@@ -31,13 +32,11 @@ function getRangeStart(range: RangeType): string | null {
  * LP 集計バッチ (BAT-003)
  *
  * 全アクティブな LP サービスの metric_summaries / ranking_summaries を更新する。
- * Authorization: Bearer {BATCH_SECRET} で認証。
+ * Authorization: Bearer {CRON_SECRET または BATCH_SECRET} で認証。
  */
 export async function POST(request: NextRequest) {
-  // バッチシークレット認証
-  const authHeader = request.headers.get('authorization')
-  const batchSecret = process.env.BATCH_SECRET
-  if (!batchSecret || authHeader !== `Bearer ${batchSecret}`) {
+  if (!validateBatchRequest(request)) {
+    logBatchAuthFailure('lp-aggregate', request)
     return NextResponse.json(
       { success: false, error: { code: 'UNAUTHORIZED', message: 'バッチ認証に失敗しました' } },
       { status: 401 }
@@ -137,4 +136,9 @@ export async function POST(request: NextRequest) {
       results,
     },
   })
+}
+
+// Vercel Cron は GET で呼び出す
+export async function GET(request: NextRequest) {
+  return POST(request)
 }

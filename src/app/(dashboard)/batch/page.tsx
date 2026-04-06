@@ -186,26 +186,64 @@ export default function BatchPage() {
       })
       const json = (await res.json().catch(() => ({}))) as {
         success?: boolean
-        error?: string
+        error?: string | { message?: string; code?: string }
         processed?: number
         failed?: number
         accounts?: number
         skipped_no_token?: number
         last_error?: string
         hint_ja?: string
+        data?: {
+          targetDate?: string
+          processedServices?: number
+          okCount?: number
+          errorCount?: number
+          results?: Array<{ status: string; error?: string; serviceId?: string }>
+        }
       }
+      const errMsg =
+        typeof json.error === 'string'
+          ? json.error
+          : json.error?.message
+
       if (!res.ok) {
-        alert(typeof json.error === 'string' ? json.error : `失敗 (${res.status})`)
+        alert(errMsg ?? `失敗 (${res.status})`)
         return
       }
+
+      // GA4/Clarity 等: HTTP 200 でも success:false（連携0件・全件失敗・DB upsert 失敗）
+      if (json.success === false) {
+        const resultErrors =
+          json.data?.results
+            ?.filter((r) => r.status === 'error')
+            .map((r) => `${r.serviceId ?? '?'}: ${r.error ?? 'error'}`)
+            .join('\n') ?? ''
+        alert(
+          [
+            errMsg ?? 'バッチは完了しませんでした。',
+            json.hint_ja,
+            json.data?.targetDate != null ? `対象日: ${json.data.targetDate}` : null,
+            json.data?.processedServices != null
+              ? `連携サービス数: ${json.data.processedServices}`
+              : null,
+            resultErrors ? `各サービス:\n${resultErrors}` : null,
+          ]
+            .filter(Boolean)
+            .join('\n\n')
+        )
+        return
+      }
+
       const meta = JOB_META[jobName]
       const label = meta ? `[${meta.category}] ${meta.label}` : jobName
-      const doneLine = json.success === false
-        ? `${label} は終了しましたが、失敗した処理があります。`
-        : `${label} が完了しました。`
+      const doneLine = `${label} が完了しました。`
       const lines = [
         doneLine,
         json.hint_ja ?? null,
+        json.data?.targetDate != null ? `対象日: ${json.data.targetDate}` : null,
+        json.data?.okCount != null && json.data?.errorCount != null
+          ? `成功サービス: ${json.data.okCount} / 失敗: ${json.data.errorCount}`
+          : null,
         json.processed != null ? `処理件数: ${json.processed}` : null,
         json.failed != null ? `失敗: ${json.failed}` : null,
         json.accounts != null ? `対象アカウント数: ${json.accounts}` : null,
@@ -251,12 +289,12 @@ export default function BatchPage() {
       <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
         <h2 className="text-sm font-semibold text-gray-700 mb-4">手動実行</h2>
         <div className="mb-5">
-          <label className="block text-xs font-medium text-gray-500 mb-1">BATCH_SECRET</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">CRON_SECRET</label>
           <input
             type="password"
             value={cronSecret}
             onChange={e => setCronSecret(e.target.value)}
-            placeholder="環境変数の BATCH_SECRET を入力"
+            placeholder=".env の CRON_SECRET（旧 BATCH_SECRET も可）"
             className="w-72 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
           />
         </div>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, use } from 'react'
+import { useState, use, useCallback } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 
@@ -58,6 +58,165 @@ function formatValue(metricName: string, value: number | null): string {
   return value.toLocaleString()
 }
 
+// ---------------------------------------------------------------------------
+// SDK 埋め込みコードセクション
+// ---------------------------------------------------------------------------
+function EmbedCodeSection({ lpCode, apiBase, serviceId }: { lpCode: string; apiBase: string; serviceId: string }) {
+  const [copied, setCopied] = useState<'snippet' | 'lpCode' | 'newKey' | null>(null)
+  const [open, setOpen] = useState(false)
+  const [newApiKey, setNewApiKey] = useState<string | null>(null)
+  const [rotating, setRotating] = useState(false)
+
+  const snippet = `<script src="${apiBase}/lp-sdk.js"></script>
+<script>
+  LpMA.init({
+    apiBase: '${apiBase}/api/public/lp',
+    apiKey: 'YOUR_API_KEY',  // サービス作成時に発行されたキー
+    lpCode: '${lpCode}',
+  });
+</script>`
+
+  const copy = useCallback((text: string, type: 'snippet' | 'lpCode') => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(type)
+      setTimeout(() => setCopied(null), 2000)
+    })
+  }, [])
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-5 py-4 text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+      >
+        <span className="flex items-center gap-2">
+          <span className="text-base">{'</>'}</span>
+          SDK 埋め込み設定
+        </span>
+        <svg className={`w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}
+          fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="border-t border-gray-100 px-5 py-4 space-y-4">
+          {/* LP コード */}
+          <div>
+            <p className="text-xs font-semibold text-gray-500 mb-1.5">LP コード（lpCode）</p>
+            <div className="flex items-center gap-2 bg-gray-50 rounded-lg border border-gray-200 px-3 py-2">
+              <code className="text-sm font-mono text-purple-700 flex-1">{lpCode}</code>
+              <button
+                onClick={() => copy(lpCode, 'lpCode')}
+                className="text-gray-400 hover:text-purple-600 transition flex-shrink-0"
+                title="コピー"
+              >
+                {copied === 'lpCode' ? (
+                  <svg className="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* API キー注意書き */}
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-xs text-amber-700">
+            <p className="font-semibold mb-0.5">⚠️ API キー（apiKey）について</p>
+            <p>API キーはサービス作成時に一度だけ表示されます。紛失した場合は下の「APIキーを再発行」から新しいキーを発行してください。</p>
+          </div>
+
+          {/* 埋め込みコード */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-xs font-semibold text-gray-500">埋め込みコード（LP の {'</body>'} 直前に貼り付け）</p>
+              <button
+                onClick={() => copy(snippet, 'snippet')}
+                className="flex items-center gap-1 text-xs text-gray-500 hover:text-purple-600 transition"
+              >
+                {copied === 'snippet' ? (
+                  <><svg className="w-3.5 h-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg><span className="text-green-600">コピーしました</span></>
+                ) : (
+                  <><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg><span>コピー</span></>
+                )}
+              </button>
+            </div>
+            <pre className="bg-gray-900 text-gray-100 rounded-xl text-xs p-4 overflow-x-auto leading-relaxed whitespace-pre">
+              {snippet}
+            </pre>
+          </div>
+
+          {/* API キー再発行 */}
+          <div className="border-t border-gray-100 pt-4">
+            <p className="text-xs font-semibold text-red-500 mb-1">API キーを再発行</p>
+            <p className="text-xs text-gray-400 mb-3">再発行すると既存キーは即座に無効になります。LP に埋め込み済みのコードも更新が必要です。</p>
+            <button
+              onClick={async () => {
+                if (!confirm('APIキーを再発行しますか？\n既存のキーは即座に無効になります。')) return
+                setRotating(true)
+                setNewApiKey(null)
+                try {
+                  const res = await fetch(`/api/services/${serviceId}/rotate-key`, { method: 'POST' })
+                  const json = await res.json()
+                  if (json.api_key) {
+                    setNewApiKey(json.api_key)
+                  }
+                } finally {
+                  setRotating(false)
+                }
+              }}
+              disabled={rotating}
+              className="px-4 py-2 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition disabled:opacity-50"
+            >
+              {rotating ? '発行中...' : 'APIキーを再発行する'}
+            </button>
+
+            {/* 新しいキーの表示（画面内にコピー可能な形で） */}
+            {newApiKey && (
+              <div className="mt-4 bg-green-50 border border-green-200 rounded-xl p-4">
+                <p className="text-xs font-semibold text-green-700 mb-2">✅ 新しい API キーが発行されました</p>
+                <p className="text-xs text-green-600 mb-3">このキーは今後表示されません。必ずコピーして LP 側に設定してください。</p>
+                <div className="flex items-center gap-2 bg-white rounded-lg border border-green-200 px-3 py-2">
+                  <code className="text-sm font-mono text-green-800 flex-1 break-all">{newApiKey}</code>
+                  <button
+                    onClick={() => copy(newApiKey, 'newKey')}
+                    className="text-green-500 hover:text-green-700 transition flex-shrink-0 ml-2"
+                    title="コピー"
+                  >
+                    {copied === 'newKey' ? (
+                      <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                {copied === 'newKey' && (
+                  <p className="text-xs text-green-600 mt-1">コピーしました！</p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function LpDashboardPage({
   params,
 }: {
@@ -78,6 +237,8 @@ export default function LpDashboardPage({
 
   const service = serviceData?.data
   const summary = summaryData?.data
+  const lpCode = (service?.type_config as Record<string, unknown> | null)?.lp_code as string | undefined
+  const apiBase = typeof window !== 'undefined' ? window.location.origin : ''
 
   const metricOrder = ['session_count', 'user_count', 'avg_stay_seconds', 'hot_session_rate']
   const metricsMap = new Map((summary?.metrics ?? []).map(m => [m.metricName, m]))
@@ -154,6 +315,9 @@ export default function LpDashboardPage({
           })}
         </div>
       )}
+
+      {/* SDK 埋め込み設定 */}
+      {lpCode && <EmbedCodeSection lpCode={lpCode} apiBase={apiBase} serviceId={serviceId} />}
 
       {/* Rankings */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -256,9 +420,9 @@ export default function LpDashboardPage({
           <h3 className="font-semibold text-gray-900 text-sm mb-4">🔧 管理メニュー</h3>
           <div className="space-y-2">
             {[
-              { href: 'users', label: 'ユーザー一覧', icon: '👥', desc: 'HOT/COLDユーザーを確認' },
-              { href: 'sessions', label: 'セッション一覧', icon: '🕐', desc: '訪問セッションの詳細' },
-              { href: 'events', label: 'イベント管理', icon: '⚡', desc: 'イベントルールの設定' },
+              { href: 'users', label: 'ユーザー一覧', icon: '👥', desc: 'HOT/COLDユーザーを確認', color: 'hover:bg-purple-50 group-hover:text-purple-700 group-hover:text-purple-400' },
+              { href: 'sessions', label: 'セッション一覧', icon: '🕐', desc: '訪問セッションの詳細', color: 'hover:bg-purple-50 group-hover:text-purple-700 group-hover:text-purple-400' },
+              { href: 'events', label: 'イベント管理', icon: '⚡', desc: 'イベントルールの設定', color: 'hover:bg-purple-50 group-hover:text-purple-700 group-hover:text-purple-400' },
             ].map(item => (
               <Link
                 key={item.href}
@@ -275,6 +439,36 @@ export default function LpDashboardPage({
                 </svg>
               </Link>
             ))}
+            {/* 外部分析ツール */}
+            <div className="border-t border-gray-100 pt-3 mt-3 space-y-2">
+              <p className="text-xs font-medium text-gray-400 px-1">外部分析ツール</p>
+              <Link
+                href={`/projects/${projectId}/services/${serviceId}/lp/ga4`}
+                className="flex items-center gap-3 p-3 rounded-xl hover:bg-blue-50 transition-colors group border border-dashed border-blue-200"
+              >
+                <span className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: '#4285F4' }}>G</span>
+                <div>
+                  <p className="text-sm font-medium text-gray-900 group-hover:text-blue-700">GA4 分析</p>
+                  <p className="text-xs text-gray-400">トラフィック・コンバージョン・ユーザー行動</p>
+                </div>
+                <svg className="w-4 h-4 text-gray-300 group-hover:text-blue-400 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </Link>
+              <Link
+                href={`/projects/${projectId}/services/${serviceId}/lp/clarity`}
+                className="flex items-center gap-3 p-3 rounded-xl hover:bg-cyan-50 transition-colors group border border-dashed border-cyan-200"
+              >
+                <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">C</span>
+                <div>
+                  <p className="text-sm font-medium text-gray-900 group-hover:text-cyan-700">Clarity 分析</p>
+                  <p className="text-xs text-gray-400">ユーザー行動・問題行動の可視化</p>
+                </div>
+                <svg className="w-4 h-4 text-gray-300 group-hover:text-cyan-400 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </Link>
+            </div>
           </div>
         </div>
       </div>

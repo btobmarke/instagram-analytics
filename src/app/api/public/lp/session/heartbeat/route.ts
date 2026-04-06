@@ -1,14 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { createClient } from '@supabase/supabase-js'
+import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { authenticateLpRequest } from '@/lib/lp-auth'
-
-function createAnonSupabaseClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
-}
 
 const HeartbeatSchema = z.object({
   sessionId: z.string().uuid(),
@@ -22,7 +15,7 @@ const HeartbeatSchema = z.object({
  * - セッションの last_activity_at を更新して継続扱いにする
  */
 export async function POST(request: NextRequest) {
-  const supabase = createAnonSupabaseClient()
+  const supabase = createSupabaseAdminClient()
 
   const auth = await authenticateLpRequest(request, supabase)
   if (auth.error) return auth.error
@@ -39,6 +32,8 @@ export async function POST(request: NextRequest) {
   }
 
   const { sessionId, occurredAt } = parsed.data
+
+  console.log(`[LP-SDK] heartbeat  sessionId=${sessionId}`)
   const now = occurredAt ? new Date(occurredAt).toISOString() : new Date().toISOString()
 
   // セッションが対象 lpSite に属するか確認

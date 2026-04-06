@@ -10,7 +10,11 @@ export async function authenticateLpRequest(
   request: Request,
   supabase: SupabaseClient
 ): Promise<{ lpSite: LpSiteRow; error: null } | { lpSite: null; error: Response }> {
-  const apiKey = request.headers.get('x-api-key')
+  // x-api-key ヘッダー優先。sendBeacon はヘッダー不可のため URL クエリパラメータ ?apiKey= をフォールバックとして使用
+  const apiKey =
+    request.headers.get('x-api-key') ??
+    new URL(request.url).searchParams.get('apiKey')
+
   if (!apiKey) {
     return {
       lpSite: null,

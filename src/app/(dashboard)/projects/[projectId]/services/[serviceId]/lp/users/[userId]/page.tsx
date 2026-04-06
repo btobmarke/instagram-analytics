@@ -84,14 +84,14 @@ export default function LpUserDetailPage({
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-4">
             <div className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 text-2xl ${
-              user.userTemperature === 'hot' ? 'bg-red-50' : 'bg-blue-50'
+              user.userTemperature === 'HOT' ? 'bg-red-50' : 'bg-blue-50'
             }`}>
-              {user.userTemperature === 'hot' ? '🔥' : '❄️'}
+              {user.userTemperature === 'HOT' ? '🔥' : '❄️'}
             </div>
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                  user.userTemperature === 'hot'
+                  user.userTemperature === 'HOT'
                     ? 'bg-red-100 text-red-700'
                     : 'bg-blue-100 text-blue-700'
                 }`}>

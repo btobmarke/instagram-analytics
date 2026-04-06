@@ -50,10 +50,13 @@ export async function GET(
 
   const rangeStart = getRangeStart(rangeParam)
 
+  // DB は 'HOT'/'COLD' の大文字で保存されているため正規化
+  const temperatureUpper = temperature ? temperature.toUpperCase() : null
+
   let query = supabase
     .from('lp_users')
     .select(
-      'id, anonymous_key, first_visited_at, last_visited_at, visit_count, total_intent_score, user_temperature, user_agent',
+      'id, anonymous_user_key, first_visited_at, last_visited_at, visit_count, total_intent_score, user_temperature',
       { count: 'exact' }
     )
     .eq('lp_site_id', lpSite.id)
@@ -61,12 +64,13 @@ export async function GET(
     .range(from, from + pageSize - 1)
 
   if (rangeStart) query = query.gte('last_visited_at', rangeStart)
-  if (temperature) query = query.eq('user_temperature', temperature)
-  if (keyword) query = query.ilike('anonymous_key', `%${keyword}%`)
+  if (temperatureUpper) query = query.eq('user_temperature', temperatureUpper)
+  if (keyword) query = query.ilike('anonymous_user_key', `%${keyword}%`)
 
   const { data, error, count } = await query
 
   if (error) {
+    console.error('[LP users] DB error', error)
     return NextResponse.json({ success: false, error: { code: 'DB_ERROR', message: 'データ取得に失敗しました' } }, { status: 500 })
   }
 
@@ -74,12 +78,12 @@ export async function GET(
     success: true,
     data: (data ?? []).map(u => ({
       userId: u.id,
-      anonymousKey: u.anonymous_key,
+      anonymousKey: u.anonymous_user_key,
       firstVisitedAt: u.first_visited_at,
       lastVisitedAt: u.last_visited_at,
       visitCount: u.visit_count,
       totalIntentScore: u.total_intent_score,
-      userTemperature: u.user_temperature,
+      userTemperature: u.user_temperature, // 'HOT' | 'COLD'
     })),
     meta: { page, pageSize, totalCount: count ?? 0 },
   })

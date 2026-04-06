@@ -1,14 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { createClient } from '@supabase/supabase-js'
+import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { authenticateLpRequest } from '@/lib/lp-auth'
-
-function createAnonSupabaseClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
-}
 
 const SessionStartSchema = z.object({
   lpCode: z.string().min(1),
@@ -26,7 +19,7 @@ const SessionStartSchema = z.object({
  * - それ以外は新規セッション作成
  */
 export async function POST(request: NextRequest) {
-  const supabase = createAnonSupabaseClient()
+  const supabase = createSupabaseAdminClient()
 
   const auth = await authenticateLpRequest(request, supabase)
   if (auth.error) return auth.error
@@ -44,12 +37,14 @@ export async function POST(request: NextRequest) {
 
   const { anonymousUserKey, startedAt, referrerSource, landingPageUrl } = parsed.data
 
+  console.log(`[LP-SDK] session/start  lpCode=${lpSite.lp_code} anonKey=${anonymousUserKey.slice(0,16)}... referrer=${referrerSource ?? 'direct'} url=${landingPageUrl ?? '-'}`)
+
   // ユーザー取得
   const { data: lpUser } = await supabase
     .from('lp_users')
     .select('id, last_visited_at, visit_count')
     .eq('lp_site_id', lpSite.id)
-    .eq('anonymous_key', anonymousUserKey)
+    .eq('anonymous_user_key', anonymousUserKey)
     .single()
 
   if (!lpUser) {
@@ -78,6 +73,7 @@ export async function POST(request: NextRequest) {
 
     if (elapsed < timeoutMs) {
       // セッション継続: last_activity_at を更新して返す
+      console.log(`[LP-SDK] session/start  → セッション継続 sessionId=${latestSession.id}`)
       await supabase
         .from('lp_sessions')
         .update({ last_activity_at: now.toISOString() })
@@ -111,6 +107,8 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     )
   }
+
+  console.log(`[LP-SDK] session/start  → 新規セッション sessionId=${newSession.id}`)
 
   // ユーザーの visit_count / last_visited_at 更新
   await supabase

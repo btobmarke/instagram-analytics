@@ -1,14 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { createClient } from '@supabase/supabase-js'
+import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { authenticateLpRequest } from '@/lib/lp-auth'
-
-function createAnonSupabaseClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
-}
 
 const PageViewSchema = z.object({
   lpCode: z.string().min(1),
@@ -29,14 +22,15 @@ const PageViewSchema = z.object({
  * - lp_sessions の last_activity_at 更新
  */
 export async function POST(request: NextRequest) {
-  const supabase = createAnonSupabaseClient()
+  const supabase = createSupabaseAdminClient()
 
   const auth = await authenticateLpRequest(request, supabase)
   if (auth.error) return auth.error
 
   const lpSite = auth.lpSite
 
-  const body = await request.json().catch(() => null)
+  // sendBeacon は text/plain で送るため text() → JSON.parse にフォールバック
+  const body = await request.text().then(t => { try { return JSON.parse(t) } catch { return null } }).catch(() => null)
   const parsed = PageViewSchema.safeParse(body)
   if (!parsed.success) {
     return NextResponse.json(
@@ -47,10 +41,12 @@ export async function POST(request: NextRequest) {
 
   const { anonymousUserKey, sessionId, occurredAt, pageUrl, pageTitle, scrollPercentMax, staySeconds } = parsed.data
 
+  console.log(`[LP-SDK] page-view  lpCode=${lpSite.lp_code} url=${pageUrl ?? location} scroll=${scrollPercentMax ?? '?'}% stay=${staySeconds ?? '?'}秒`)
+
   // セッション確認（lpSite に紐づくユーザーのセッションか）
   const { data: session } = await supabase
     .from('lp_sessions')
-    .select('id, lp_user_id, lp_users!inner(id, anonymous_key, lp_site_id)')
+    .select('id, lp_user_id, lp_users!inner(id, anonymous_user_key, lp_site_id)')
     .eq('id', sessionId)
     .single()
 
@@ -59,7 +55,7 @@ export async function POST(request: NextRequest) {
 
   if (
     !session ||
-    sessionUser?.anonymous_key !== anonymousUserKey ||
+    sessionUser?.anonymous_user_key !== anonymousUserKey ||
     sessionUser?.lp_site_id !== lpSite.id
   ) {
     return NextResponse.json(
@@ -82,7 +78,7 @@ export async function POST(request: NextRequest) {
   })
 
   if (pvError) {
-    console.error('[POST /api/public/lp/page-view] insert error', pvError)
+    console.error('[LP-SDK] page-view  ✗ DB error', pvError)
     return NextResponse.json(
       { success: false, error: { code: 'DB_ERROR', message: 'ページビュー保存に失敗しました' } },
       { status: 500 }
