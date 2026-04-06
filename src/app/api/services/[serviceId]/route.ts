@@ -82,6 +82,69 @@ export async function GET(
   })
 }
 
+// DELETE /api/services/:serviceId - サービスを論理削除
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ serviceId: string }> }
+) {
+  const { serviceId } = await params
+  const supabase = await createSupabaseServerClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ success: false, error: { code: 'UNAUTHORIZED' } }, { status: 401 })
+
+  // サービス存在確認
+  const { data: service } = await supabase
+    .from('services')
+    .select('id, service_type')
+    .eq('id', serviceId)
+    .is('deleted_at', null)
+    .single()
+
+  if (!service) {
+    return NextResponse.json({ success: false, error: { code: 'NOT_FOUND', message: 'サービスが見つかりません' } }, { status: 404 })
+  }
+
+  const admin = createSupabaseAdminClient()
+  const now = new Date().toISOString()
+
+  // 1. Instagram: ig_accounts.service_id を NULL にして再利用可能にする
+  if (service.service_type === 'instagram') {
+    const { error: igErr } = await admin
+      .from('ig_accounts')
+      .update({ service_id: null })
+      .eq('service_id', serviceId)
+    if (igErr) console.error('[DELETE /api/services] ig_accounts unlock error', igErr)
+  }
+
+  // 2. LP: lp_sites を非アクティブにする
+  if (service.service_type === 'lp') {
+    const { error: lpErr } = await admin
+      .from('lp_sites')
+      .update({ is_active: false })
+      .eq('service_id', serviceId)
+    if (lpErr) console.error('[DELETE /api/services] lp_sites deactivate error', lpErr)
+  }
+
+  // 3. 外部連携設定を削除
+  await admin
+    .from('service_integrations')
+    .delete()
+    .eq('service_id', serviceId)
+
+  // 4. services を論理削除
+  const { error: deleteErr } = await admin
+    .from('services')
+    .update({ deleted_at: now, is_active: false })
+    .eq('id', serviceId)
+
+  if (deleteErr) {
+    console.error('[DELETE /api/services] soft delete error', deleteErr)
+    return NextResponse.json({ success: false, error: { code: 'DB_ERROR', message: '削除に失敗しました' } }, { status: 500 })
+  }
+
+  return NextResponse.json({ success: true })
+}
+
 // PATCH /api/services/:serviceId - Instagram アカウントをサービスに紐づける
 export async function PATCH(
   request: NextRequest,

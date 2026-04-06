@@ -252,14 +252,8 @@ export async function POST(request: NextRequest) {
         console.error('[clarity-collector] external_fetch_logs FAILED update failed', failLog.error)
       }
 
-      const failInt = await supabase
-        .from('service_integrations')
-        .update({ status: 'error' })
-        .eq('id', integ.id)
-      if (failInt.error) {
-        console.error('[clarity-collector] service_integrations error status update failed', failInt.error)
-      }
-
+      // 一時的なAPIエラーで status を変えると再登録が必要になるため更新しない
+      // エラーは external_fetch_logs の FAILED レコードで追跡する
       results.push({ serviceId: integ.service_id, projectId, date: targetDate, status: 'error', error: message })
     }
   }

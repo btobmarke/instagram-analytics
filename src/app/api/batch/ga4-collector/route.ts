@@ -342,14 +342,8 @@ export async function POST(request: NextRequest) {
         console.error('[ga4-collector] external_fetch_logs FAILED update failed', failLog.error)
       }
 
-      const failInt = await supabase
-        .from('service_integrations')
-        .update({ status: 'error' })
-        .eq('id', integ.id)
-      if (failInt.error) {
-        console.error('[ga4-collector] service_integrations error status update failed', failInt.error)
-      }
-
+      // 一時的なAPIエラーで status を変えると再登録が必要になるため更新しない
+      // エラーは external_fetch_logs の FAILED レコードで追跡する
       results.push({ serviceId: integ.service_id, propertyId, date: targetDate, status: 'error', error: message })
     }
   }

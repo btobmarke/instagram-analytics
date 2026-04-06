@@ -16,7 +16,7 @@ export async function GET(
     .select(`
       id, project_name, note, is_active, created_at, updated_at, client_id,
       clients!inner(id, client_name),
-      services(id, service_type, service_name, display_order, is_active, created_at, updated_at)
+      services(id, service_type, service_name, display_order, is_active, deleted_at, created_at, updated_at)
     `)
     .eq('id', projectId)
     .single()
@@ -27,7 +27,7 @@ export async function GET(
 
   const client = (data as Record<string, unknown>).clients as Record<string, unknown>
   const services = ((data as Record<string, unknown>).services as Record<string, unknown>[] ?? [])
-    .filter((s: Record<string, unknown>) => s.is_active)
+    .filter((s: Record<string, unknown>) => s.is_active && s.deleted_at === null)
     .sort((a: Record<string, unknown>, b: Record<string, unknown>) => (Number(a.display_order) - Number(b.display_order)))
 
   return NextResponse.json({

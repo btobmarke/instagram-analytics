@@ -76,14 +76,16 @@ export default function InstagramServicePage({
   const igAccountRefId = service?.type_config?.ig_account_ref_id
 
   // アカウント詳細取得（連携済みの場合）
-  const { data: accountData, mutate: mutateAccount } = useSWR<IgAccountWithToken>(
+  // GET /api/accounts/[id] は { data: IgAccountWithToken } を返すので .data を取り出す
+  const { data: accountData, mutate: mutateAccount } = useSWR<{ data: IgAccountWithToken }>(
     igAccountRefId ? `/api/accounts/${igAccountRefId}` : null,
     fetcher
   )
-  const account = accountData
+  const account = accountData?.data
 
-  const refreshAll = useCallback(() => {
-    mutateService()
+  const refreshAll = useCallback(async () => {
+    // まずサービス情報を再取得し、ig_account_ref_id が確定してからアカウントも再取得
+    await mutateService()
     mutateAccount()
   }, [mutateService, mutateAccount])
 
@@ -151,7 +153,7 @@ export default function InstagramServicePage({
               {account.profile_picture_url ? (
                 <img src={account.profile_picture_url} alt={account.username} className="w-full h-full object-cover" />
               ) : (
-                <span className="text-white text-2xl font-bold">{account.username[0]?.toUpperCase()}</span>
+                <span className="text-white text-2xl font-bold">{account.username?.[0]?.toUpperCase() ?? '?'}</span>
               )}
             </div>
             <div className="flex-1 min-w-0">

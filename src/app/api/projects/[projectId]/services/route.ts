@@ -45,12 +45,16 @@ export async function POST(
   }
 
   const body = await request.json().catch(() => null)
+  console.log('[POST /api/projects/:id/services] body:', JSON.stringify(body))
+
   const parsed = CreateServiceSchema.safeParse(body)
   if (!parsed.success) {
+    console.error('[POST /api/projects/:id/services] validation error:', parsed.error.errors)
     return NextResponse.json({ success: false, error: { code: 'VALIDATION_ERROR', message: parsed.error.errors[0]?.message ?? '入力値が不正です' } }, { status: 400 })
   }
 
   const { service_type, service_name, display_order, config } = parsed.data
+  console.log('[POST /api/projects/:id/services] service_type:', service_type, '/ service_name:', service_name, '/ config:', JSON.stringify(config))
 
   // services テーブルに登録
   const { data: service, error: serviceError } = await supabase
@@ -60,9 +64,10 @@ export async function POST(
     .single()
 
   if (serviceError || !service) {
-    console.error('[POST /api/projects/:id/services] services insert', serviceError)
+    console.error('[POST /api/projects/:id/services] services insert error:', serviceError)
     return NextResponse.json({ success: false, error: { code: 'DB_ERROR', message: 'サービス登録に失敗しました' } }, { status: 500 })
   }
+  console.log('[POST /api/projects/:id/services] service created:', service.id)
 
   // サービス種別ごとの追加登録
   if (service_type === 'lp' && config) {
@@ -129,15 +134,28 @@ export async function POST(
   }
 
   if (service_type === 'instagram' && config) {
+    console.log('[POST /api/projects/:id/services] instagram config:', JSON.stringify(config))
     const igParsed = InstagramConfigSchema.safeParse(config)
+    console.log('[POST /api/projects/:id/services] instagram config parse success:', igParsed.success, '/ ig_account_ref_id:', igParsed.success ? igParsed.data.ig_account_ref_id : 'N/A')
+
+    if (!igParsed.success) {
+      console.error('[POST /api/projects/:id/services] instagram config validation error:', igParsed.error.errors)
+    }
+
     // ig_account_ref_id が指定されている場合は ig_accounts.service_id を更新して紐づける
     if (igParsed.success && igParsed.data.ig_account_ref_id) {
-      await supabase
+      const { error: igLinkError } = await supabase
         .from('ig_accounts')
         .update({ service_id: service.id })
         .eq('id', igParsed.data.ig_account_ref_id)
+      if (igLinkError) {
+        console.error('[POST /api/projects/:id/services] ig_accounts.service_id update error:', igLinkError)
+      } else {
+        console.log('[POST /api/projects/:id/services] ig_accounts linked: account_id=', igParsed.data.ig_account_ref_id, '-> service_id=', service.id)
+      }
     }
   }
 
+  console.log('[POST /api/projects/:id/services] done, returning success')
   return NextResponse.json({ success: true, data: service }, { status: 201 })
 }
