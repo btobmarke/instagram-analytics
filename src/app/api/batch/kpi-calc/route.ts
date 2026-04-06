@@ -231,3 +231,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }
+
+// Vercel Cron は GET で呼び出す
+export async function GET(request: Request) {
+  return POST(request)
+}
