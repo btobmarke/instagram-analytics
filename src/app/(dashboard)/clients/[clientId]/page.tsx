@@ -7,6 +7,12 @@ import type { ClientDetail } from '@/types'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
+interface GbpCredentialInfo {
+  id: string
+  auth_status: 'pending' | 'active' | 'revoked' | 'error'
+  google_account_email: string | null
+}
+
 export default function ClientDetailPage({ params }: { params: Promise<{ clientId: string }> }) {
   const { clientId } = use(params)
   const [showCreateProject, setShowCreateProject] = useState(false)
@@ -68,6 +74,12 @@ export default function ClientDetailPage({ params }: { params: Promise<{ clientI
           <p className="text-sm text-gray-600 mt-4 bg-gray-50 rounded-lg px-4 py-3">{client.note}</p>
         )}
       </div>
+
+      {/* GBP 連携設定 */}
+      <GbpCredentialSection clientId={clientId} />
+
+      {/* LINE OAM セッション設定 */}
+      <LineOamSessionSection clientId={clientId} />
 
       {/* Projects Section */}
       <div className="flex items-center justify-between mb-4">
@@ -224,6 +236,417 @@ function CreateProjectModal({
           </div>
         </form>
       </div>
+    </div>
+  )
+}
+
+// --------------------------------------------------------------------------
+// LINE OAM セッション設定セクション
+// --------------------------------------------------------------------------
+interface LineOamSession {
+  id: string
+  client_id: string
+  label: string | null
+  status: 'active' | 'revoked'
+  last_used_at: string | null
+  created_at: string
+  updated_at: string
+  has_passphrase: boolean
+}
+
+function LineOamSessionSection({ clientId }: { clientId: string }) {
+  const { data: sessionData, mutate: mutateSession } = useSWR<{ success: boolean; data: LineOamSession | null }>(
+    `/api/clients/${clientId}/line-oam/session`, fetcher
+  )
+  const session = sessionData?.data
+
+  const [showForm, setShowForm] = useState(false)
+  const [jsonText, setJsonText] = useState('')
+  const [passphrase, setPassphrase] = useState('')
+  const [label, setLabel] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  // JSON を解析して暗号化バンドルを取得
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+
+    let parsed: Record<string, unknown>
+    try {
+      parsed = JSON.parse(jsonText.trim())
+    } catch {
+      setError('JSON の形式が正しくありません')
+      return
+    }
+
+    if (!parsed.kdf || !parsed.nonce_b64 || !parsed.ciphertext_b64) {
+      setError('必須フィールド (kdf, nonce_b64, ciphertext_b64) が見つかりません')
+      return
+    }
+
+    setSaving(true)
+    const body: Record<string, unknown> = { ...parsed }
+    if (passphrase.trim()) body.passphrase = passphrase.trim()
+    if (label.trim()) body.label = label.trim()
+
+    const res = await fetch(`/api/clients/${clientId}/line-oam/session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const json = await res.json()
+    if (!json.success) { setError(json.error ?? '保存に失敗しました'); setSaving(false); return }
+    setShowForm(false)
+    setJsonText('')
+    setPassphrase('')
+    setLabel('')
+    setSaving(false)
+    mutateSession()
+  }
+
+  const handleRevoke = async () => {
+    if (!confirm('LINE OAMセッションを無効化しますか？')) return
+    await fetch(`/api/clients/${clientId}/line-oam/session`, { method: 'DELETE' })
+    mutateSession()
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-green-100 to-emerald-100 flex items-center justify-center text-lg">💬</div>
+          <h2 className="font-bold text-gray-900">LINE OAM セッション設定</h2>
+        </div>
+        {session && session.status === 'active' && (
+          <button onClick={handleRevoke} className="text-xs text-gray-400 hover:text-red-500 transition">
+            無効化
+          </button>
+        )}
+      </div>
+
+      {/* 未登録 or 無効化済み */}
+      {(!session || session.status === 'revoked') && !showForm && (
+        <div className="text-center py-4">
+          <p className="text-sm text-gray-500 mb-3">
+            LINE OAM バッチを動かすには、暗号化済み storage_state を登録してください
+          </p>
+          <button
+            onClick={() => setShowForm(true)}
+            className="px-4 py-2 text-sm font-medium text-green-700 border border-green-300 rounded-lg hover:bg-green-50 transition"
+          >
+            セッションを登録
+          </button>
+        </div>
+      )}
+
+      {/* 登録済み（active） */}
+      {session && session.status === 'active' && !showForm && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">
+                有効
+              </span>
+              <div>
+                {session.label && (
+                  <p className="text-sm font-medium text-gray-700">{session.label}</p>
+                )}
+                <p className="text-xs text-gray-400">
+                  登録: {new Date(session.created_at).toLocaleDateString('ja-JP')}
+                  {session.last_used_at && (
+                    <> / 最終使用: {new Date(session.last_used_at).toLocaleDateString('ja-JP')}</>
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              {session.has_passphrase && (
+                <span className="text-xs text-gray-400 flex items-center gap-1">
+                  🔑 パスフレーズ登録済み
+                </span>
+              )}
+              <button
+                onClick={() => setShowForm(true)}
+                className="text-xs text-gray-400 hover:text-green-600 transition"
+              >
+                更新
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 登録フォーム */}
+      {showForm && (
+        <form onSubmit={handleSave} className="space-y-4 mt-2">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              暗号化バンドル JSON <span className="text-red-500">*</span>
+            </label>
+            <p className="text-xs text-gray-400 mb-1">
+              Python スクリプトで出力した JSON をそのまま貼り付けてください（kdf, nonce_b64, ciphertext_b64 を含むオブジェクト）
+            </p>
+            <textarea
+              rows={6}
+              value={jsonText}
+              onChange={e => setJsonText(e.target.value)}
+              placeholder={'{\n  "format_version": 1,\n  "cipher": "AES-256-GCM",\n  "kdf": "PBKDF2-HMAC-SHA256",\n  "nonce_b64": "...",\n  "ciphertext_b64": "..."\n}'}
+              className="w-full px-3 py-2 text-xs font-mono border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 resize-none"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              パスフレーズ（無人バッチ用・任意）
+            </label>
+            <p className="text-xs text-gray-400 mb-1">
+              登録するとサーバー側に KEK 暗号化して保存され、無人バッチ実行時に自動的に使用されます
+            </p>
+            <input
+              type="password"
+              value={passphrase}
+              onChange={e => setPassphrase(e.target.value)}
+              placeholder="パスフレーズ（省略可）"
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">ラベル（任意）</label>
+            <input
+              type="text"
+              value={label}
+              onChange={e => setLabel(e.target.value)}
+              placeholder="例: 本番セッション 2025-01"
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300"
+            />
+          </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <div className="flex gap-2">
+            <button type="button" onClick={() => { setShowForm(false); setError('') }}
+              className="px-4 py-2 text-sm text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">
+              キャンセル
+            </button>
+            <button type="submit" disabled={saving}
+              className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-60 transition">
+              {saving ? '保存中...' : '保存'}
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  )
+}
+
+// --------------------------------------------------------------------------
+// GBP 連携設定セクション
+// --------------------------------------------------------------------------
+function GbpCredentialSection({ clientId }: { clientId: string }) {
+  const { data: credData, mutate: mutateCred } = useSWR<{ success: boolean; data: GbpCredentialInfo | null }>(
+    `/api/clients/${clientId}/gbp/credential`, fetcher
+  )
+  const credential = credData?.data
+
+  const [showForm, setShowForm] = useState(false)
+  const [oauthClientId, setOauthClientId] = useState('')
+  const [oauthClientSecret, setOauthClientSecret] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!oauthClientId.trim() || !oauthClientSecret.trim()) {
+      setError('Client ID と Client Secret の両方を入力してください')
+      return
+    }
+    setSaving(true)
+    setError('')
+    const res = await fetch(`/api/clients/${clientId}/gbp/credential`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        oauth_client_id:     oauthClientId.trim(),
+        oauth_client_secret: oauthClientSecret.trim(),
+      }),
+    })
+    const json = await res.json()
+    if (!json.success) { setError(json.error ?? '保存に失敗しました'); setSaving(false); return }
+    setShowForm(false)
+    setOauthClientId('')
+    setOauthClientSecret('')
+    setSaving(false)
+    mutateCred()
+  }
+
+  const handleDelete = async () => {
+    if (!confirm('GBP連携設定を削除しますか？OAuth認証情報もすべて削除されます。')) return
+    await fetch(`/api/clients/${clientId}/gbp/credential`, { method: 'DELETE' })
+    mutateCred()
+  }
+
+  const statusLabel = (s: string) => {
+    switch (s) {
+      case 'active':  return { text: '連携済み', color: 'bg-green-100 text-green-700' }
+      case 'pending': return { text: 'OAuth未完了', color: 'bg-yellow-100 text-yellow-700' }
+      case 'error':   return { text: '要再連携', color: 'bg-red-100 text-red-700' }
+      case 'revoked': return { text: '解除済み', color: 'bg-gray-100 text-gray-500' }
+      default:        return { text: s, color: 'bg-gray-100 text-gray-500' }
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-teal-100 to-green-100 flex items-center justify-center text-lg">🏢</div>
+          <h2 className="font-bold text-gray-900">GBP 連携設定</h2>
+        </div>
+        {credential && (
+          <button onClick={handleDelete} className="text-xs text-gray-400 hover:text-red-500 transition">
+            設定を削除
+          </button>
+        )}
+      </div>
+
+      {/* 未登録状態 */}
+      {!credential && !showForm && (
+        <div className="text-center py-4">
+          <p className="text-sm text-gray-500 mb-3">
+            GBPデータを取得するにはGoogle OAuthクライアント情報の登録が必要です
+          </p>
+          <button
+            onClick={() => setShowForm(true)}
+            className="px-4 py-2 text-sm font-medium text-teal-700 border border-teal-300 rounded-lg hover:bg-teal-50 transition"
+          >
+            GBP OAuth設定を登録
+          </button>
+        </div>
+      )}
+
+      {/* 登録フォーム */}
+      {(showForm || (!credential && false)) && (
+        <form onSubmit={handleSave} className="space-y-3 mt-2">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Google OAuth Client ID</label>
+            <input
+              type="text"
+              value={oauthClientId}
+              onChange={e => setOauthClientId(e.target.value)}
+              placeholder="123456789-xxxxxxxxx.apps.googleusercontent.com"
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Google OAuth Client Secret</label>
+            <input
+              type="password"
+              value={oauthClientSecret}
+              onChange={e => setOauthClientSecret(e.target.value)}
+              placeholder="GOCSPX-xxxxxxxxx"
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400"
+            />
+          </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setShowForm(false)}
+              className="px-4 py-2 text-sm text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">
+              キャンセル
+            </button>
+            <button type="submit" disabled={saving}
+              className="px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-60 transition">
+              {saving ? '保存中...' : '保存'}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* 登録済み状態 */}
+      {credential && (
+        <div className="space-y-3">
+          {/* ステータス */}
+          <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
+            <div className="flex items-center gap-2">
+              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusLabel(credential.auth_status).color}`}>
+                {statusLabel(credential.auth_status).text}
+              </span>
+              {credential.google_account_email && (
+                <span className="text-sm text-gray-600">{credential.google_account_email}</span>
+              )}
+            </div>
+            <button
+              onClick={() => setShowForm(true)}
+              className="text-xs text-gray-400 hover:text-teal-600 transition"
+            >
+              Client ID/Secretを変更
+            </button>
+          </div>
+
+          {/* OAuth認証ボタン（未完了 or エラー or 解除済みの場合） */}
+          {credential.auth_status !== 'active' && (
+            <a
+              href={`/api/clients/${clientId}/gbp/auth`}
+              className="flex items-center justify-center gap-2 w-full px-4 py-2.5 bg-white border-2 border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:border-teal-400 hover:text-teal-700 transition"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+              Googleアカウントと連携する
+            </a>
+          )}
+
+          {/* 連携済みの場合 */}
+          {credential.auth_status === 'active' && (
+            <div className="flex items-center gap-2">
+              <a
+                href={`/api/clients/${clientId}/gbp/auth`}
+                className="text-xs text-gray-400 hover:text-teal-600 transition"
+              >
+                再認証する
+              </a>
+            </div>
+          )}
+
+          {/* 入力フォーム（変更用） */}
+          {showForm && (
+            <form onSubmit={handleSave} className="space-y-3 border-t border-gray-100 pt-3 mt-3">
+              <p className="text-xs text-gray-400">OAuth クライアント情報を更新します</p>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Google OAuth Client ID</label>
+                <input
+                  type="text"
+                  value={oauthClientId}
+                  onChange={e => setOauthClientId(e.target.value)}
+                  placeholder="123456789-xxxxxxxxx.apps.googleusercontent.com"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Google OAuth Client Secret</label>
+                <input
+                  type="password"
+                  value={oauthClientSecret}
+                  onChange={e => setOauthClientSecret(e.target.value)}
+                  placeholder="GOCSPX-xxxxxxxxx"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400"
+                />
+              </div>
+              {error && <p className="text-sm text-red-600">{error}</p>}
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setShowForm(false)}
+                  className="px-4 py-2 text-sm text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">
+                  キャンセル
+                </button>
+                <button type="submit" disabled={saving}
+                  className="px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-60 transition">
+                  {saving ? '保存中...' : '更新'}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      )}
     </div>
   )
 }

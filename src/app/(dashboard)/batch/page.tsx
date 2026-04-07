@@ -17,7 +17,7 @@ interface BatchSchedule {
 // -----------------------------------------------------------------------
 // バッチメタ情報（カテゴリ・説明・頻度）
 // -----------------------------------------------------------------------
-type Category = 'Instagram' | 'LP / MA' | 'GA4' | 'Clarity' | 'システム'
+type Category = 'Instagram' | 'LP / MA' | 'GA4' | 'Clarity' | 'GBP' | 'LINE OAM' | 'システム'
 
 interface JobMeta {
   label: string
@@ -31,6 +31,8 @@ const CATEGORY_STYLE: Record<Category, { bg: string; text: string; dot: string }
   'LP / MA': { bg: 'bg-indigo-100', text: 'text-indigo-700', dot: 'bg-indigo-400' },
   GA4:       { bg: 'bg-orange-100', text: 'text-orange-700', dot: 'bg-orange-400' },
   Clarity:   { bg: 'bg-blue-100',   text: 'text-blue-700',   dot: 'bg-blue-400' },
+  GBP:       { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-400' },
+  'LINE OAM': { bg: 'bg-green-100',  text: 'text-green-700',  dot: 'bg-green-400' },
   システム:  { bg: 'bg-gray-100',   text: 'text-gray-600',   dot: 'bg-gray-400' },
 }
 
@@ -95,6 +97,18 @@ const JOB_META: Record<string, JobMeta> = {
     category: 'Clarity',
     frequency: '毎日',
   },
+  gbp_daily: {
+    label: 'GBP日次データ収集',
+    description: 'GBP Performance API からインプレッション・アクション指標を取得し、レビューを同期',
+    category: 'GBP',
+    frequency: '毎日',
+  },
+  line_oam_daily: {
+    label: 'LINE OAM日次データ収集',
+    description: 'LINE OAM からフレンド数・属性・ショップカード・リワードカード取引履歴を取得',
+    category: 'LINE OAM',
+    frequency: '毎日',
+  },
 }
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; label: string; dot: string }> = {
@@ -111,6 +125,8 @@ const BATCH_ENDPOINTS: Record<string, string> = {
   lp_aggregate:                   '/api/batch/lp-aggregate',
   ga4_collector:                  '/api/batch/ga4-collector',
   clarity_collector:              '/api/batch/clarity-collector',
+  gbp_daily:                      '/api/batch/gbp-daily',
+  line_oam_daily:                 '/api/batch/line-oam-daily',
 }
 
 const BATCH_GROUPS: { category: Category; jobs: string[] }[] = [
@@ -118,6 +134,8 @@ const BATCH_GROUPS: { category: Category; jobs: string[] }[] = [
   { category: 'LP / MA',   jobs: ['lp_aggregate'] },
   { category: 'GA4',       jobs: ['ga4_collector'] },
   { category: 'Clarity',   jobs: ['clarity_collector'] },
+  { category: 'GBP',       jobs: ['gbp_daily'] },
+  { category: 'LINE OAM', jobs: ['line_oam_daily'] },
 ]
 
 // -----------------------------------------------------------------------
@@ -189,10 +207,14 @@ export default function BatchPage() {
         error?: string | { message?: string; code?: string }
         processed?: number
         failed?: number
+        errors?: number
         accounts?: number
         skipped_no_token?: number
         last_error?: string
         hint_ja?: string
+        target_date?: string
+        batch_run_id?: string
+        status?: string
         data?: {
           targetDate?: string
           processedServices?: number
@@ -240,17 +262,20 @@ export default function BatchPage() {
       const lines = [
         doneLine,
         json.hint_ja ?? null,
+        json.target_date != null ? `対象日: ${json.target_date}` : null,
         json.data?.targetDate != null ? `対象日: ${json.data.targetDate}` : null,
         json.data?.okCount != null && json.data?.errorCount != null
           ? `成功サービス: ${json.data.okCount} / 失敗: ${json.data.errorCount}`
           : null,
-        json.processed != null ? `処理件数: ${json.processed}` : null,
+        json.processed != null ? `処理サイト数: ${json.processed}` : null,
+        json.errors != null && json.errors > 0 ? `エラー件数: ${json.errors}` : null,
         json.failed != null ? `失敗: ${json.failed}` : null,
         json.accounts != null ? `対象アカウント数: ${json.accounts}` : null,
         json.skipped_no_token != null && json.skipped_no_token > 0
           ? `トークンなしでスキップ: ${json.skipped_no_token}`
           : null,
         json.last_error ? `最後のエラー: ${json.last_error}` : null,
+        json.status != null ? `ステータス: ${json.status}` : null,
       ].filter(Boolean)
       alert(lines.join('\n'))
     } finally {
@@ -259,7 +284,7 @@ export default function BatchPage() {
     }
   }
 
-  const LOG_CATEGORIES: (Category | 'すべて')[] = ['すべて', 'Instagram', 'LP / MA', 'GA4', 'Clarity', 'システム']
+  const LOG_CATEGORIES: (Category | 'すべて')[] = ['すべて', 'Instagram', 'LP / MA', 'GA4', 'Clarity', 'GBP', 'LINE OAM', 'システム']
   const filteredLogs = logFilter === 'すべて'
     ? logs
     : logs.filter(l => JOB_META[l.job_name]?.category === logFilter)
