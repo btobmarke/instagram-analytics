@@ -224,22 +224,42 @@ export class InstagramClient {
 
   // ========== Account Insights ==========
 
-  /** `GET /{ig-user-id}/insights?metric=...&period=day&since&until` — アカウント日次メトリクス
-   * v22.0+: 多くのメトリクスは `metric_type=total_value` が必須。
-   * @see https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/insights
+  /**
+   * アカウント日次メトリクス — 2種類のAPIコールに分けて取得
+   *
+   * Instagram Graph API v22+ では一部メトリクスに metric_type=total_value が必須。
+   * しかし metric_type=total_value + period=day + 複数日 since/until → data:[] になる。
+   *
+   * 戦略:
+   *  (A) reach → period=day + since/until で values 配列取得（日次分解あり）
+   *  (B) accounts_engaged 等 → metric_type=total_value + period=day を **1日ずつ** 取得
    */
-  async getAccountInsights(since: string, until: string) {
+  async getAccountInsightsTimeSeries(since: string, until: string) {
     return this.fetch(
       `/${this.accountId}/insights`,
       {
-        metric: 'reach,views,profile_views,accounts_engaged,total_interactions,likes,comments,shares,saves,replies,profile_links_taps',
+        metric: 'reach',
         period: 'day',
         since,
         until,
-        metric_type: 'total_value',
       },
       undefined,
-      'getAccountInsights'
+      'getAccountInsightsTimeSeries'
+    )
+  }
+
+  async getAccountInsightsTotalValue(since: string, until: string) {
+    return this.fetch(
+      `/${this.accountId}/insights`,
+      {
+        metric: 'accounts_engaged,total_interactions,likes,comments,shares,saves',
+        metric_type: 'total_value',
+        period: 'day',
+        since,
+        until,
+      },
+      undefined,
+      'getAccountInsightsTotalValue'
     )
   }
 

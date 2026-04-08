@@ -39,6 +39,7 @@ export async function POST(request: Request) {
   const startedAt = new Date()
   let totalProcessed = 0
   let totalFailed = 0
+  let acctInsightTotal = 0
 
   const { data: jobLog } = await admin.from('batch_job_logs').insert({
     job_name: 'hourly_media_insight_collector',
@@ -51,22 +52,36 @@ export async function POST(request: Request) {
   console.info('[insight-collector] start', { job_id: jobLog?.id ?? null })
 
   try {
-    const { data: accounts } = await admin
+    const { data: accounts, error: accountsError } = await admin
       .from('ig_accounts')
       .select('id, platform_account_id, api_base_url, api_version')
       .eq('status', 'active')
 
+    console.info('[insight-collector] accounts found', {
+      count: accounts?.length ?? 0,
+      error: accountsError?.message ?? null,
+    })
+
     for (const account of (accounts ?? [])) {
-      const { data: tokenRow } = await admin
+      console.info('[insight-collector] processing account', {
+        account_id: account.id,
+        platform_account_id: account.platform_account_id,
+      })
+
+      const { data: tokenRow, error: tokenError } = await admin
         .from('ig_account_tokens')
         .select('access_token_enc')
         .eq('account_id', account.id)
         .eq('is_active', true)
         .single()
       if (!tokenRow) {
-        console.warn('[insight-collector] skip account (no active token)', { account_id: account.id })
+        console.warn('[insight-collector] skip account (no active token)', {
+          account_id: account.id,
+          token_error: tokenError?.message ?? null,
+        })
         continue
       }
+      console.info('[insight-collector] token found', { account_id: account.id })
 
       const accessToken = decrypt(tokenRow.access_token_enc)
       const igClient = new InstagramClient(accessToken, account.platform_account_id, {
@@ -76,7 +91,7 @@ export async function POST(request: Request) {
 
       // 直近30日以内の投稿を対象
       const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-      const { data: mediaList } = await admin
+      const { data: mediaList, error: mediaListError } = await admin
         .from('ig_media')
         .select('id, platform_media_id, media_product_type, media_type')
         .eq('account_id', account.id)
@@ -84,6 +99,12 @@ export async function POST(request: Request) {
         .gte('posted_at', since)
         .order('posted_at', { ascending: false })
         .limit(50)
+
+      console.info('[insight-collector] media to process', {
+        account_id: account.id,
+        media_count: mediaList?.length ?? 0,
+        error: mediaListError?.message ?? null,
+      })
 
       for (const media of (mediaList ?? [])) {
         try {
@@ -132,42 +153,114 @@ export async function POST(request: Request) {
         await new Promise(resolve => setTimeout(resolve, 100))
       }
 
-      // アカウントインサイト収集（昨日分）
+      // アカウントインサイト収集（直近7日分: データ遅延に備えて広めに取得）
       try {
-        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-        const { data: acctInsight } = await igClient.getAccountInsights(yesterday, yesterday)
+        const until   = new Date(Date.now() - 1  * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+        const since   = new Date(Date.now() - 7  * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+        console.info('[insight-collector] fetching account insights', {
+          account_id: account.id,
+          since,
+          until,
+        })
+
         type AcctRow = {
           name: string
           values?: Array<{ value: number; end_time: string }>
           total_value?: { value?: number }
         }
-        const insightArr = (acctInsight as { data: AcctRow[] })?.data ?? []
+        let acctUpsertCount = 0
 
-        for (const metric of insightArr) {
-          if (metric.values?.length) {
+        // --- (A) reach: period=day で日次 values 配列を取得 ---
+        try {
+          const { data: tsData } = await igClient.getAccountInsightsTimeSeries(since, until)
+          const tsArr = (tsData as { data: AcctRow[] })?.data ?? []
+          console.info('[insight-collector] time-series metrics', {
+            account_id: account.id,
+            count: tsArr.length,
+            metrics: tsArr.map(m => m.name),
+          })
+          for (const metric of tsArr) {
+            if (!metric.values?.length) continue
             for (const v of metric.values) {
-              await admin.from('ig_account_insight_fact').upsert({
+              const endDate = new Date(v.end_time)
+              endDate.setDate(endDate.getDate() - 1)
+              const valueDate = endDate.toISOString().slice(0, 10)
+              const { error: upsertErr } = await admin.from('ig_account_insight_fact').upsert({
                 account_id: account.id,
                 metric_code: metric.name,
+                dimension_code: '',
+                dimension_value: '',
                 period_code: 'day',
-                value_date: v.end_time.slice(0, 10),
+                value_date: valueDate,
                 value: v.value,
                 fetched_at: new Date().toISOString(),
-              }, { onConflict: 'account_id,metric_code,period_code,value_date' })
+              }, { onConflict: 'account_id,metric_code,period_code,value_date,dimension_code,dimension_value' })
+              if (upsertErr) {
+                console.error('[insight-collector] ts upsert failed', {
+                  metric: metric.name, valueDate, error: upsertErr.message,
+                })
+              } else {
+                acctUpsertCount++
+              }
             }
-          } else if (typeof metric.total_value?.value === 'number') {
-            // v22+ metric_type=total_value 時は values ではなく total_value のみ返ることが多い
-            await admin.from('ig_account_insight_fact').upsert({
-              account_id: account.id,
-              metric_code: metric.name,
-              period_code: 'day',
-              value_date: yesterday,
-              value: metric.total_value.value,
-              fetched_at: new Date().toISOString(),
-            }, { onConflict: 'account_id,metric_code,period_code,value_date' })
           }
+        } catch (tsErr) {
+          console.warn('[insight-collector] time-series call failed (non-fatal)', tsErr)
         }
+
+        // --- (B) total_value メトリクス: 1日ずつ取得 ---
+        // metric_type=total_value + period=day は複数日レンジだと data:[] になるため1日ずつ
+        const sinceDate = new Date(since + 'T00:00:00Z')
+        const untilDate = new Date(until + 'T00:00:00Z')
+        for (let d = new Date(sinceDate); d <= untilDate; d.setDate(d.getDate() + 1)) {
+          const daySince = d.toISOString().slice(0, 10)
+          const nextDay = new Date(d)
+          nextDay.setDate(nextDay.getDate() + 1)
+          const dayUntil = nextDay.toISOString().slice(0, 10)
+          try {
+            const { data: tvData } = await igClient.getAccountInsightsTotalValue(daySince, dayUntil)
+            const tvArr = (tvData as { data: AcctRow[] })?.data ?? []
+            console.info('[insight-collector] total_value metrics', {
+              account_id: account.id,
+              date: daySince,
+              count: tvArr.length,
+              metrics: tvArr.map(m => ({ name: m.name, val: m.total_value?.value })),
+            })
+            for (const metric of tvArr) {
+              const val = metric.total_value?.value
+              if (typeof val !== 'number') continue
+              const { error: upsertErr } = await admin.from('ig_account_insight_fact').upsert({
+                account_id: account.id,
+                metric_code: metric.name,
+                dimension_code: '',
+                dimension_value: '',
+                period_code: 'day',
+                value_date: daySince,
+                value: val,
+                fetched_at: new Date().toISOString(),
+              }, { onConflict: 'account_id,metric_code,period_code,value_date,dimension_code,dimension_value' })
+              if (upsertErr) {
+                console.error('[insight-collector] tv upsert failed', {
+                  metric: metric.name, date: daySince, error: upsertErr.message,
+                })
+              } else {
+                acctUpsertCount++
+              }
+            }
+          } catch (tvErr) {
+            console.warn('[insight-collector] total_value call failed for date', { date: daySince, error: tvErr })
+          }
+          // レート制限対策
+          await new Promise(resolve => setTimeout(resolve, 200))
+        }
+
+        acctInsightTotal += acctUpsertCount
+        console.info('[insight-collector] account insights upserted', {
+          account_id: account.id,
+          upserted: acctUpsertCount,
+        })
       } catch (err) {
+        totalFailed++
         logInsightError('account_insights', {
           account_id: account.id,
           platform_account_id: account.platform_account_id,
@@ -188,7 +281,8 @@ export async function POST(request: Request) {
 
     console.info('[insight-collector] done', {
       job_id: jobLog?.id ?? null,
-      processed: totalProcessed,
+      media_insights_processed: totalProcessed,
+      account_insights_upserted: acctInsightTotal,
       failed: totalFailed,
       duration_ms: duration,
       status: totalFailed === 0 ? 'success' : 'partial',
@@ -196,7 +290,8 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: totalFailed === 0,
-      processed: totalProcessed,
+      media_insights_processed: totalProcessed,
+      account_insights_upserted: acctInsightTotal,
       failed: totalFailed,
     })
   } catch (err) {

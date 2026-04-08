@@ -16,6 +16,7 @@ interface GbpCredentialInfo {
 export default function ClientDetailPage({ params }: { params: Promise<{ clientId: string }> }) {
   const { clientId } = use(params)
   const [showCreateProject, setShowCreateProject] = useState(false)
+  const [activeTab, setActiveTab] = useState<'projects' | 'settings'>('projects')
 
   const { data, error, isLoading, mutate } = useSWR<{ success: boolean; data: ClientDetail }>(
     `/api/clients/${clientId}`,
@@ -45,7 +46,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ clientI
   return (
     <div className="p-6 max-w-4xl mx-auto">
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-2 text-sm text-gray-400 mb-6">
+      <nav className="flex items-center gap-2 text-sm text-gray-400 mb-4">
         <Link href="/clients" className="hover:text-purple-600">クライアント一覧</Link>
         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -53,95 +54,129 @@ export default function ClientDetailPage({ params }: { params: Promise<{ clientI
         <span className="text-gray-700 font-medium">{client.client_name}</span>
       </nav>
 
-      {/* Client Info */}
-      <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-100 to-pink-100 flex items-center justify-center flex-shrink-0">
-              <span className="text-purple-700 font-bold text-xl">
-                {client.client_name.charAt(0)}
-              </span>
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">{client.client_name}</h1>
-              <p className="text-sm text-gray-400 mt-1">
-                登録日: {new Date(client.created_at).toLocaleDateString('ja-JP')}
-              </p>
-            </div>
-          </div>
+      {/* クライアントヘッダー */}
+      <div className="flex items-center gap-4 mb-4">
+        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-100 to-pink-100 flex items-center justify-center flex-shrink-0">
+          <span className="text-purple-700 font-bold text-xl">
+            {client.client_name.charAt(0)}
+          </span>
         </div>
-        {client.note && (
-          <p className="text-sm text-gray-600 mt-4 bg-gray-50 rounded-lg px-4 py-3">{client.note}</p>
-        )}
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">{client.client_name}</h1>
+          <p className="text-sm text-gray-400 mt-0.5">
+            登録日: {new Date(client.created_at).toLocaleDateString('ja-JP')}
+          </p>
+        </div>
       </div>
 
-      {/* GBP 連携設定 */}
-      <GbpCredentialSection clientId={clientId} />
-
-      {/* LINE OAM セッション設定 */}
-      <LineOamSessionSection clientId={clientId} />
-
-      {/* Projects Section */}
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-bold text-gray-900">
-          プロジェクト
-          <span className="ml-2 text-sm font-normal text-gray-400">{client.projects.length}件</span>
-        </h2>
+      {/* タブナビ */}
+      <div className="flex items-center gap-1 mb-6 border-b border-gray-200">
         <button
-          onClick={() => setShowCreateProject(true)}
-          className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors"
+          onClick={() => setActiveTab('projects')}
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition ${
+            activeTab === 'projects'
+              ? 'text-purple-600 border-purple-600'
+              : 'text-gray-500 border-transparent hover:text-gray-700'
+          }`}
         >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          新規プロジェクト
+          プロジェクト一覧
+          <span className="ml-1.5 text-xs text-gray-400">{client.projects.length}</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('settings')}
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition ${
+            activeTab === 'settings'
+              ? 'text-purple-600 border-purple-600'
+              : 'text-gray-500 border-transparent hover:text-gray-700'
+          }`}
+        >
+          設定
         </button>
       </div>
 
-      {client.projects.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 bg-white rounded-2xl border border-dashed border-gray-200 text-gray-400">
-          <svg className="w-10 h-10 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-          </svg>
-          <p className="text-sm">プロジェクトがありません</p>
-          <button
-            onClick={() => setShowCreateProject(true)}
-            className="mt-2 text-purple-600 text-sm font-medium hover:underline"
-          >
-            最初のプロジェクトを追加する
-          </button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {client.projects.map((project) => (
-            <Link
-              key={project.id}
-              href={`/projects/${project.id}`}
-              className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md hover:border-purple-200 transition-all group"
+      {/* ── プロジェクト一覧タブ ── */}
+      {activeTab === 'projects' && (
+        <>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-medium text-gray-500">
+              {client.projects.length}件のプロジェクト
+            </h2>
+            <button
+              onClick={() => setShowCreateProject(true)}
+              className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors"
             >
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="font-semibold text-gray-900 group-hover:text-purple-700 transition-colors">
-                    {project.project_name}
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              新規プロジェクト
+            </button>
+          </div>
+
+          {client.projects.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 bg-white rounded-2xl border border-dashed border-gray-200 text-gray-400">
+              <svg className="w-10 h-10 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                  d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+              </svg>
+              <p className="text-sm">プロジェクトがありません</p>
+              <button
+                onClick={() => setShowCreateProject(true)}
+                className="mt-2 text-purple-600 text-sm font-medium hover:underline"
+              >
+                最初のプロジェクトを追加する
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {client.projects.map((project) => (
+                <Link
+                  key={project.id}
+                  href={`/projects/${project.id}`}
+                  className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md hover:border-purple-200 transition-all group"
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-semibold text-gray-900 group-hover:text-purple-700 transition-colors">
+                        {project.project_name}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        サービス {project.service_count}件
+                      </p>
+                    </div>
+                    <svg className="w-4 h-4 text-gray-300 group-hover:text-purple-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
+                  {project.note && (
+                    <p className="text-xs text-gray-500 mt-3 line-clamp-2">{project.note}</p>
+                  )}
+                  <p className="text-xs text-gray-300 mt-3">
+                    登録: {new Date(project.created_at).toLocaleDateString('ja-JP')}
                   </p>
-                  <p className="text-xs text-gray-400 mt-1">
-                    サービス {project.service_count}件
-                  </p>
-                </div>
-                <svg className="w-4 h-4 text-gray-300 group-hover:text-purple-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </div>
-              {project.note && (
-                <p className="text-xs text-gray-500 mt-3 line-clamp-2">{project.note}</p>
-              )}
-              <p className="text-xs text-gray-300 mt-3">
-                登録: {new Date(project.created_at).toLocaleDateString('ja-JP')}
-              </p>
-            </Link>
-          ))}
-        </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── 設定タブ ── */}
+      {activeTab === 'settings' && (
+        <>
+          {/* クライアント基本情報 */}
+          {client.note && (
+            <div className="bg-white rounded-2xl border border-gray-200 p-5 mb-6">
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">備考</h3>
+              <p className="text-sm text-gray-600 bg-gray-50 rounded-lg px-4 py-3">{client.note}</p>
+            </div>
+          )}
+
+          {/* GBP 連携設定 */}
+          <GbpCredentialSection clientId={clientId} />
+
+          {/* LINE OAM セッション設定 */}
+          <LineOamSessionSection clientId={clientId} />
+        </>
       )}
 
       {/* Create Project Modal */}

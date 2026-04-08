@@ -92,7 +92,7 @@ export default function ServicePostsPage({
   return (
     <div className="p-6 max-w-6xl mx-auto pb-24">
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-2 text-sm text-gray-400 mb-6 flex-wrap">
+      <nav className="flex items-center gap-2 text-sm text-gray-400 mb-4 flex-wrap">
         <Link href="/clients" className="hover:text-purple-600">クライアント一覧</Link>
         <span>›</span>
         <Link href={`/clients/${service?.client.id}`} className="hover:text-purple-600">{service?.client.client_name}</Link>
@@ -106,10 +106,46 @@ export default function ServicePostsPage({
         <span className="text-gray-700 font-medium">投稿一覧</span>
       </nav>
 
+      {/* サービスヘッダー */}
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center text-xl">📸</div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Instagram</h1>
+          <p className="text-sm text-gray-400">{service?.service_name}</p>
+        </div>
+      </div>
+
+      {/* タブナビ */}
+      <div className="flex items-center gap-1 mb-6 border-b border-gray-200">
+        <Link
+          href={`/projects/${projectId}/services/${serviceId}/instagram/analytics`}
+          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
+        >
+          ダッシュボード
+        </Link>
+        <Link
+          href={`/projects/${projectId}/services/${serviceId}/instagram/posts`}
+          className="px-4 py-2.5 text-sm font-medium text-pink-600 border-b-2 border-pink-600 -mb-px"
+        >
+          投稿一覧
+        </Link>
+        <Link
+          href={`/projects/${projectId}/services/${serviceId}/instagram`}
+          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
+        >
+          設定
+        </Link>
+        <Link
+          href={`/projects/${projectId}/services/${serviceId}/summary`}
+          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
+        >
+          サマリー
+        </Link>
+      </div>
+
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">投稿一覧</h1>
-          <p className="text-sm text-gray-500 mt-1">全{total}件の投稿</p>
+          <p className="text-sm text-gray-500">全{total}件の投稿</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           {['', 'FEED', 'REELS', 'STORY'].map(t => (

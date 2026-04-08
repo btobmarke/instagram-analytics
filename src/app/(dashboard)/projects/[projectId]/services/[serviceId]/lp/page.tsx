@@ -282,6 +282,22 @@ export default function LpDashboardPage({
         </div>
       </div>
 
+      {/* タブナビ */}
+      <div className="flex items-center gap-1 mb-6 border-b border-gray-200">
+        <Link
+          href={`/projects/${projectId}/services/${serviceId}/lp`}
+          className="px-4 py-2.5 text-sm font-medium text-purple-600 border-b-2 border-purple-600 -mb-px"
+        >
+          ダッシュボード
+        </Link>
+        <Link
+          href={`/projects/${projectId}/services/${serviceId}/summary`}
+          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px"
+        >
+          サマリー
+        </Link>
+      </div>
+
       {/* KPI Cards */}
       {isLoading ? (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">

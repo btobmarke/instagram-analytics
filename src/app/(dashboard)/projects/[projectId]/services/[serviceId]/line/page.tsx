@@ -85,6 +85,12 @@ export default function LineServicePage({
         >
           設定
         </Link>
+        <Link
+          href={`/projects/${projectId}/services/${serviceId}/summary`}
+          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px"
+        >
+          サマリー
+        </Link>
       </div>
 
       {/* bot_id 設定 */}
@@ -92,6 +98,23 @@ export default function LineServicePage({
 
       {/* リワードカード設定 */}
       <RewardcardSection serviceId={serviceId} />
+
+      {/* サマリーテンプレート */}
+      <Link
+        href={`/projects/${projectId}/services/${serviceId}/summary`}
+        className="flex items-center justify-between bg-white rounded-2xl border border-gray-200 p-5 mt-6 hover:border-green-200 transition group"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-100 to-emerald-100 flex items-center justify-center text-lg">📊</div>
+          <div>
+            <p className="text-sm font-bold text-gray-900 group-hover:text-green-600 transition">サマリーテンプレート</p>
+            <p className="text-xs text-gray-500">テンプレートの作成・編集</p>
+          </div>
+        </div>
+        <svg className="w-4 h-4 text-gray-400 group-hover:text-green-600 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+      </Link>
     </div>
   )
 }

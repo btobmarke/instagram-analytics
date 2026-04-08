@@ -145,6 +145,43 @@ export default function ServiceAnalyticsPage({
         <span className="text-gray-700 font-medium">アカウントインサイト</span>
       </nav>
 
+      {/* サービスヘッダー */}
+      <div className="flex items-center gap-3 -mt-2">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center text-xl">📸</div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Instagram</h1>
+          <p className="text-sm text-gray-400">{service?.service_name}</p>
+        </div>
+      </div>
+
+      {/* タブナビ */}
+      <div className="flex items-center gap-1 border-b border-gray-200 -mt-2">
+        <Link
+          href={`/projects/${projectId}/services/${serviceId}/instagram/analytics`}
+          className="px-4 py-2.5 text-sm font-medium text-pink-600 border-b-2 border-pink-600 -mb-px"
+        >
+          ダッシュボード
+        </Link>
+        <Link
+          href={`/projects/${projectId}/services/${serviceId}/instagram/posts`}
+          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
+        >
+          投稿一覧
+        </Link>
+        <Link
+          href={`/projects/${projectId}/services/${serviceId}/instagram`}
+          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
+        >
+          設定
+        </Link>
+        <Link
+          href={`/projects/${projectId}/services/${serviceId}/summary`}
+          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
+        >
+          サマリー
+        </Link>
+      </div>
+
       {!accountId ? (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center text-amber-800">
           <p className="font-semibold mb-1">Instagram アカウントが未連携です</p>

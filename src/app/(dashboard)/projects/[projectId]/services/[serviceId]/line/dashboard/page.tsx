@@ -164,6 +164,12 @@ export default function LineOamDashboard({
         >
           設定
         </Link>
+        <Link
+          href={`/projects/${projectId}/services/${serviceId}/summary`}
+          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px"
+        >
+          サマリー
+        </Link>
       </div>
 
       {isLoading ? (

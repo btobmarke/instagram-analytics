@@ -128,7 +128,7 @@ export default function InstagramServicePage({
   return (
     <div className="p-6 max-w-4xl mx-auto">
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-2 text-sm text-gray-400 mb-6 flex-wrap">
+      <nav className="flex items-center gap-2 text-sm text-gray-400 mb-4 flex-wrap">
         <Link href="/clients" className="hover:text-purple-600">クライアント一覧</Link>
         <span>›</span>
         <Link href={`/clients/${service?.client.id}`} className="hover:text-purple-600">
@@ -141,6 +141,43 @@ export default function InstagramServicePage({
         <span>›</span>
         <span className="text-gray-700 font-medium">{service?.service_name ?? 'Instagram'}</span>
       </nav>
+
+      {/* サービスヘッダー */}
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center text-xl">📸</div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Instagram</h1>
+          <p className="text-sm text-gray-400">{service?.service_name}</p>
+        </div>
+      </div>
+
+      {/* タブナビ */}
+      <div className="flex items-center gap-1 mb-6 border-b border-gray-200">
+        <Link
+          href={`/projects/${projectId}/services/${serviceId}/instagram/analytics`}
+          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
+        >
+          ダッシュボード
+        </Link>
+        <Link
+          href={`/projects/${projectId}/services/${serviceId}/instagram/posts`}
+          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
+        >
+          投稿一覧
+        </Link>
+        <Link
+          href={`/projects/${projectId}/services/${serviceId}/instagram`}
+          className="px-4 py-2.5 text-sm font-medium text-pink-600 border-b-2 border-pink-600 -mb-px"
+        >
+          設定
+        </Link>
+        <Link
+          href={`/projects/${projectId}/services/${serviceId}/summary`}
+          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
+        >
+          サマリー
+        </Link>
+      </div>
 
       {/* ================================================================ */}
       {/* アカウント情報ヘッダー                                            */}
@@ -248,58 +285,6 @@ export default function InstagramServicePage({
           >
             アカウントを連携する
           </button>
-        </div>
-      )}
-
-      {/* ================================================================ */}
-      {/* 分析メニュー                                                      */}
-      {/* ================================================================ */}
-      <h2 className="text-base font-bold text-gray-900 mb-3">分析メニュー</h2>
-
-      {!igAccountRefId ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          {[
-            { icon: '📸', label: '投稿一覧', desc: '投稿ごとのリーチ・エンゲージメントを確認' },
-            { icon: '📊', label: 'アカウントインサイト', desc: 'フォロワー推移・リーチ・KPI達成状況' },
-          ].map(item => (
-            <div key={item.label}
-              className="flex items-center gap-4 bg-white rounded-xl border border-gray-200 p-5 opacity-50 cursor-not-allowed">
-              <span className="text-3xl">{item.icon}</span>
-              <div>
-                <p className="font-semibold text-gray-700">{item.label}</p>
-                <p className="text-xs text-gray-400 mt-0.5">{item.desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          <Link
-            href={`/projects/${projectId}/services/${serviceId}/instagram/posts`}
-            className="flex items-center gap-4 bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md hover:border-pink-200 transition-all group"
-          >
-            <span className="text-3xl">📸</span>
-            <div className="flex-1">
-              <p className="font-semibold text-gray-900 group-hover:text-pink-700 transition-colors">投稿一覧</p>
-              <p className="text-xs text-gray-400 mt-0.5">投稿ごとのリーチ・エンゲージメントを確認</p>
-            </div>
-            <svg className="w-4 h-4 text-gray-300 group-hover:text-pink-400 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
-          </Link>
-          <Link
-            href={`/projects/${projectId}/services/${serviceId}/instagram/analytics`}
-            className="flex items-center gap-4 bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md hover:border-purple-200 transition-all group"
-          >
-            <span className="text-3xl">📊</span>
-            <div className="flex-1">
-              <p className="font-semibold text-gray-900 group-hover:text-purple-700 transition-colors">アカウントインサイト</p>
-              <p className="text-xs text-gray-400 mt-0.5">フォロワー推移・リーチ・KPI達成状況</p>
-            </div>
-            <svg className="w-4 h-4 text-gray-300 group-hover:text-purple-400 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
-          </Link>
         </div>
       )}
 
