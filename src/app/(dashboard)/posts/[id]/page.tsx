@@ -7,6 +7,7 @@ import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import type { IgMedia, AiAnalysisResult } from '@/types'
+import { MarkdownRenderer, BlinkingCursor } from '@/components/ai/MarkdownRenderer'
 
 interface PostDetailData {
   post: IgMedia
@@ -253,16 +254,23 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
             </div>
 
             {streamText !== null ? (
-              <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-                {streamText || <span className="text-gray-400 animate-pulse">分析中...</span>}
+              <div className="bg-gray-50 rounded-xl p-4">
+                {streamText ? (
+                  <div className="relative">
+                    <MarkdownRenderer content={streamText} />
+                    {analyzing && <BlinkingCursor />}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400 animate-pulse">分析中...</p>
+                )}
               </div>
             ) : latest_ai_analysis ? (
               <div>
                 <p className="text-xs text-gray-400 mb-3">
                   {new Date(latest_ai_analysis.created_at).toLocaleString('ja-JP')} 実行
                 </p>
-                <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-                  {latest_ai_analysis.analysis_result}
+                <div className="bg-gray-50 rounded-xl p-4">
+                  <MarkdownRenderer content={latest_ai_analysis.analysis_result} />
                 </div>
               </div>
             ) : (

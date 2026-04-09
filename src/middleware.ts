@@ -44,6 +44,6 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // api・静的ファイル・LP SDK・公開パスはミドルウェアをスキップ
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|api|lp-sdk\\.js).*)'],
+  // api・_next 配下（静的・HMR・画像最適化など）・LP SDK はミドルウェアをスキップ
+  matcher: ['/((?!_next/|api|favicon.ico|lp-sdk\\.js).*)'],
 }

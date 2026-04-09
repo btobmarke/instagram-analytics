@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { analyzeAccount } from '@/lib/claude/client'
 import { validateBatchRequest } from '@/lib/utils/batch-auth'
+import { getAiModelIdForAccountId } from '@/lib/ai/resolve-ai-model'
 
 // POST /api/batch/ai-analysis — 週次AI分析バッチ
 export async function POST(request: Request) {
@@ -32,6 +33,8 @@ export async function POST(request: Request) {
 
     for (const account of (accounts ?? [])) {
       try {
+        const modelId = await getAiModelIdForAccountId(admin, account.id)
+
         const { data: promptSetting } = await admin
           .from('analysis_prompt_settings')
           .select('prompt_text')
@@ -75,13 +78,14 @@ export async function POST(request: Request) {
           topPosts: [],
           promptText: promptSetting?.prompt_text ?? '',
           accountStrategy: strategySetting?.strategy_text ?? '',
+          modelId,
         })
 
         await admin.from('ai_analysis_results').insert({
           account_id: account.id,
           analysis_type: 'account_weekly',
           analysis_result: result,
-          model_used: 'claude-sonnet-4-6',
+          model_used: modelId,
           target_period_start: weekAgo,
           target_period_end: today,
           triggered_by: 'batch_weekly',

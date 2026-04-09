@@ -3,6 +3,9 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
+import { analyzePostComparison } from '@/lib/claude/client'
+import { getAiModelIdForAccountId } from '@/lib/ai/resolve-ai-model'
+import type { IgMedia } from '@/types'
 
 /**
  * GET /api/posts/analysis
@@ -116,5 +119,144 @@ export async function GET(request: Request) {
     posts: orderedResults,
     grain,
     total: orderedResults.length,
+  })
+}
+
+/**
+ * POST /api/posts/analysis
+ * 比較対象の複数投稿を題材に AI 比較解説をストリーミング返却する
+ * Body: { ids: string[] }（2〜10件・同一アカウント）
+ */
+export async function POST(request: Request) {
+  const supabase = await createSupabaseServerClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  let body: { ids?: unknown }
+  try {
+    body = await request.json()
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  }
+
+  const rawIds = Array.isArray(body.ids) ? body.ids : []
+  const postIds = rawIds.map((id) => String(id).trim()).filter(Boolean)
+  if (postIds.length < 2) {
+    return NextResponse.json({ error: '比較には2件以上の投稿IDが必要です' }, { status: 400 })
+  }
+  if (postIds.length > 10) {
+    return NextResponse.json({ error: '一度に比較できる投稿は10件までです' }, { status: 400 })
+  }
+
+  const admin = createSupabaseAdminClient()
+
+  const { data: posts, error: postsErr } = await admin
+    .from('ig_media')
+    .select('*')
+    .in('id', postIds)
+
+  if (postsErr) {
+    return NextResponse.json({ error: postsErr.message }, { status: 500 })
+  }
+  if (!posts || posts.length !== postIds.length) {
+    return NextResponse.json({ error: '一部の投稿が見つかりません' }, { status: 404 })
+  }
+
+  const typedPosts = posts as IgMedia[]
+  const accountIds = new Set(typedPosts.map((p) => p.account_id))
+  if (accountIds.size !== 1) {
+    return NextResponse.json({ error: '同一アカウントの投稿のみ比較できます' }, { status: 400 })
+  }
+  const accountId = typedPosts[0].account_id
+
+  const { data: insightRows, error: insightErr } = await admin
+    .from('ig_media_insight_fact')
+    .select('media_id, metric_code, value, snapshot_at')
+    .in('media_id', postIds)
+    .order('snapshot_at', { ascending: false })
+
+  if (insightErr) {
+    return NextResponse.json({ error: insightErr.message }, { status: 500 })
+  }
+
+  const insightsByMedia: Record<string, Record<string, number | null>> = {}
+  for (const id of postIds) insightsByMedia[id] = {}
+  for (const row of insightRows ?? []) {
+    const mid = row.media_id as string
+    const bucket = insightsByMedia[mid]
+    if (bucket && !(row.metric_code in bucket)) {
+      bucket[row.metric_code] = row.value
+    }
+  }
+
+  const orderedPosts = postIds
+    .map((id) => typedPosts.find((p) => p.id === id))
+    .filter((p): p is IgMedia => Boolean(p))
+
+  const postsForAi = orderedPosts.map((post) => ({
+    post,
+    insights: insightsByMedia[post.id] ?? {},
+  }))
+
+  const { data: account } = await supabase
+    .from('ig_accounts')
+    .select('username')
+    .eq('id', accountId)
+    .single()
+
+  const { data: promptSetting } = await supabase
+    .from('analysis_prompt_settings')
+    .select('prompt_text')
+    .eq('prompt_type', 'post_comparison')
+    .eq('is_active', true)
+    .single()
+
+  const { data: strategySetting } = await supabase
+    .from('account_strategy_settings')
+    .select('strategy_text')
+    .eq('account_id', accountId)
+    .single()
+
+  const promptText =
+    promptSetting?.prompt_text ??
+    '複数投稿の指標と内容を比較し、差分の要因と次回投稿への示唆を述べてください。'
+  const accountStrategy = strategySetting?.strategy_text ?? ''
+  const accountUsername = account?.username ?? 'unknown'
+  const modelId = await getAiModelIdForAccountId(supabase, accountId)
+
+  const stream = await analyzePostComparison({
+    posts: postsForAi,
+    promptText,
+    accountStrategy,
+    accountUsername,
+    modelId,
+  })
+
+  let fullText = ''
+  const [stream1, stream2] = stream.tee()
+  ;(async () => {
+    const reader = stream2.getReader()
+    const decoder = new TextDecoder()
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      fullText += decoder.decode(value, { stream: true })
+    }
+    await admin.from('ai_analysis_results').insert({
+      account_id: accountId,
+      analysis_type: 'post_comparison',
+      media_ids: postIds,
+      analysis_result: fullText,
+      model_used: modelId,
+      triggered_by: 'user',
+    })
+  })()
+
+  return new Response(stream1, {
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Transfer-Encoding': 'chunked',
+      'X-Content-Type-Options': 'nosniff',
+    },
   })
 }

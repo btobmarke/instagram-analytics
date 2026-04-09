@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { isAiModelOptionId } from '@/lib/ai/model-options'
 
 // GET /api/clients/:clientId - クライアント詳細取得（プロジェクト一覧付き）
 export async function GET(
@@ -14,7 +15,7 @@ export async function GET(
   const { data, error } = await supabase
     .from('clients')
     .select(`
-      id, client_name, note, is_active, created_at, updated_at,
+      id, client_name, note, is_active, ai_model, created_at, updated_at,
       projects (
         id, project_name, note, is_active, created_at, updated_at,
         services(id)
@@ -46,9 +47,56 @@ export async function GET(
       client_name: data.client_name,
       note: data.note,
       is_active: data.is_active,
+      ai_model: (data as { ai_model?: string }).ai_model ?? 'claude-sonnet-4-6',
       created_at: data.created_at,
       updated_at: data.updated_at,
       projects,
     },
   })
+}
+
+// PATCH /api/clients/:clientId — AI モデルなどクライアント設定の更新
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ clientId: string }> }
+) {
+  const { clientId } = await params
+  const supabase = await createSupabaseServerClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ success: false, error: { code: 'UNAUTHORIZED', message: '認証が必要です' } }, { status: 401 })
+
+  const body = await request.json().catch(() => ({}))
+  const { ai_model } = body as { ai_model?: string }
+
+  if (ai_model !== undefined) {
+    if (!isAiModelOptionId(ai_model)) {
+      return NextResponse.json(
+        { success: false, error: { code: 'INVALID_MODEL', message: '無効な ai_model です' } },
+        { status: 400 }
+      )
+    }
+  }
+
+  if (ai_model === undefined) {
+    return NextResponse.json(
+      { success: false, error: { code: 'BAD_REQUEST', message: '更新フィールドがありません' } },
+      { status: 400 }
+    )
+  }
+
+  const { data, error } = await supabase
+    .from('clients')
+    .update({ ai_model })
+    .eq('id', clientId)
+    .select('id, ai_model')
+    .single()
+
+  if (error) {
+    return NextResponse.json(
+      { success: false, error: { code: 'DB_ERROR', message: error.message } },
+      { status: 500 }
+    )
+  }
+
+  return NextResponse.json({ success: true, data })
 }

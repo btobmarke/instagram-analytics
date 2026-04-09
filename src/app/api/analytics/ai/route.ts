@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { analyzeAccount } from '@/lib/claude/client'
+import { getAiModelIdForAccountId } from '@/lib/ai/resolve-ai-model'
 
 // POST /api/analytics/ai — アカウント週次/月次AI分析
 export async function POST(request: Request) {
@@ -15,6 +16,8 @@ export async function POST(request: Request) {
   const { accountId, analysisType = 'weekly', periodStart, periodEnd } = body
 
   if (!accountId) return NextResponse.json({ error: 'accountId が必要です' }, { status: 400 })
+
+  const modelId = await getAiModelIdForAccountId(supabase, accountId)
 
   const until = periodEnd ?? new Date().toISOString().slice(0, 10)
   const since = periodStart ?? new Date(Date.now() - (analysisType === 'weekly' ? 7 : 30) * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
@@ -85,6 +88,7 @@ export async function POST(request: Request) {
     topPosts,
     promptText: promptSetting?.prompt_text ?? '',
     accountStrategy: strategySetting?.strategy_text ?? '',
+    modelId,
   })
 
   // 結果保存
@@ -93,7 +97,7 @@ export async function POST(request: Request) {
     account_id: accountId,
     analysis_type: analysisType === 'weekly' ? 'account_weekly' : 'account_monthly',
     analysis_result: result,
-    model_used: 'claude-sonnet-4-6',
+    model_used: modelId,
     target_period_start: since,
     target_period_end: until,
     triggered_by: 'user',

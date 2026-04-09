@@ -36,6 +36,7 @@ export default function SummaryTemplatePage({
   const [templates, setTemplates] = useState<SummaryTemplate[]>([])
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [newName, setNewName] = useState('')
+  const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
 
   // テンプレート一覧を読み込む
@@ -48,11 +49,16 @@ export default function SummaryTemplatePage({
 
   // 新規作成
   const handleCreate = async () => {
-    if (!newName.trim()) return
-    const tmpl = await createTemplate({ serviceId, name: newName.trim() })
-    setNewName('')
-    setShowCreateModal(false)
-    router.push(`/projects/${projectId}/services/${serviceId}/summary/${tmpl.id}`)
+    if (!newName.trim() || creating) return
+    setCreating(true)
+    try {
+      const tmpl = await createTemplate({ serviceId, name: newName.trim() })
+      setNewName('')
+      setShowCreateModal(false)
+      router.push(`/projects/${projectId}/services/${serviceId}/summary/${tmpl.id}`)
+    } finally {
+      setCreating(false)
+    }
   }
 
   // 削除
@@ -238,10 +244,10 @@ export default function SummaryTemplatePage({
               </button>
               <button
                 onClick={handleCreate}
-                disabled={!newName.trim()}
+                disabled={!newName.trim() || creating}
                 className="px-5 py-2 text-sm font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:bg-gray-200 disabled:text-gray-400 transition"
               >
-                作成して編集へ
+                {creating ? '作成中...' : '作成して編集へ'}
               </button>
             </div>
           </div>

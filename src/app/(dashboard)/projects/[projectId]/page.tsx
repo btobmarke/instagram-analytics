@@ -23,7 +23,7 @@ const SERVICE_TYPE_LABELS: Record<string, { label: string; icon: string; color: 
 function getServiceHref(projectId: string, serviceId: string, serviceType: string): string {
   switch (serviceType) {
     case 'instagram':
-      return `/projects/${projectId}/services/${serviceId}/instagram`
+      return `/projects/${projectId}/services/${serviceId}/instagram/analytics`
     case 'lp':
       return `/projects/${projectId}/services/${serviceId}/lp`
     case 'gbp':

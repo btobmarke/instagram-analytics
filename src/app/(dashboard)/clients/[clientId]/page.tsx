@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, use } from 'react'
+import { useState, use, useEffect } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 import type { ClientDetail } from '@/types'
+import { AI_MODEL_OPTIONS } from '@/lib/ai/model-options'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -171,6 +172,12 @@ export default function ClientDetailPage({ params }: { params: Promise<{ clientI
             </div>
           )}
 
+          <AiModelSection
+            clientId={clientId}
+            currentModel={client.ai_model ?? 'claude-sonnet-4-6'}
+            onSaved={() => mutate()}
+          />
+
           {/* Instagram アクセストークン設定 */}
           <InstagramTokenSection clientId={clientId} />
 
@@ -274,6 +281,83 @@ function CreateProjectModal({
           </div>
         </form>
       </div>
+    </div>
+  )
+}
+
+// --------------------------------------------------------------------------
+// AI 分析モデル（クライアント単位）
+// --------------------------------------------------------------------------
+function AiModelSection({
+  clientId,
+  currentModel,
+  onSaved,
+}: {
+  clientId: string
+  currentModel: string
+  onSaved: () => void
+}) {
+  const [model, setModel] = useState(currentModel)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    setModel(currentModel)
+  }, [currentModel])
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      const res = await fetch(`/api/clients/${clientId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ai_model: model }),
+      })
+      const json = await res.json()
+      if (!json.success) {
+        setError(json.error?.message ?? '保存に失敗しました')
+        return
+      }
+      onSaved()
+    } catch {
+      setError('通信エラーが発生しました')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 p-5 mb-6">
+      <h3 className="text-sm font-semibold text-gray-700 mb-1">AI 分析モデル</h3>
+      <p className="text-xs text-gray-500 mb-4">
+        このクライアント配下の Instagram アカウントの AI 分析（投稿分析・週次アカウント分析など）で使用するモデルです。
+      </p>
+      <form onSubmit={handleSave} className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">モデル</label>
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            className="w-full max-w-md px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-400"
+          >
+            {AI_MODEL_OPTIONS.map((opt) => (
+              <option key={opt.id} value={opt.id}>
+                {opt.label} — {opt.description}
+              </option>
+            ))}
+          </select>
+        </div>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <button
+          type="submit"
+          disabled={saving}
+          className="px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-60"
+        >
+          {saving ? '保存中...' : '保存する'}
+        </button>
+      </form>
     </div>
   )
 }

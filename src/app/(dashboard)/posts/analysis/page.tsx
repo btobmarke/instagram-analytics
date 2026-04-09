@@ -9,6 +9,7 @@ import {
   Legend, ResponsiveContainer,
 } from 'recharts'
 import type { IgMedia } from '@/types'
+import { MarkdownRenderer, BlinkingCursor } from '@/components/ai/MarkdownRenderer'
 
 // ===== 型定義 =====
 interface PostAnalysisResult {
@@ -84,6 +85,9 @@ function AnalysisContent() {
   const [grain, setGrain] = useState<Grain>('hourly')
   const [selectedMetrics, setSelectedMetrics] = useState<Set<string>>(new Set(DEFAULT_METRICS))
   const [activeTab, setActiveTab] = useState<'content' | 'metrics'>('content')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+  const [aiText, setAiText] = useState('')
 
   // 全投稿のavailableMetricsを合算
   const allAvailableMetrics = Array.from(
@@ -101,6 +105,51 @@ function AnalysisContent() {
   }, [idsParam, grain, accountId])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  useEffect(() => {
+    setAiText('')
+    setAiError(null)
+    setAiLoading(false)
+  }, [idsParam])
+
+  const canRunAiComparison = results.length >= 2
+
+  const runAiComparison = useCallback(async () => {
+    if (!canRunAiComparison) return
+    setAiError(null)
+    setAiLoading(true)
+    setAiText('')
+    try {
+      const res = await fetch('/api/posts/analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: results.map((r) => r.post.id) }),
+      })
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string }
+        setAiError(j.error ?? 'エラーが発生しました')
+        setAiLoading(false)
+        return
+      }
+      if (!res.body) {
+        setAiLoading(false)
+        return
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let text = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        text += decoder.decode(value, { stream: true })
+        setAiText(text)
+      }
+    } catch {
+      setAiError('通信エラーが発生しました')
+    } finally {
+      setAiLoading(false)
+    }
+  }, [results, canRunAiComparison])
 
   const toggleMetric = (metric: string) => {
     setSelectedMetrics(prev => {
@@ -121,8 +170,8 @@ function AnalysisContent() {
   return (
     <div className="max-w-[1400px] mx-auto">
       {/* ヘッダー */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div className="flex items-center gap-3 flex-wrap">
           <button
             onClick={() => router.push(`/posts?account=${accountId}`)}
             className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition"
@@ -138,6 +187,31 @@ function AnalysisContent() {
             {postCount}件比較中
           </span>
         </div>
+        {!loading && results.length > 0 && (
+          <button
+            type="button"
+            onClick={() => void runAiComparison()}
+            disabled={!canRunAiComparison || aiLoading}
+            title={
+              !canRunAiComparison
+                ? 'AI比較解説は投稿を2件以上選んだときに利用できます'
+                : undefined
+            }
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-sm hover:from-purple-700 hover:to-pink-700 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:from-gray-300 disabled:to-gray-400"
+          >
+            {aiLoading ? (
+              <>
+                <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                AI分析中…
+              </>
+            ) : (
+              <>
+                <span aria-hidden>✨</span>
+                AIで比較解説
+              </>
+            )}
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -187,6 +261,21 @@ function AnalysisContent() {
               </div>
             </div>
           </div>
+
+          {(aiError || aiText || aiLoading) && (
+            <div className="bg-white rounded-2xl border border-purple-100 p-5 mb-5 shadow-sm">
+              <h2 className="text-sm font-semibold text-purple-900 mb-3">AI 比較解説</h2>
+              {aiError && <p className="text-sm text-red-600">{aiError}</p>}
+              {aiText ? (
+                <div className="relative">
+                  <MarkdownRenderer content={aiText} />
+                  {aiLoading && <BlinkingCursor />}
+                </div>
+              ) : aiLoading ? (
+                <p className="text-sm text-gray-500">回答を生成しています…</p>
+              ) : null}
+            </div>
+          )}
 
           {/* グラフエリア */}
           <div className={`grid ${colClass} gap-4 mb-5`}>

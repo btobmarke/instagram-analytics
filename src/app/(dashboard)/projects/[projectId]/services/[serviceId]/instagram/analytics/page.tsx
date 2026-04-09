@@ -7,8 +7,6 @@ import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
-import type { AiAnalysisResult } from '@/types'
-
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
 interface ServiceDetail {
@@ -65,12 +63,8 @@ export default function ServiceAnalyticsPage({
   const accountId = service?.type_config?.ig_account_ref_id
 
   const [data, setData] = useState<AnalyticsData | null>(null)
-  const [aiHistory, setAiHistory] = useState<AiAnalysisResult[]>([])
   const [loading, setLoading] = useState(false)
-  const [aiLoading, setAiLoading] = useState(false)
   const [period, setPeriod] = useState<'7d' | '30d' | '90d'>('30d')
-  const [analysisType, setAnalysisType] = useState<'weekly' | 'monthly'>('weekly')
-  const [selectedAi, setSelectedAi] = useState<AiAnalysisResult | null>(null)
 
   const since = (() => {
     const days = period === '7d' ? 7 : period === '30d' ? 30 : 90
@@ -86,27 +80,7 @@ export default function ServiceAnalyticsPage({
     setLoading(false)
   }, [accountId, since])
 
-  const fetchAiHistory = useCallback(async () => {
-    if (!accountId) return
-    const res = await fetch(`/api/analytics/ai?account=${accountId}`)
-    const json = await res.json()
-    setAiHistory(json.data ?? [])
-    if ((json.data ?? []).length > 0) setSelectedAi(json.data[0])
-  }, [accountId])
-
-  useEffect(() => { fetchData(); fetchAiHistory() }, [fetchData, fetchAiHistory])
-
-  const handleRunAi = async () => {
-    if (!accountId) return
-    setAiLoading(true)
-    await fetch('/api/analytics/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accountId, analysisType }),
-    })
-    await fetchAiHistory()
-    setAiLoading(false)
-  }
+  useEffect(() => { fetchData() }, [fetchData])
 
   // チャートデータ
   const followerChartData = (data?.follower_data ?? []).map(r => ({
@@ -167,6 +141,12 @@ export default function ServiceAnalyticsPage({
           className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
         >
           投稿一覧
+        </Link>
+        <Link
+          href={`/projects/${projectId}/services/${serviceId}/instagram/ai`}
+          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
+        >
+          AI分析
         </Link>
         <Link
           href={`/projects/${projectId}/services/${serviceId}/instagram`}
@@ -286,59 +266,20 @@ export default function ServiceAnalyticsPage({
             </div>
           )}
 
-          {/* AI分析 */}
-          <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold text-gray-700">AI 分析レポート</h2>
-              <div className="flex items-center gap-3">
-                <select value={analysisType} onChange={e => setAnalysisType(e.target.value as 'weekly' | 'monthly')}
-                  className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-300">
-                  <option value="weekly">週次分析</option>
-                  <option value="monthly">月次分析</option>
-                </select>
-                <button onClick={handleRunAi} disabled={aiLoading}
-                  className="flex items-center gap-1.5 px-4 py-1.5 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition disabled:opacity-50">
-                  {aiLoading ? (
-                    <div className="w-3.5 h-3.5 border-2 border-purple-300 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                  )}
-                  {aiLoading ? '分析中...' : '分析を実行'}
-                </button>
-              </div>
+          {/* AI分析（専用タブへ誘導） */}
+          <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-100 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-800">AI 分析レポート</h2>
+              <p className="text-xs text-gray-500 mt-1">
+                週次・月次レポートをストリーミング生成し、過去の分析も閲覧できます。
+              </p>
             </div>
-
-            {aiHistory.length === 0 ? (
-              <div className="text-center py-8 text-gray-400 text-sm">
-                <p>まだ分析レポートがありません</p>
-                <p className="text-xs mt-1">「分析を実行」ボタンで AI 分析を開始します</p>
-              </div>
-            ) : (
-              <div className="flex gap-4">
-                <div className="w-48 flex-shrink-0 border-r border-gray-100 pr-4 space-y-1">
-                  {aiHistory.slice(0, 10).map(ai => (
-                    <button key={ai.id} onClick={() => setSelectedAi(ai)}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-xs transition ${selectedAi?.id === ai.id ? 'bg-purple-50 text-purple-700 font-medium' : 'text-gray-500 hover:bg-gray-50'}`}>
-                      <p>{ai.analysis_type === 'weekly' ? '週次' : '月次'}</p>
-                      <p className="text-gray-400">{new Date(ai.created_at).toLocaleDateString('ja-JP')}</p>
-                    </button>
-                  ))}
-                </div>
-                <div className="flex-1 min-w-0">
-                  {selectedAi?.analysis_result ? (
-                    <div className="prose prose-sm max-w-none text-gray-700 text-sm whitespace-pre-wrap">
-                      {typeof selectedAi.analysis_result === 'string'
-                        ? selectedAi.analysis_result
-                        : JSON.stringify(selectedAi.analysis_result, null, 2)}
-                    </div>
-                  ) : (
-                    <p className="text-gray-400 text-sm">レポートを選択してください</p>
-                  )}
-                </div>
-              </div>
-            )}
+            <Link
+              href={`/projects/${projectId}/services/${serviceId}/instagram/ai`}
+              className="inline-flex justify-center items-center gap-1.5 px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition shrink-0"
+            >
+              AI分析タブを開く
+            </Link>
           </div>
         </>
       )}

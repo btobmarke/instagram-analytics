@@ -1,9 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { IgMedia, IgMediaInsightFact, KpiProgress, KpiMaster } from '@/types'
+import { normalizeAiModelId, type AiModelOptionId } from '@/lib/ai/model-options'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-
-const MODEL = 'claude-sonnet-4-6'
 
 // ========== 投稿単体AI分析 ==========
 
@@ -13,6 +12,8 @@ export async function analyzePost(params: {
   promptText: string
   accountStrategy: string
   accountUsername: string
+  /** Anthropic model id（省略時は Sonnet 4.6） */
+  modelId?: AiModelOptionId
 }): Promise<ReadableStream<Uint8Array>> {
   const systemPrompt = buildSystemPrompt(params.promptText, params.accountStrategy)
   const userMessage = `
@@ -31,7 +32,8 @@ ${Object.entries(params.insights)
   .join('\n')}
 `
 
-  return streamMessage(systemPrompt, userMessage)
+  const model = normalizeAiModelId(params.modelId)
+  return streamMessage(systemPrompt, userMessage, model)
 }
 
 // ========== 投稿比較AI分析 ==========
@@ -41,6 +43,7 @@ export async function analyzePostComparison(params: {
   promptText: string
   accountStrategy: string
   accountUsername: string
+  modelId?: AiModelOptionId
 }): Promise<ReadableStream<Uint8Array>> {
   const systemPrompt = buildSystemPrompt(params.promptText, params.accountStrategy)
   const userMessage = `
@@ -55,7 +58,8 @@ ${params.posts.map((p, i) => `
 `).join('\n---\n')}
 `
 
-  return streamMessage(systemPrompt, userMessage)
+  const model = normalizeAiModelId(params.modelId)
+  return streamMessage(systemPrompt, userMessage, model)
 }
 
 // ========== 週次・月次AI分析 ==========
@@ -70,6 +74,7 @@ export async function analyzeAccount(params: {
   topPosts: Array<{ post: IgMedia; insights: Record<string, number | null> }>
   promptText: string
   accountStrategy: string
+  modelId?: AiModelOptionId
 }): Promise<string> {
   const systemPrompt = buildSystemPrompt(params.promptText, params.accountStrategy)
   const analysisLabel = params.analysisType === 'weekly' ? '週次' : '月次'
@@ -94,8 +99,9 @@ ${params.topPosts.slice(0, 5).map((p, i) =>
 ).join('\n')}
 `
 
+  const model = normalizeAiModelId(params.modelId)
   const response = await anthropic.messages.create({
-    model: MODEL,
+    model,
     max_tokens: 3000,
     system: systemPrompt,
     messages: [{ role: 'user', content: userMessage }],
@@ -106,9 +112,12 @@ ${params.topPosts.slice(0, 5).map((p, i) =>
 
 // ========== アルゴリズム情報取得 ==========
 
-export async function fetchInstagramAlgorithmInfo(): Promise<string> {
+export async function fetchInstagramAlgorithmInfo(
+  modelId?: AiModelOptionId
+): Promise<string> {
+  const model = normalizeAiModelId(modelId)
   const response = await anthropic.messages.create({
-    model: MODEL,
+    model,
     max_tokens: 2000,
     messages: [{
       role: 'user',
@@ -133,11 +142,15 @@ ${analysisPrompt}
 ${strategy || '（戦略未設定）'}`
 }
 
-async function streamMessage(systemPrompt: string, userMessage: string): Promise<ReadableStream<Uint8Array>> {
+async function streamMessage(
+  systemPrompt: string,
+  userMessage: string,
+  model: string
+): Promise<ReadableStream<Uint8Array>> {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const response = await anthropic.messages.stream({
-        model: MODEL,
+        model,
         max_tokens: 2048,
         system: systemPrompt,
         messages: [{ role: 'user', content: userMessage }],

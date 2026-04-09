@@ -130,6 +130,12 @@ export default function ServicePostsPage({
           投稿一覧
         </Link>
         <Link
+          href={`/projects/${projectId}/services/${serviceId}/instagram/ai`}
+          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
+        >
+          AI分析
+        </Link>
+        <Link
           href={`/projects/${projectId}/services/${serviceId}/instagram`}
           className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
         >

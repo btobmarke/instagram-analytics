@@ -242,6 +242,8 @@ export interface Client {
   client_name: string
   note: string | null
   is_active: boolean
+  /** Anthropic API のモデル ID（例: claude-sonnet-4-6） */
+  ai_model?: string
   created_at: string
   updated_at: string
 }

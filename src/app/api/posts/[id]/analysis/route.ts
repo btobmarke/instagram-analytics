@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { analyzePost } from '@/lib/claude/client'
+import { getAiModelIdForAccountId } from '@/lib/ai/resolve-ai-model'
 
 // POST /api/posts/[id]/analysis — AI分析実行（ストリーミング）
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -58,9 +59,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const promptText = promptSetting?.prompt_text ?? 'この投稿のパフォーマンスを分析してください。'
   const accountStrategy = strategySetting?.strategy_text ?? ''
   const accountUsername = account?.username ?? 'unknown'
+  const modelId = await getAiModelIdForAccountId(supabase, post.account_id)
 
   // ストリーミングレスポンス
-  const stream = await analyzePost({ post, insights, promptText, accountStrategy, accountUsername })
+  const stream = await analyzePost({
+    post,
+    insights,
+    promptText,
+    accountStrategy,
+    accountUsername,
+    modelId,
+  })
 
   // バックグラウンドで結果保存（ストリームを複製することは難しいので、非ストリーミングで別途保存は省略）
   const admin = createSupabaseAdminClient()
@@ -84,7 +93,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       analysis_type: 'post_analysis',
       media_ids: [id],
       analysis_result: fullText,
-      model_used: 'claude-sonnet-4-6',
+      model_used: modelId,
       triggered_by: 'user',
     })
   })()

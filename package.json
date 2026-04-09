@@ -12,20 +12,27 @@
     "test:ga4-live": "vitest run src/lib/ga4/ga4-client.live.test.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.68",
+    "@ai-sdk/react": "^3.0.156",
     "@anthropic-ai/sdk": "^0.36.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.47.0",
+    "ai": "^6.0.154",
+    "html2pdf.js": "^0.14.0",
     "next": "15.1.11",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
     "recharts": "^2.13.3",
+    "remark-gfm": "^4.0.1",
     "swr": "^2.2.5",
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@tailwindcss/typography": "^0.5.19",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
