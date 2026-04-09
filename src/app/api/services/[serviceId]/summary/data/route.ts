@@ -121,7 +121,7 @@ const AVG_FIELDS = new Set([
 /**
  * ig_account_insight_fact
  * pivot: metric_code = field, value_date DATE
- * FK: account_id → ig_accounts.id ← instagram_accounts.ig_account_ref_id ← service_id
+ * FK: account_id → ig_accounts.id（ig_accounts.service_id でサービスと紐づく。008 で instagram_accounts は廃止済み）
  */
 async function fetchIgAccountInsight(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
@@ -131,15 +131,14 @@ async function fetchIgAccountInsight(
 ): Promise<Record<string, Record<string, number | null>>> {
   const result: Record<string, Record<string, number | null>> = {}
 
-  // service_id → ig_account_id
-  const { data: iaRow } = await supabase
-    .from('instagram_accounts')
-    .select('ig_account_ref_id')
+  const { data: igRow } = await supabase
+    .from('ig_accounts')
+    .select('id')
     .eq('service_id', serviceId)
-    .single()
-  if (!iaRow) return result
+    .maybeSingle()
+  if (!igRow) return result
 
-  const accountId = iaRow.ig_account_ref_id
+  const accountId = igRow.id
   const rangeStart = periods[0].start.toISOString().slice(0, 10)
   const rangeEnd   = periods[periods.length - 1].end.toISOString().slice(0, 10)
 
@@ -150,7 +149,7 @@ async function fetchIgAccountInsight(
       .select('value_date, value')
       .eq('account_id', accountId)
       .eq('metric_code', field)
-      .eq('period_code', 'DAY')
+      .eq('period_code', 'day')
       .gte('value_date', rangeStart)
       .lte('value_date', rangeEnd)
 

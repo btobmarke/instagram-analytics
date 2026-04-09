@@ -34,27 +34,42 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   const admin = createSupabaseAdminClient()
 
-  // トークン取得
-  const { data: tokenRow, error: tokenErr } = await admin
-    .from('ig_account_tokens')
-    .select('access_token_enc')
-    .eq('account_id', id)
-    .eq('is_active', true)
-    .single()
-
-  if (tokenErr || !tokenRow) {
-    return NextResponse.json({ error: 'トークンが見つかりません' }, { status: 404 })
-  }
-
-  // アカウント取得（API設定含む）
+  // アカウント取得（API設定 + service_id 含む）
   const { data: account, error: accErr } = await admin
     .from('ig_accounts')
-    .select('platform_account_id, api_base_url, api_version, username')
+    .select('platform_account_id, api_base_url, api_version, username, service_id')
     .eq('id', id)
     .single()
 
   if (accErr || !account) {
     return NextResponse.json({ error: 'アカウントが見つかりません' }, { status: 404 })
+  }
+
+  // service_id → project → client → client_ig_tokens でトークン取得
+  if (!account.service_id) {
+    return NextResponse.json({ error: 'アカウントがサービスに紐づいていません' }, { status: 400 })
+  }
+
+  const { data: svcRow } = await admin
+    .from('services')
+    .select('project_id, projects!inner(client_id)')
+    .eq('id', account.service_id)
+    .single()
+
+  const clientId = (svcRow?.projects as { client_id: string } | null)?.client_id
+  if (!clientId) {
+    return NextResponse.json({ error: 'クライアントの解決に失敗しました' }, { status: 500 })
+  }
+
+  const { data: tokenRow, error: tokenErr } = await admin
+    .from('client_ig_tokens')
+    .select('access_token_enc')
+    .eq('client_id', clientId)
+    .eq('is_active', true)
+    .single()
+
+  if (tokenErr || !tokenRow) {
+    return NextResponse.json({ error: 'クライアントに Instagram トークンが登録されていません。クライアント設定からトークンを登録してください。' }, { status: 404 })
   }
 
   if (!account.username?.trim()) {

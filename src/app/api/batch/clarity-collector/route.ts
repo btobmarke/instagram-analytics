@@ -52,6 +52,15 @@ export async function POST(request: NextRequest) {
   const supabase = createServiceRoleClient()
   const startedAt = new Date().toISOString()
 
+  // batch_job_logs INSERT
+  const { data: jobLog } = await supabase.from('batch_job_logs').insert({
+    job_name: 'clarity_collector',
+    status: 'running',
+    records_processed: 0,
+    records_failed: 0,
+    started_at: startedAt,
+  }).select().single()
+
   // --- Clarity 連携設定を取得 ---
   let integQuery = supabase
     .from('service_integrations')
@@ -268,6 +277,18 @@ export async function POST(request: NextRequest) {
     okCount,
     errorCount,
   })
+
+  // batch_job_logs UPDATE
+  if (jobLog) {
+    const batchStatus = okCount > 0 && errorCount === 0 ? 'success' : okCount > 0 ? 'partial' : 'failed'
+    await supabase.from('batch_job_logs').update({
+      status: batchStatus,
+      records_processed: okCount,
+      records_failed: errorCount,
+      finished_at: finishedAt,
+      duration_ms: new Date(finishedAt).getTime() - new Date(startedAt).getTime(),
+    }).eq('id', jobLog.id)
+  }
 
   return NextResponse.json({
     success: okCount > 0,

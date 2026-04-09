@@ -54,8 +54,9 @@ export async function POST(request: Request) {
   try {
     const { data: accounts, error: accountsError } = await admin
       .from('ig_accounts')
-      .select('id, platform_account_id, api_base_url, api_version')
+      .select('id, platform_account_id, api_base_url, api_version, service_id')
       .eq('status', 'active')
+      .not('service_id', 'is', null)
 
     console.info('[insight-collector] accounts found', {
       count: accounts?.length ?? 0,
@@ -68,20 +69,38 @@ export async function POST(request: Request) {
         platform_account_id: account.platform_account_id,
       })
 
+      // service_id → project_id → client_id → client_ig_tokens
+      const { data: svcRow } = await admin
+        .from('services')
+        .select('project_id, projects!inner(client_id)')
+        .eq('id', account.service_id!)
+        .single()
+
+      const clientId = (svcRow?.projects as { client_id: string } | null)?.client_id
+
+      if (!clientId) {
+        console.warn('[insight-collector] skip account (cannot resolve client)', {
+          account_id: account.id,
+          service_id: account.service_id,
+        })
+        continue
+      }
+
       const { data: tokenRow, error: tokenError } = await admin
-        .from('ig_account_tokens')
+        .from('client_ig_tokens')
         .select('access_token_enc')
-        .eq('account_id', account.id)
+        .eq('client_id', clientId)
         .eq('is_active', true)
         .single()
       if (!tokenRow) {
-        console.warn('[insight-collector] skip account (no active token)', {
+        console.warn('[insight-collector] skip account (no active token for client)', {
           account_id: account.id,
+          client_id: clientId,
           token_error: tokenError?.message ?? null,
         })
         continue
       }
-      console.info('[insight-collector] token found', { account_id: account.id })
+      console.info('[insight-collector] token found', { account_id: account.id, client_id: clientId })
 
       const accessToken = decrypt(tokenRow.access_token_enc)
       const igClient = new InstagramClient(accessToken, account.platform_account_id, {

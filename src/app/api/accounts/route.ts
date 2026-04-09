@@ -3,7 +3,6 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
-import { encrypt } from '@/lib/utils/crypto'
 
 // GET /api/accounts — アカウント一覧取得
 export async function GET() {
@@ -13,7 +12,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from('ig_accounts')
-    .select('*, ig_account_tokens(is_active, expires_at, last_verified_at)')
+    .select('*')
     .order('display_order', { ascending: true })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -29,11 +28,11 @@ export async function POST(request: Request) {
   const body = await request.json()
   const {
     platform_account_id, username, account_name, account_type,
-    access_token, facebook_page_id,
+    facebook_page_id,
     api_base_url, api_version,
   } = body
 
-  if (!platform_account_id || !username || !access_token) {
+  if (!platform_account_id || !username) {
     return NextResponse.json({ error: '必須項目が不足しています' }, { status: 400 })
   }
 
@@ -60,23 +59,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'このアカウントはすでに登録されています' }, { status: 409 })
     }
     return NextResponse.json({ error: accountError.message }, { status: 500 })
-  }
-
-  // トークン登録（暗号化して保存）
-  const encryptedToken = encrypt(access_token)
-  const { error: tokenError } = await admin
-    .from('ig_account_tokens')
-    .insert({
-      account_id: account.id,
-      token_type: 'long_lived',
-      access_token_enc: encryptedToken,
-      is_active: true,
-    })
-
-  if (tokenError) {
-    // ロールバック
-    await admin.from('ig_accounts').delete().eq('id', account.id)
-    return NextResponse.json({ error: 'トークンの保存に失敗しました' }, { status: 500 })
   }
 
   // 戦略・KPI設定の初期化

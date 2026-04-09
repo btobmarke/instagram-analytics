@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
 // ------------------------------------------------------------
 async function runBatch(_request: NextRequest) {
   const admin = createSupabaseAdminClient()
+  const startedAt = new Date()
 
   // target_date = JST昨日 から GBP_DATE_OFFSET_DAYS 日前まで
   const offsetDays = Number(process.env.GBP_DATE_OFFSET_DAYS ?? '1')
@@ -56,6 +57,15 @@ async function runBatch(_request: NextRequest) {
   startDate.setDate(targetDate.getDate() - (days - 1))
 
   const targetDateStr = dateToString(targetDate)
+
+  // batch_job_logs INSERT
+  const { data: jobLog } = await admin.from('batch_job_logs').insert({
+    job_name: 'gbp_daily',
+    status: 'running',
+    records_processed: 0,
+    records_failed: 0,
+    started_at: startedAt.toISOString(),
+  }).select().single()
 
   // バッチ実行レコード INSERT
   const { data: batchRun, error: batchInsertErr } = await admin
@@ -71,6 +81,14 @@ async function runBatch(_request: NextRequest) {
 
   if (batchInsertErr || !batchRun) {
     console.error('[gbp-daily] batch_run insert error:', batchInsertErr)
+    if (jobLog) {
+      await admin.from('batch_job_logs').update({
+        status: 'failed',
+        error_message: 'batch_run insert failed',
+        finished_at: new Date().toISOString(),
+        duration_ms: Date.now() - startedAt.getTime(),
+      }).eq('id', jobLog.id)
+    }
     return NextResponse.json({ error: 'batch_run insert failed' }, { status: 500 })
   }
 
@@ -232,11 +250,31 @@ async function runBatch(_request: NextRequest) {
     const msg = fatalErr instanceof Error ? fatalErr.message : String(fatalErr)
     console.error('[gbp-daily] fatal error:', msg)
     await finalizeBatch(admin, batchRunId, 'failed', [{ clientId: 'all', error: msg }], processedSites)
+    if (jobLog) {
+      await admin.from('batch_job_logs').update({
+        status: 'failed',
+        records_processed: processedSites,
+        records_failed: 1,
+        error_message: msg,
+        finished_at: new Date().toISOString(),
+        duration_ms: Date.now() - startedAt.getTime(),
+      }).eq('id', jobLog.id)
+    }
     return NextResponse.json({ success: false, error: msg }, { status: 500 })
   }
 
   const status = errors.length === 0 ? 'success' : (processedSites > 0 ? 'partial' : 'failed')
   await finalizeBatch(admin, batchRunId, status, errors, processedSites)
+
+  if (jobLog) {
+    await admin.from('batch_job_logs').update({
+      status,
+      records_processed: processedSites,
+      records_failed: errors.length,
+      finished_at: new Date().toISOString(),
+      duration_ms: Date.now() - startedAt.getTime(),
+    }).eq('id', jobLog.id)
+  }
 
   return NextResponse.json({
     success: true,

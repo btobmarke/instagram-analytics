@@ -3,7 +3,6 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
-import { encrypt } from '@/lib/utils/crypto'
 
 // GET /api/accounts/[id]
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -49,24 +48,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-  const newToken = typeof body.access_token === 'string' ? body.access_token.trim() : ''
-  if (newToken.length > 0) {
-    const admin = createSupabaseAdminClient()
-    const enc = encrypt(newToken)
-    const { error: tokenErr } = await admin
-      .from('ig_account_tokens')
-      .update({
-        access_token_enc: enc,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('account_id', id)
-      .eq('is_active', true)
-
-    if (tokenErr) {
-      return NextResponse.json({ error: `アカウントは更新しましたがトークン更新に失敗: ${tokenErr.message}` }, { status: 500 })
-    }
-  }
 
   return NextResponse.json({ data })
 }

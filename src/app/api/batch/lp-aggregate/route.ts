@@ -47,6 +47,15 @@ export async function POST(request: NextRequest) {
   const startedAt = new Date().toISOString()
   const today = new Date().toISOString().slice(0, 10)
 
+  // batch_job_logs INSERT
+  const { data: jobLog } = await supabase.from('batch_job_logs').insert({
+    job_name: 'lp_aggregate',
+    status: 'running',
+    records_processed: 0,
+    records_failed: 0,
+    started_at: startedAt,
+  }).select().single()
+
   // アクティブな LP サービス一覧取得
   const { data: lpSites, error: siteError } = await supabase
     .from('lp_sites')
@@ -124,11 +133,24 @@ export async function POST(request: NextRequest) {
 
   const finishedAt = new Date().toISOString()
   const errorCount = results.filter(r => r.status === 'error').length
+  const okSites = lpSites?.length ?? 0
+
+  // batch_job_logs UPDATE
+  if (jobLog) {
+    const batchStatus = errorCount === 0 ? 'success' : okSites > 0 ? 'partial' : 'failed'
+    await supabase.from('batch_job_logs').update({
+      status: batchStatus,
+      records_processed: okSites,
+      records_failed: errorCount,
+      finished_at: finishedAt,
+      duration_ms: new Date(finishedAt).getTime() - new Date(startedAt).getTime(),
+    }).eq('id', jobLog.id)
+  }
 
   return NextResponse.json({
     success: true,
     data: {
-      processedSites: lpSites?.length ?? 0,
+      processedSites: okSites,
       totalTasks: results.length,
       errorCount,
       startedAt,

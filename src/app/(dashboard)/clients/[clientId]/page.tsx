@@ -171,6 +171,9 @@ export default function ClientDetailPage({ params }: { params: Promise<{ clientI
             </div>
           )}
 
+          {/* Instagram アクセストークン設定 */}
+          <InstagramTokenSection clientId={clientId} />
+
           {/* GBP 連携設定 */}
           <GbpCredentialSection clientId={clientId} />
 
@@ -271,6 +274,163 @@ function CreateProjectModal({
           </div>
         </form>
       </div>
+    </div>
+  )
+}
+
+// --------------------------------------------------------------------------
+// Instagram アクセストークン設定セクション
+// --------------------------------------------------------------------------
+interface IgTokenInfo {
+  id: string
+  client_id: string
+  token_type: string
+  expires_at: string | null
+  is_active: boolean
+  last_verified_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+function InstagramTokenSection({ clientId }: { clientId: string }) {
+  const { data: tokenData, mutate: mutateToken } = useSWR<{ success: boolean; data: IgTokenInfo | null }>(
+    `/api/clients/${clientId}/instagram/token`, fetcher
+  )
+  const token = tokenData?.data
+
+  const [showForm, setShowForm] = useState(false)
+  const [accessToken, setAccessToken] = useState('')
+  const [expiresAt, setExpiresAt] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!accessToken.trim()) { setError('アクセストークンを入力してください'); return }
+    setSaving(true)
+    setError('')
+    const res = await fetch(`/api/clients/${clientId}/instagram/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        access_token: accessToken.trim(),
+        expires_at: expiresAt.trim() || null,
+      }),
+    })
+    const json = await res.json()
+    if (!json.success) { setError(json.error ?? '保存に失敗しました'); setSaving(false); return }
+    setShowForm(false)
+    setAccessToken('')
+    setExpiresAt('')
+    setSaving(false)
+    mutateToken()
+  }
+
+  const handleDelete = async () => {
+    if (!confirm('Instagram アクセストークンを削除しますか？')) return
+    await fetch(`/api/clients/${clientId}/instagram/token`, { method: 'DELETE' })
+    mutateToken()
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-100 to-pink-100 flex items-center justify-center text-lg">📷</div>
+          <h2 className="font-bold text-gray-900">Instagram アクセストークン</h2>
+        </div>
+        {token && (
+          <button onClick={handleDelete} className="text-xs text-gray-400 hover:text-red-500 transition">
+            削除
+          </button>
+        )}
+      </div>
+
+      {/* 未登録状態 */}
+      {!token && !showForm && (
+        <div className="text-center py-4">
+          <p className="text-sm text-gray-500 mb-3">
+            このクライアント配下のすべての Instagram サービスで使用するアクセストークンを登録してください
+          </p>
+          <button
+            onClick={() => setShowForm(true)}
+            className="px-4 py-2 text-sm font-medium text-purple-700 border border-purple-300 rounded-lg hover:bg-purple-50 transition"
+          >
+            トークンを登録
+          </button>
+        </div>
+      )}
+
+      {/* 登録済み状態 */}
+      {token && !showForm && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
+            <div className="flex items-center gap-3">
+              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${token.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                {token.is_active ? '有効' : '無効'}
+              </span>
+              <div>
+                <p className="text-xs text-gray-500">
+                  種別: {token.token_type === 'long_lived' ? '長期トークン' : '短期トークン'}
+                </p>
+                <p className="text-xs text-gray-400">
+                  登録: {new Date(token.created_at).toLocaleDateString('ja-JP')}
+                  {token.expires_at && (
+                    <> / 有効期限: {new Date(token.expires_at).toLocaleDateString('ja-JP')}</>
+                  )}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowForm(true)}
+              className="text-xs text-gray-400 hover:text-purple-600 transition"
+            >
+              更新
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 登録フォーム */}
+      {showForm && (
+        <form onSubmit={handleSave} className="space-y-4 mt-2">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              アクセストークン <span className="text-red-500">*</span>
+            </label>
+            <p className="text-xs text-gray-400 mb-1">
+              Instagram Graph API の長期アクセストークン（EAAで始まる文字列）
+            </p>
+            <textarea
+              rows={3}
+              value={accessToken}
+              onChange={e => setAccessToken(e.target.value)}
+              placeholder="EAAxxxxxxxxxx..."
+              className="w-full px-3 py-2 text-xs font-mono border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300 resize-none"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">有効期限（任意）</label>
+            <input
+              type="date"
+              value={expiresAt}
+              onChange={e => setExpiresAt(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
+            />
+          </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <div className="flex gap-2">
+            <button type="button" onClick={() => { setShowForm(false); setError('') }}
+              className="px-4 py-2 text-sm text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">
+              キャンセル
+            </button>
+            <button type="submit" disabled={saving}
+              className="px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-60 transition">
+              {saving ? '保存中...' : '保存'}
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   )
 }

@@ -95,7 +95,6 @@ export function AddAccountModal({
     username: '',
     account_name: '',
     account_type: 'BUSINESS',
-    access_token: '',
     facebook_page_id: '',
     api_base_url: 'https://graph.facebook.com',
     api_version: 'v22.0',
@@ -308,11 +307,6 @@ export function AddAccountModal({
                   </select>
                 </Field>
               </div>
-              <Field label="アクセストークン *" hint="Instagram Graph API の長期トークン">
-                <textarea required rows={3} value={form.access_token}
-                  onChange={e => setForm(f => ({ ...f, access_token: e.target.value }))}
-                  placeholder="EAAxxxxxxxxxx..." className="input w-full resize-none" />
-              </Field>
               <Field label="Facebook ページ ID" hint="任意。ページ連携時のみ">
                 <input type="text" value={form.facebook_page_id}
                   onChange={e => setForm(f => ({ ...f, facebook_page_id: e.target.value }))}
@@ -362,7 +356,6 @@ export function EditAccountModal({
     api_base_url: account.api_base_url ?? 'https://graph.facebook.com',
     api_version: account.api_version ?? 'v22.0',
     status: account.status,
-    access_token: '',
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -383,7 +376,6 @@ export function EditAccountModal({
       api_version: form.api_version,
       status: form.status,
     }
-    if (form.access_token.trim()) body.access_token = form.access_token.trim()
     const res = await fetch(`/api/accounts/${account.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -470,11 +462,6 @@ export function EditAccountModal({
               <input type="text" value={form.facebook_page_id}
                 onChange={e => setForm(f => ({ ...f, facebook_page_id: e.target.value }))}
                 className="input w-full" />
-            </Field>
-            <Field label="アクセストークン" hint="変更する場合のみ入力。空欄なら現在のトークンを維持します。">
-              <textarea rows={3} value={form.access_token}
-                onChange={e => setForm(f => ({ ...f, access_token: e.target.value }))}
-                placeholder="変更する場合のみ入力" className="input w-full resize-none" />
             </Field>
             {error && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>
