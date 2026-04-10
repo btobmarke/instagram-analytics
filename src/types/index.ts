@@ -441,6 +441,20 @@ export interface RankingSummary {
   created_at: string
 }
 
+export interface AiServiceAnalysisResult {
+  id: string
+  service_id: string
+  service_type: string | null
+  analysis_type: string
+  analysis_result: string
+  model_used: string | null
+  tokens_used: number | null
+  target_period_start: string | null
+  target_period_end: string | null
+  triggered_by: 'user' | 'batch_weekly' | 'batch_monthly'
+  created_at: string
+}
+
 // ==============================
 // Phase 2: API レスポンス型
 // ==============================

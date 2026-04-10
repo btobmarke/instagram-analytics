@@ -17,7 +17,7 @@ interface BatchSchedule {
 // -----------------------------------------------------------------------
 // バッチメタ情報（カテゴリ・説明・頻度）
 // -----------------------------------------------------------------------
-type Category = 'Instagram' | 'LP / MA' | 'GA4' | 'Clarity' | 'GBP' | 'LINE OAM' | 'システム'
+type Category = 'Instagram' | 'LP / MA' | 'GA4' | 'Clarity' | 'GBP' | 'LINE OAM' | 'Google 広告' | 'システム'
 
 interface JobMeta {
   label: string
@@ -33,6 +33,7 @@ const CATEGORY_STYLE: Record<Category, { bg: string; text: string; dot: string }
   Clarity:   { bg: 'bg-blue-100',   text: 'text-blue-700',   dot: 'bg-blue-400' },
   GBP:       { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-400' },
   'LINE OAM': { bg: 'bg-green-100',  text: 'text-green-700',  dot: 'bg-green-400' },
+  'Google 広告': { bg: 'bg-sky-100', text: 'text-sky-800', dot: 'bg-sky-500' },
   システム:  { bg: 'bg-gray-100',   text: 'text-gray-600',   dot: 'bg-gray-400' },
 }
 
@@ -109,6 +110,12 @@ const JOB_META: Record<string, JobMeta> = {
     category: 'LINE OAM',
     frequency: '毎日',
   },
+  google_ads_daily: {
+    label: 'Google 広告 日次収集',
+    description: 'Google Ads API からキャンペーン・広告グループ・キーワード（ON時）の日次指標を取得',
+    category: 'Google 広告',
+    frequency: '毎日',
+  },
 }
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; label: string; dot: string }> = {
@@ -127,6 +134,7 @@ const BATCH_ENDPOINTS: Record<string, string> = {
   clarity_collector:              '/api/batch/clarity-collector',
   gbp_daily:                      '/api/batch/gbp-daily',
   line_oam_daily:                 '/api/batch/line-oam-daily',
+  google_ads_daily:               '/api/batch/google-ads-daily',
 }
 
 const BATCH_GROUPS: { category: Category; jobs: string[] }[] = [
@@ -136,6 +144,7 @@ const BATCH_GROUPS: { category: Category; jobs: string[] }[] = [
   { category: 'Clarity',   jobs: ['clarity_collector'] },
   { category: 'GBP',       jobs: ['gbp_daily'] },
   { category: 'LINE OAM', jobs: ['line_oam_daily'] },
+  { category: 'Google 広告', jobs: ['google_ads_daily'] },
 ]
 
 // -----------------------------------------------------------------------
@@ -277,6 +286,13 @@ export default function BatchPage() {
         json.last_error ? `最後のエラー: ${json.last_error}` : null,
         json.status != null ? `ステータス: ${json.status}` : null,
       ].filter(Boolean)
+      const errList = (json as { errors?: Array<{ serviceId?: string; error?: string }> }).errors
+      if (Array.isArray(errList) && errList.length > 0) {
+        lines.push('【一部失敗】')
+        for (const e of errList) {
+          lines.push(`${e.serviceId ?? '?'}: ${e.error ?? ''}`)
+        }
+      }
       alert(lines.join('\n'))
     } finally {
       await fetchData()
@@ -284,7 +300,7 @@ export default function BatchPage() {
     }
   }
 
-  const LOG_CATEGORIES: (Category | 'すべて')[] = ['すべて', 'Instagram', 'LP / MA', 'GA4', 'Clarity', 'GBP', 'LINE OAM', 'システム']
+  const LOG_CATEGORIES: (Category | 'すべて')[] = ['すべて', 'Instagram', 'LP / MA', 'GA4', 'Clarity', 'GBP', 'LINE OAM', 'Google 広告', 'システム']
   const filteredLogs = logFilter === 'すべて'
     ? logs
     : logs.filter(l => JOB_META[l.job_name]?.category === logFilter)

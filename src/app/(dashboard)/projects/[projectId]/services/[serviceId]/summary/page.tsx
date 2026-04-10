@@ -14,8 +14,44 @@ const SERVICE_THEME: Record<string, { accent: string; bg: string; border: string
   gbp:       { accent: 'text-teal-600',   bg: 'bg-teal-50',   border: 'border-teal-200',   badge: 'bg-teal-100 text-teal-700' },
   line:      { accent: 'text-green-600',  bg: 'bg-green-50',  border: 'border-green-200',  badge: 'bg-green-100 text-green-700' },
   lp:        { accent: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-200', badge: 'bg-purple-100 text-purple-700' },
+  google_ads:{ accent: 'text-blue-600',   bg: 'bg-blue-50',   border: 'border-blue-200',   badge: 'bg-blue-100 text-blue-700' },
 }
-const SERVICE_LABEL: Record<string, string> = { instagram: 'Instagram', gbp: 'GBP', line: 'LINE OAM', lp: 'LP' }
+const SERVICE_LABEL: Record<string, string> = { instagram: 'Instagram', gbp: 'GBP', line: 'LINE OAM', lp: 'LP', google_ads: 'Google 広告' }
+
+/** サマリーページ上部タブの実ルート（従来の …/dashboard 一律は google_ads / instagram で 404 になる） */
+function summaryDashboardHref(projectId: string, serviceId: string, serviceType: string): string {
+  const b = `/projects/${projectId}/services/${serviceId}`
+  switch (serviceType) {
+    case 'lp':
+      return `${b}/lp`
+    case 'instagram':
+      return `${b}/instagram/analytics`
+    case 'google_ads':
+      return `${b}/google-ads/analytics`
+    case 'gbp':
+      return `${b}/gbp/dashboard`
+    case 'line':
+      return `${b}/line/dashboard`
+    default:
+      return `${b}/${serviceType}`
+  }
+}
+
+function summarySettingsHref(projectId: string, serviceId: string, serviceType: string): string {
+  const b = `/projects/${projectId}/services/${serviceId}`
+  switch (serviceType) {
+    case 'instagram':
+      return `${b}/instagram`
+    case 'google_ads':
+      return `${b}/google-ads/settings`
+    case 'gbp':
+      return `${b}/gbp`
+    case 'line':
+      return `${b}/line`
+    default:
+      return `${b}/${serviceType}`
+  }
+}
 
 export default function SummaryTemplatePage({
   params,
@@ -69,12 +105,17 @@ export default function SummaryTemplatePage({
   }
 
   // サービス種別ごとのタブリンク
-  const serviceBase = serviceType ? `/projects/${projectId}/services/${serviceId}/${serviceType}` : null
+  const serviceBase = serviceType
+    ? serviceType === 'google_ads'
+      ? `/projects/${projectId}/services/${serviceId}/google-ads`
+      : `/projects/${projectId}/services/${serviceId}/${serviceType}`
+    : null
   const activeColor = {
     instagram: 'text-pink-600 border-pink-600',
     gbp:       'text-teal-600 border-teal-600',
     line:      'text-green-600 border-green-600',
     lp:        'text-purple-600 border-purple-600',
+    google_ads:'text-blue-600 border-blue-600',
   }[serviceType] ?? 'text-purple-600 border-purple-600'
 
   return (
@@ -92,14 +133,14 @@ export default function SummaryTemplatePage({
       {serviceBase && (
         <div className="flex items-center gap-1 mb-6 border-b border-gray-200">
           <Link
-            href={serviceType === 'lp' ? serviceBase : `${serviceBase}/dashboard`}
+            href={summaryDashboardHref(projectId, serviceId, serviceType)}
             className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px"
           >
             ダッシュボード
           </Link>
           {serviceType !== 'lp' && (
             <Link
-              href={serviceBase}
+              href={summarySettingsHref(projectId, serviceId, serviceType)}
               className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px"
             >
               設定

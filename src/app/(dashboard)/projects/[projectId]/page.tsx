@@ -30,6 +30,8 @@ function getServiceHref(projectId: string, serviceId: string, serviceType: strin
       return `/projects/${projectId}/services/${serviceId}/gbp/dashboard`
     case 'line':
       return `/projects/${projectId}/services/${serviceId}/line/dashboard`
+    case 'google_ads':
+      return `/projects/${projectId}/services/${serviceId}/google-ads/analytics`
     default:
       return `/projects/${projectId}/services/${serviceId}`
   }
