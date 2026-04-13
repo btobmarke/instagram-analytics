@@ -285,7 +285,6 @@ export default function TemplateEditorPage({
   const [timeUnit, setTimeUnit] = useState<TimeUnit>('day')
   const [rangeStart, setRangeStart] = useState('')
   const [rangeEnd, setRangeEnd] = useState('')
-  const [customCards, setCustomCards] = useState<MetricCard[]>([])
   const [isDirty, setIsDirty] = useState(false)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
 
@@ -297,12 +296,28 @@ export default function TemplateEditorPage({
       setTimeUnit(tmpl.timeUnit)
       setRangeStart(tmpl.rangeStart?.slice(0, 10) ?? '')
       setRangeEnd(tmpl.rangeEnd?.slice(0, 10) ?? '')
-      setCustomCards(tmpl.customCards)
       // rows を復元（セルは空状態）
       const headers = generateTimeHeaders(tmpl.timeUnit, 8, tmpl.rangeStart, tmpl.rangeEnd)
       setRows(tmpl.rows.map(r => ({ id: r.id, label: r.label, cells: Object.fromEntries(headers.map(h => [h, ''])) })))
     })
   }, [templateId, projectId, serviceId, router])
+
+  // ── カスタム指標ライブラリ（サービス単位） ────────────────────
+  interface LibraryMetric { id: string; service_id: string; name: string; formula: MetricCard['formula'] }
+  const { data: libraryResp, mutate: mutateLibrary } = useSWR<{ success: boolean; data: LibraryMetric[] }>(
+    serviceId ? `/api/services/${serviceId}/custom-metrics` : null,
+    fetcher,
+  )
+  const customCards: MetricCard[] = useMemo(
+    () => (libraryResp?.data ?? []).map(m => ({
+      id:       m.id,
+      label:    m.name,
+      category: 'カスタム指標',
+      fieldRef: m.id,
+      formula:  m.formula as MetricCard['formula'],
+    })),
+    [libraryResp],
+  )
 
   // 保存
   const handleSave = useCallback(async () => {
@@ -313,22 +328,20 @@ export default function TemplateEditorPage({
       }
     }
     setSaveState('saving')
-    const storedRows = rows.map(r => {
-      const custom = customCards.find(c => c.id === r.id)
-      return { id: r.id, label: r.label, formula: custom?.formula }
-    })
+    // カスタム指標はライブラリで管理するため formula を rows に埋め込まない
+    const storedRows = rows.map(r => ({ id: r.id, label: r.label }))
     await updateTemplate(templateId, serviceId, {
       name: templateName,
       timeUnit,
       rangeStart: timeUnit === 'custom_range' ? rangeStart : null,
       rangeEnd: timeUnit === 'custom_range' ? rangeEnd : null,
       rows: storedRows,
-      customCards,
+      customCards: [],  // ライブラリ移行後は空配列
     })
     setIsDirty(false)
     setSaveState('saved')
     setTimeout(() => setSaveState('idle'), 2000)
-  }, [templateId, serviceId, templateName, timeUnit, rangeStart, rangeEnd, rows, customCards])
+  }, [templateId, serviceId, templateName, timeUnit, rangeStart, rangeEnd, rows])
 
   // フィルタ・タブ・アコーディオン
   const [searchQuery, setSearchQuery] = useState('')
@@ -397,17 +410,44 @@ export default function TemplateEditorPage({
     setIsDirty(true)
   }
 
-  const handleSaveCustomCard = useCallback((card: MetricCard) => {
-    setCustomCards(prev => { const idx = prev.findIndex(c => c.id === card.id); if (idx >= 0) { const n=[...prev]; n[idx]=card; return n } return [...prev, card] })
-    setRows(prev => prev.map(r => r.id === card.id ? { ...r, label: card.label } : r))
+  const handleSaveCustomCard = useCallback(async (card: MetricCard) => {
+    if (!card.formula) return
+    const isExisting = customCards.some(c => c.id === card.id)
+    if (isExisting) {
+      // 既存指標を更新
+      await fetch(`/api/services/${serviceId}/custom-metrics/${card.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: card.label, formula: card.formula }),
+      })
+      // テーブル内の行ラベルも同期
+      setRows(prev => prev.map(r => r.id === card.id ? { ...r, label: card.label } : r))
+    } else {
+      // 新規作成
+      const res = await fetch(`/api/services/${serviceId}/custom-metrics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: card.label, formula: card.formula }),
+      })
+      const json = await res.json()
+      if (json.success) {
+        // 新しい DB ID でテーブルに追加（ドラッグして追加する前に確認ができるよう行には追加しない）
+        const newId = json.data.id
+        // もし元の card.id（仮 ID）がすでにテーブルの行にあれば ID を差し替え
+        setRows(prev => prev.map(r => r.id === card.id ? { ...r, id: newId, label: card.label } : r))
+      }
+    }
+    await mutateLibrary()
     setIsDirty(true)
     setShowFormulaModal(false); setEditingCustomCard(null)
-  }, [])
-  const handleDeleteCustomCard = useCallback((id: string) => {
-    setCustomCards(prev => prev.filter(c => c.id !== id))
+  }, [serviceId, customCards, mutateLibrary])
+
+  const handleDeleteCustomCard = useCallback(async (id: string) => {
+    await fetch(`/api/services/${serviceId}/custom-metrics/${id}`, { method: 'DELETE' })
+    await mutateLibrary()
     setRows(prev => prev.filter(r => r.id !== id))
     setIsDirty(true)
-  }, [])
+  }, [serviceId, mutateLibrary])
 
   const themeColor: Record<string, { bg: string; border: string }> = {
     instagram: { bg: 'bg-pink-50',   border: 'border-pink-200' },

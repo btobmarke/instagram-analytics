@@ -297,11 +297,29 @@ export default function SummaryViewPage({
     })
   }, [templateId, projectId, serviceId, router])
 
+  // ── カスタム指標ライブラリ ─────────────────────────────────────
+  interface LibraryMetric { id: string; name: string; formula: FormulaNode }
+  const { data: libraryResp } = useSWR<{ success: boolean; data: LibraryMetric[] }>(
+    serviceId ? `/api/services/${serviceId}/custom-metrics` : null,
+    fetcher,
+  )
+  const libraryCards: MetricCard[] = useMemo(
+    () => (libraryResp?.data ?? []).map(m => ({
+      id:       m.id,
+      label:    m.name,
+      category: 'カスタム指標',
+      fieldRef: m.id,
+      formula:  m.formula,
+    })),
+    [libraryResp],
+  )
+
   // フォームの全フィールドRef を収集（カスタム指標のオペランドも含む）
   const allFieldRefs = useMemo(() => {
     if (!template) return []
     const catalog = getMetricCatalog(serviceType)
-    const allCards = [...catalog, ...template.customCards]
+    // ライブラリ優先、旧 customCards をフォールバック
+    const allCards = [...catalog, ...libraryCards, ...(template.customCards ?? [])]
     const refs = new Set<string>()
     const addFormulaRefs = (f: FormulaNode | undefined) => {
       if (!f) return
@@ -323,7 +341,7 @@ export default function SummaryViewPage({
       }
     }
     return [...refs].filter(isSummaryDataFieldRef)
-  }, [template, serviceType])
+  }, [template, serviceType, libraryCards])
 
   // 集計データ取得
   const dataUrl = useMemo(() => {
@@ -361,7 +379,8 @@ export default function SummaryViewPage({
   if (!template) return <div className="p-8 text-center text-gray-400 text-sm">読み込み中...</div>
 
   const catalog = getMetricCatalog(serviceType)
-  const allCards = [...catalog, ...template.customCards]
+  // ライブラリ優先、旧 customCards をフォールバック
+  const allCards = [...catalog, ...libraryCards, ...(template.customCards ?? [])]
 
   // 現在infoが開いている行のデータを取得
   const infoRow =
@@ -396,7 +415,7 @@ export default function SummaryViewPage({
           <p className="text-xs text-gray-500">
             横軸: {axisDescription}
             {' · '}{template.rows.length}項目
-            {template.customCards.length > 0 && ` · カスタム指標${template.customCards.length}件`}
+            {libraryCards.length > 0 && ` · カスタム指標${libraryCards.length}件`}
             {' · '}最終更新: {new Date(template.updatedAt).toLocaleDateString('ja-JP')}
           </p>
         </div>

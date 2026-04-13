@@ -124,6 +124,7 @@ function PostsContent() {
       ) : (
         <>
           <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
@@ -206,6 +207,7 @@ function PostsContent() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
 
           {totalPages > 1 && (

@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import type { IgMedia, AiAnalysisResult } from '@/types'
 import { MarkdownRenderer, BlinkingCursor } from '@/components/ai/MarkdownRenderer'
+import { PostMediaSlider } from '@/components/posts/PostMediaSlider'
 
 interface PostDetailData {
   post: IgMedia
@@ -96,8 +97,10 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
   const saveRate = latest_insights.reach && latest_insights.reach > 0 && latest_insights.saved != null
     ? ((latest_insights.saved / latest_insights.reach) * 100).toFixed(2) : null
 
+  const children = post.children_json as Array<{ media_url?: string; thumbnail_url?: string }> | null
+
   return (
-    <div className="max-w-6xl mx-auto">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-sm text-gray-500 mb-6">
         <Link href={`/posts?account=${accountId}`} className="hover:text-purple-600">投稿一覧</Link>
@@ -105,28 +108,19 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
         <span className="text-gray-900 font-medium">投稿詳細</span>
       </nav>
 
-      <div className="grid grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Left Column: Post Info */}
-        <div className="col-span-1 space-y-4">
-          {/* Thumbnail */}
+        <div className="md:col-span-1 space-y-4">
+          {/* Thumbnail / Carousel */}
           <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-            <div className="aspect-square bg-gray-100 overflow-hidden">
-              {(post.thumbnail_url || post.media_url) ? (
-                <img
-                  src={post.thumbnail_url ?? post.media_url ?? ''}
-                  alt=""
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <svg className="w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
-                </div>
-              )}
+            <div className="p-3">
+              <PostMediaSlider
+                mediaUrl={post.media_url}
+                thumbnailUrl={post.thumbnail_url}
+                children={children}
+              />
             </div>
-            <div className="p-4">
+            <div className="px-4 pb-4">
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-purple-100 text-purple-700">
                   {post.media_product_type ?? post.media_type}
@@ -173,7 +167,7 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
         </div>
 
         {/* Right Column: Chart + AI */}
-        <div className="col-span-2 space-y-4">
+        <div className="md:col-span-2 space-y-4">
           {/* Time Series Chart */}
           <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
             <div className="flex items-center justify-between mb-4">

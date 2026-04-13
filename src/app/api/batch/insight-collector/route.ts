@@ -273,6 +273,40 @@ export async function POST(request: Request) {
           await new Promise(resolve => setTimeout(resolve, 200))
         }
 
+        // --- (C) follower_count: Insights API では取得不可のためプロフィールエンドポイントから取得 ---
+        try {
+          const { data: profileData } = await igClient.getProfileCounts()
+          const pd = profileData as Record<string, unknown>
+          const followerCount = typeof pd.followers_count === 'number' ? pd.followers_count : null
+          if (followerCount !== null) {
+            const today = new Date().toISOString().slice(0, 10)
+            const { error: upsertErr } = await admin.from('ig_account_insight_fact').upsert({
+              account_id: account.id,
+              metric_code: 'follower_count',
+              dimension_code: '',
+              dimension_value: '',
+              period_code: 'day',
+              value_date: today,
+              value: followerCount,
+              fetched_at: new Date().toISOString(),
+            }, { onConflict: 'account_id,metric_code,period_code,value_date,dimension_code,dimension_value' })
+            if (upsertErr) {
+              console.error('[insight-collector] follower_count upsert failed', {
+                account_id: account.id, error: upsertErr.message,
+              })
+            } else {
+              acctUpsertCount++
+              console.info('[insight-collector] follower_count upserted', {
+                account_id: account.id, value: followerCount, date: today,
+              })
+            }
+          }
+        } catch (fcErr) {
+          console.warn('[insight-collector] follower_count fetch failed (non-fatal)', {
+            account_id: account.id, error: fcErr instanceof Error ? fcErr.message : String(fcErr),
+          })
+        }
+
         acctInsightTotal += acctUpsertCount
         console.info('[insight-collector] account insights upserted', {
           account_id: account.id,

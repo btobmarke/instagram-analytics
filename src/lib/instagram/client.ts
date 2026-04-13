@@ -121,6 +121,16 @@ export class InstagramClient {
   }
 
   /**
+   * バッチ用: 現在のフォロワー数などプロフィールカウントを取得。
+   * accountId（IG User ID）は this.accountId から解決するため igUserId 引数不要。
+   * `followers_count` は Insights API では取得できないため、このエンドポイントを使う。
+   */
+  async getProfileCounts() {
+    const fields = 'followers_count,follows_count,media_count'
+    return this.fetch(`/${this.accountId}`, { fields }, this.igUserNodeBase(), 'getProfileCounts')
+  }
+
+  /**
    * 表示名は counts とは別に取得。PBIA 等では profile_picture_url がノードに無いことがあるため含めない。
    */
   private async getProfileDisplayFields(igUserId: string) {

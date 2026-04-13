@@ -1,12 +1,195 @@
 'use client'
 
-import { useState, use } from 'react'
+import { useState, use, useEffect } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import { ServiceRegisterModal } from '@/components/services/ServiceRegisterModal'
 import type { ProjectDetail } from '@/types'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
+
+// ── 位置情報設定モーダル ──────────────────────────────────────────────────────
+
+interface LocationData {
+  latitude:      number | null
+  longitude:     number | null
+  location_name: string | null
+}
+
+function LocationSettingModal({
+  projectId,
+  current,
+  onClose,
+  onSaved,
+}: {
+  projectId: string
+  current: LocationData | null
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [latitude,  setLatitude]  = useState(current?.latitude  != null ? String(current.latitude)  : '')
+  const [longitude, setLongitude] = useState(current?.longitude != null ? String(current.longitude) : '')
+  const [locName,   setLocName]   = useState(current?.location_name ?? '')
+  const [saving,    setSaving]    = useState(false)
+  const [error,     setError]     = useState<string | null>(null)
+
+  // 主要都市のプリセット
+  const PRESETS = [
+    { label: '東京',  lat: '35.6895', lng: '139.6917' },
+    { label: '大阪',  lat: '34.6937', lng: '135.5022' },
+    { label: '名古屋', lat: '35.1815', lng: '136.9066' },
+    { label: '福岡',  lat: '33.5904', lng: '130.4017' },
+    { label: '札幌',  lat: '43.0618', lng: '141.3545' },
+    { label: '仙台',  lat: '38.2688', lng: '140.8721' },
+  ]
+
+  const handleSave = async () => {
+    if (!latitude || !longitude) {
+      setError('緯度・経度は必須です')
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/projects/${projectId}/location`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          latitude:      parseFloat(latitude),
+          longitude:     parseFloat(longitude),
+          location_name: locName.trim() || null,
+        }),
+      })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error?.message ?? '保存に失敗しました')
+      onSaved()
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '保存に失敗しました')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!confirm('位置情報を削除しますか？天気データの取得が停止されます。')) return
+    setSaving(true)
+    try {
+      await fetch(`/api/projects/${projectId}/location`, { method: 'DELETE' })
+      onSaved()
+      onClose()
+    } catch {
+      setError('削除に失敗しました')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+        <div className="flex items-center justify-between p-5 border-b border-gray-100">
+          <h3 className="text-base font-semibold text-gray-900">
+            📍 位置情報の設定
+          </h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          <p className="text-xs text-gray-500">
+            横断サマリーのデータ表に天気情報を表示するために使用します。<br />
+            天気データは Open-Meteo（非商用向け）から取得されます。
+          </p>
+
+          {/* プリセット */}
+          <div>
+            <p className="text-xs font-medium text-gray-600 mb-2">主要都市から選ぶ</p>
+            <div className="flex flex-wrap gap-2">
+              {PRESETS.map(p => (
+                <button
+                  key={p.label}
+                  onClick={() => { setLatitude(p.lat); setLongitude(p.lng); setLocName(p.label) }}
+                  className="px-3 py-1 text-xs border border-gray-200 rounded-full hover:bg-purple-50 hover:border-purple-300 hover:text-purple-700 transition-colors"
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 手動入力 */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">緯度 <span className="text-red-500">*</span></label>
+              <input
+                type="number"
+                step="0.0001"
+                value={latitude}
+                onChange={e => setLatitude(e.target.value)}
+                placeholder="35.6895"
+                className="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">経度 <span className="text-red-500">*</span></label>
+              <input
+                type="number"
+                step="0.0001"
+                value={longitude}
+                onChange={e => setLongitude(e.target.value)}
+                placeholder="139.6917"
+                className="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">場所の名称（任意）</label>
+            <input
+              type="text"
+              value={locName}
+              onChange={e => setLocName(e.target.value)}
+              placeholder="例: 東京都渋谷区"
+              className="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
+            />
+          </div>
+
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+
+        <div className="p-4 border-t border-gray-100 flex items-center justify-between gap-2">
+          {current?.latitude != null ? (
+            <button
+              onClick={handleDelete}
+              disabled={saving}
+              className="px-3 py-2 text-xs text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+            >
+              位置情報を削除
+            </button>
+          ) : (
+            <div />
+          )}
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+              キャンセル
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving || !latitude || !longitude}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50 transition-colors"
+            >
+              {saving ? '保存中...' : '保存'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 const SERVICE_TYPE_LABELS: Record<string, { label: string; icon: string; color: string }> = {
   instagram: { label: 'Instagram', icon: '📸', color: 'bg-pink-50 text-pink-700 border-pink-200' },
@@ -42,15 +225,31 @@ function getServiceHref(projectId: string, serviceId: string, serviceType: strin
 
 export default function ProjectDetailPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = use(params)
-  const [showServiceModal, setShowServiceModal] = useState(false)
-  const [newApiKey, setNewApiKey] = useState<string | null>(null)
+  const searchParams  = useSearchParams()
+  const [showServiceModal,  setShowServiceModal]  = useState(false)
+  const [showLocationModal, setShowLocationModal] = useState(false)
+  const [newApiKey,         setNewApiKey]         = useState<string | null>(null)
   const [deletingServiceId, setDeletingServiceId] = useState<string | null>(null)
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [deleteConfirmId,   setDeleteConfirmId]   = useState<string | null>(null)
 
   const { data, error, isLoading, mutate } = useSWR<{ success: boolean; data: ProjectDetail }>(
     `/api/projects/${projectId}`,
     fetcher
   )
+
+  // 位置情報
+  const { data: locationResp, mutate: mutateLocation } = useSWR<{
+    success: boolean
+    data: LocationData
+  }>(`/api/projects/${projectId}/location`, fetcher)
+  const locationData = locationResp?.success ? locationResp.data : null
+
+  // ?settings=location でページに来たときにモーダルを開く
+  useEffect(() => {
+    if (searchParams.get('settings') === 'location') {
+      setShowLocationModal(true)
+    }
+  }, [searchParams])
 
   const project = data?.data
 
@@ -127,6 +326,26 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ projec
               </Link>
             </div>
           </div>
+          {/* 位置情報バッジ */}
+          <button
+            onClick={() => setShowLocationModal(true)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+              locationData?.latitude != null
+                ? 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100'
+                : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100 hover:text-gray-600'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            {locationData?.latitude != null
+              ? (locationData.location_name ?? `${locationData.latitude}, ${locationData.longitude}`)
+              : '位置情報を設定'
+            }
+          </button>
         </div>
         {project.note && (
           <p className="text-sm text-gray-600 mt-4 bg-gray-50 rounded-lg px-4 py-3">{project.note}</p>
@@ -165,6 +384,30 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ projec
             </button>
           </div>
         </div>
+      )}
+
+      {/* Unified Summary Link */}
+      {project.services.length > 0 && (
+        <Link
+          href={`/projects/${projectId}/unified-summary`}
+          className="flex items-center justify-between p-4 mb-5 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-xl hover:shadow-md hover:border-purple-300 transition-all group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-white shadow-sm flex items-center justify-center flex-shrink-0">
+              <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-purple-800 group-hover:text-purple-900">横断サマリーを見る</p>
+              <p className="text-xs text-purple-500 mt-0.5">全 {project.services.length} サービスのデータを一覧で確認</p>
+            </div>
+          </div>
+          <svg className="w-4 h-4 text-purple-400 group-hover:text-purple-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </Link>
       )}
 
       {/* Services Section */}
@@ -331,6 +574,16 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ projec
           projectId={projectId}
           onClose={() => setShowServiceModal(false)}
           onCreated={handleServiceCreated}
+        />
+      )}
+
+      {/* Location Setting Modal */}
+      {showLocationModal && (
+        <LocationSettingModal
+          projectId={projectId}
+          current={locationData ?? null}
+          onClose={() => setShowLocationModal(false)}
+          onSaved={() => mutateLocation()}
         />
       )}
     </div>
