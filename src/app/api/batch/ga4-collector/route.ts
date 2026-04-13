@@ -397,3 +397,8 @@ export async function POST(request: NextRequest) {
     },
   })
 }
+
+// Vercel Cron は GET で呼び出す
+export async function GET(request: NextRequest) {
+  return POST(request)
+}

@@ -5,8 +5,9 @@
  *
  * Query params:
  *   fields    カンマ区切り "table.field" リスト (例: ig_account_insight_fact.reach,gbp_performance_daily.call_clicks)
- *   timeUnit  day | week | month | hour (default: day)
- *   count     期間数 (default: 8)
+ *   timeUnit  day | week | month | hour | custom_range (default: day)
+ *   count     期間数 (default: 8) ※ custom_range では無視
+ *   rangeStart / rangeEnd  YYYY-MM-DD（timeUnit=custom_range のとき必須）
  *
  * Response:
  *   { success: true, data: { [fieldRef]: { [timeLabel]: number | null } } }
@@ -14,19 +15,29 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { generateCustomRangePeriod, generateJstDayPeriods } from '@/lib/summary/jst-periods'
 
-type TimeUnit = 'hour' | 'day' | 'week' | 'month'
+type TimeUnit = 'hour' | 'day' | 'week' | 'month' | 'custom_range'
 
 interface Period {
   label: string
   start: Date
   end: Date
+  /** 日次（JST）のとき DB の value_date と突き合わせる YYYY-MM-DD */
+  dateKey?: string
+  /** custom_range のとき含む日付境界 YYYY-MM-DD */
+  rangeStart?: string
+  rangeEnd?: string
 }
 
 // ── 期間生成（フロントエンドと同じラベルフォーマット） ──────────
 function generatePeriods(unit: TimeUnit, count: number): Period[] {
   const periods: Period[] = []
   const now = new Date()
+
+  if (unit === 'day') {
+    return generateJstDayPeriods(count, now)
+  }
 
   for (let i = count - 1; i >= 0; i--) {
     const d = new Date(now)
@@ -38,14 +49,6 @@ function generatePeriods(unit: TimeUnit, count: number): Period[] {
         start = new Date(d)
         end = new Date(d); end.setHours(end.getHours() + 1)
         label = `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:00`
-        break
-      }
-      case 'day': {
-        d.setDate(d.getDate() - i)
-        d.setHours(0, 0, 0, 0)
-        start = new Date(d)
-        end = new Date(d); end.setDate(end.getDate() + 1)
-        label = `${d.getMonth() + 1}/${d.getDate()}`
         break
       }
       case 'week': {
@@ -139,8 +142,24 @@ async function fetchIgAccountInsight(
   if (!igRow) return result
 
   const accountId = igRow.id
-  const rangeStart = periods[0].start.toISOString().slice(0, 10)
-  const rangeEnd   = periods[periods.length - 1].end.toISOString().slice(0, 10)
+  const p0 = periods[0]
+  const pLast = periods[periods.length - 1]
+  let rangeStart: string
+  let rangeEnd: string
+  if (periods.length === 1 && p0.rangeStart && p0.rangeEnd) {
+    rangeStart = p0.rangeStart
+    rangeEnd = p0.rangeEnd
+  } else {
+    const dayKeys = periods.map(p => p.dateKey).filter((k): k is string => Boolean(k))
+    rangeStart =
+      dayKeys.length === periods.length && dayKeys.length > 0
+        ? [...dayKeys].sort()[0]
+        : p0.start.toISOString().slice(0, 10)
+    rangeEnd =
+      dayKeys.length === periods.length && dayKeys.length > 0
+        ? [...dayKeys].sort()[dayKeys.length - 1]
+        : pLast.end.toISOString().slice(0, 10)
+  }
 
   for (const field of fields) {
     const accum = emptyAccum(periods)
@@ -154,11 +173,148 @@ async function fetchIgAccountInsight(
       .lte('value_date', rangeEnd)
 
     for (const row of rows ?? []) {
-      const label = bucketDate(new Date(row.value_date), periods)
+      const vd = String(row.value_date).slice(0, 10)
+      let label: string | null = null
+      if (periods.length === 1 && p0.rangeStart && p0.rangeEnd) {
+        if (vd >= p0.rangeStart && vd <= p0.rangeEnd) label = p0.label
+      } else {
+        const byKey = periods.find(p => p.dateKey === vd)?.label
+        label =
+          byKey ??
+          bucketDate(new Date(`${vd}T12:00:00+09:00`), periods)
+      }
       addValue(accum, label, row.value)
     }
     result[`ig_account_insight_fact.${field}`] = finalizeAccum(accum, 'sum')
   }
+  return result
+}
+
+type IgMediaInsightLogicalTable =
+  | 'ig_media_insight_feed'
+  | 'ig_media_insight_reels'
+  | 'ig_media_insight_story'
+
+/**
+ * カタログ上の ig_media_insight_feed / reels / story → DB は ig_media_insight_fact（種別は ig_media で絞る）
+ *
+ * 各期間の「終端（排他的）」より前の最新スナップショット（lifetime 値）を投稿ごとに採用し合算する。
+ * アカウント日次インサイト（value_date）とは指標定義が異なる。
+ */
+async function fetchIgMediaInsightByProduct(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  serviceId: string,
+  logicalTable: IgMediaInsightLogicalTable,
+  fields: string[],
+  periods: Period[],
+): Promise<Record<string, Record<string, number | null>>> {
+  const result: Record<string, Record<string, number | null>> = {}
+  const fieldUniq = [...new Set(fields)]
+
+  const fillAllNull = () => {
+    for (const f of fieldUniq) {
+      result[`${logicalTable}.${f}`] = Object.fromEntries(periods.map(p => [p.label, null]))
+    }
+    return result
+  }
+
+  const { data: igRow } = await supabase
+    .from('ig_accounts')
+    .select('id')
+    .eq('service_id', serviceId)
+    .maybeSingle()
+  if (!igRow) return fillAllNull()
+
+  let mediaQuery = supabase
+    .from('ig_media')
+    .select('id')
+    .eq('account_id', igRow.id)
+    .eq('is_deleted', false)
+
+  if (logicalTable === 'ig_media_insight_feed') {
+    mediaQuery = mediaQuery.eq('media_product_type', 'FEED')
+  } else if (logicalTable === 'ig_media_insight_story') {
+    mediaQuery = mediaQuery.eq('media_product_type', 'STORY')
+  } else {
+    mediaQuery = mediaQuery.or('media_product_type.eq.REELS,media_type.eq.VIDEO')
+  }
+
+  const { data: mediaRows } = await mediaQuery
+  const mediaIds = (mediaRows ?? []).map(m => m.id)
+  if (mediaIds.length === 0) return fillAllNull()
+
+  const rangeEndIso = periods[periods.length - 1].end.toISOString()
+  const allFacts: Array<{
+    media_id: string
+    metric_code: string
+    value: number | null
+    snapshot_at: string
+  }> = []
+  const pageSize = 1000
+  for (let from = 0; ; from += pageSize) {
+    const { data: page, error } = await supabase
+      .from('ig_media_insight_fact')
+      .select('media_id, metric_code, value, snapshot_at')
+      .in('media_id', mediaIds)
+      .in('metric_code', fieldUniq)
+      .lt('snapshot_at', rangeEndIso)
+      .order('snapshot_at', { ascending: true })
+      .range(from, from + pageSize - 1)
+    if (error) {
+      console.error('[summary/data] ig_media_insight_fact query failed', error)
+      return fillAllNull()
+    }
+    const chunk = page ?? []
+    allFacts.push(...chunk)
+    if (chunk.length < pageSize) break
+  }
+
+  const timelines = new Map<string, { t: number; v: number }[]>()
+  for (const row of allFacts) {
+    if (row.value == null) continue
+    const k = `${row.media_id}\0${row.metric_code}`
+    let arr = timelines.get(k)
+    if (!arr) {
+      arr = []
+      timelines.set(k, arr)
+    }
+    arr.push({ t: new Date(row.snapshot_at).getTime(), v: Number(row.value) })
+  }
+  for (const arr of timelines.values()) {
+    arr.sort((a, b) => a.t - b.t)
+  }
+
+  for (const field of fieldUniq) {
+    const accum = emptyAccum(periods)
+    for (const p of periods) {
+      const endMs = p.end.getTime()
+      let sum = 0
+      let any = false
+      for (const mid of mediaIds) {
+        const arr = timelines.get(`${mid}\0${field}`)
+        if (!arr?.length) continue
+        let lo = 0
+        let hi = arr.length - 1
+        let ans = -1
+        while (lo <= hi) {
+          const m = (lo + hi) >> 1
+          if (arr[m].t < endMs) {
+            ans = m
+            lo = m + 1
+          } else {
+            hi = m - 1
+          }
+        }
+        if (ans >= 0) {
+          sum += arr[ans].v
+          any = true
+        }
+      }
+      addValue(accum, p.label, any ? sum : undefined)
+    }
+    result[`${logicalTable}.${field}`] = finalizeAccum(accum, 'sum')
+  }
+
   return result
 }
 
@@ -415,6 +571,8 @@ export async function GET(
   const rawFields = url.searchParams.get('fields') ?? ''
   const timeUnit  = (url.searchParams.get('timeUnit') ?? 'day') as TimeUnit
   const count     = Math.min(parseInt(url.searchParams.get('count') ?? '8', 10), 24)
+  const rangeStartParam = url.searchParams.get('rangeStart')?.slice(0, 10)
+  const rangeEndParam = url.searchParams.get('rangeEnd')?.slice(0, 10)
 
   if (!rawFields) {
     return NextResponse.json({ success: true, data: {} })
@@ -431,7 +589,19 @@ export async function GET(
     ;(byTable[table] ??= []).push(field)
   }
 
-  const periods = generatePeriods(timeUnit, count)
+  let periods: Period[]
+  if (timeUnit === 'custom_range') {
+    if (!rangeStartParam || !rangeEndParam || rangeStartParam > rangeEndParam) {
+      return NextResponse.json(
+        { success: false, error: { code: 'VALIDATION_ERROR', message: 'custom_range には rangeStart・rangeEnd（YYYY-MM-DD）が必要です' } },
+        { status: 400 },
+      )
+    }
+    const cr = generateCustomRangePeriod(rangeStartParam, rangeEndParam)
+    periods = [{ label: cr.label, start: cr.start, end: cr.end, rangeStart: cr.rangeStart, rangeEnd: cr.rangeEnd }]
+  } else {
+    periods = generatePeriods(timeUnit, count)
+  }
   const merged: Record<string, Record<string, number | null>> = {}
 
   // テーブルごとにクエリを実行
@@ -462,7 +632,15 @@ export async function GET(
       case 'lp_users':
         queries.push(fetchLpTable(supabase, serviceId, table, fields, periods))
         break
-      // ig_media_insight_feed/reels/story など未実装テーブル → null のまま
+      case 'ig_media_insight_feed':
+        queries.push(fetchIgMediaInsightByProduct(supabase, serviceId, 'ig_media_insight_feed', fields, periods))
+        break
+      case 'ig_media_insight_reels':
+        queries.push(fetchIgMediaInsightByProduct(supabase, serviceId, 'ig_media_insight_reels', fields, periods))
+        break
+      case 'ig_media_insight_story':
+        queries.push(fetchIgMediaInsightByProduct(supabase, serviceId, 'ig_media_insight_story', fields, periods))
+        break
       default:
         break
     }

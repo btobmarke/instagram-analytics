@@ -5,7 +5,9 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 // ── バリデーションスキーマ ──────────────────────────────
 const UpdateSchema = z.object({
   name:         z.string().min(1).max(100).optional(),
-  time_unit:    z.enum(['hour', 'day', 'week', 'month']).optional(),
+  time_unit:    z.enum(['hour', 'day', 'week', 'month', 'custom_range']).optional(),
+  range_start:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  range_end:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   rows:         z.array(z.any()).optional(),
   custom_cards: z.array(z.any()).optional(),
 })
@@ -19,6 +21,8 @@ function toTemplate(row: Record<string, unknown>) {
     serviceId:   row.service_id,
     name:        row.name,
     timeUnit:    row.time_unit,
+    rangeStart:  row.range_start ?? null,
+    rangeEnd:    row.range_end ?? null,
     rows:        row.rows         ?? [],
     customCards: row.custom_cards ?? [],
     createdAt:   row.created_at,
@@ -102,12 +106,30 @@ export async function PUT(
     )
   }
 
+  const nextUnit = parsed.data.time_unit ?? (existing.time_unit as string)
+  if (nextUnit === 'custom_range') {
+    const rs = parsed.data.range_start ?? (existing.range_start as string | null)
+    const re = parsed.data.range_end ?? (existing.range_end as string | null)
+    if (!rs || !re || rs > re) {
+      return NextResponse.json(
+        { success: false, error: { code: 'VALIDATION_ERROR', message: 'custom_range では range_start / range_end（YYYY-MM-DD）が必要です' } },
+        { status: 400 },
+      )
+    }
+  }
+
   // undefined フィールドは除外してパッチ
   const patch: Record<string, unknown> = {}
   if (parsed.data.name         !== undefined) patch.name         = parsed.data.name
   if (parsed.data.time_unit    !== undefined) patch.time_unit    = parsed.data.time_unit
   if (parsed.data.rows         !== undefined) patch.rows         = parsed.data.rows
   if (parsed.data.custom_cards !== undefined) patch.custom_cards = parsed.data.custom_cards
+  if (parsed.data.range_start  !== undefined) patch.range_start  = parsed.data.range_start
+  if (parsed.data.range_end    !== undefined) patch.range_end    = parsed.data.range_end
+  if (parsed.data.time_unit !== undefined && parsed.data.time_unit !== 'custom_range') {
+    patch.range_start = null
+    patch.range_end = null
+  }
 
   const { data, error } = await supabase
     .from('summary_templates')

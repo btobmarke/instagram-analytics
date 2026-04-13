@@ -15,8 +15,16 @@ const SERVICE_THEME: Record<string, { accent: string; bg: string; border: string
   line:      { accent: 'text-green-600',  bg: 'bg-green-50',  border: 'border-green-200',  badge: 'bg-green-100 text-green-700' },
   lp:        { accent: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-200', badge: 'bg-purple-100 text-purple-700' },
   google_ads:{ accent: 'text-blue-600',   bg: 'bg-blue-50',   border: 'border-blue-200',   badge: 'bg-blue-100 text-blue-700' },
+  sales:     { accent: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200', badge: 'bg-amber-100 text-amber-700' },
 }
-const SERVICE_LABEL: Record<string, string> = { instagram: 'Instagram', gbp: 'GBP', line: 'LINE OAM', lp: 'LP', google_ads: 'Google 広告' }
+const SERVICE_LABEL: Record<string, string> = {
+  instagram: 'Instagram',
+  gbp: 'GBP',
+  line: 'LINE OAM',
+  lp: 'LP',
+  google_ads: 'Google 広告',
+  sales: '売上分析',
+}
 
 /** サマリーページ上部タブの実ルート（従来の …/dashboard 一律は google_ads / instagram で 404 になる） */
 function summaryDashboardHref(projectId: string, serviceId: string, serviceType: string): string {
@@ -32,6 +40,8 @@ function summaryDashboardHref(projectId: string, serviceId: string, serviceType:
       return `${b}/gbp/dashboard`
     case 'line':
       return `${b}/line/dashboard`
+    case 'sales':
+      return `${b}/sales/dashboard`
     default:
       return `${b}/${serviceType}`
   }
@@ -104,19 +114,19 @@ export default function SummaryTemplatePage({
     setDeleting(null)
   }
 
-  // サービス種別ごとのタブリンク
-  const serviceBase = serviceType
-    ? serviceType === 'google_ads'
-      ? `/projects/${projectId}/services/${serviceId}/google-ads`
-      : `/projects/${projectId}/services/${serviceId}/${serviceType}`
-    : null
   const activeColor = {
     instagram: 'text-pink-600 border-pink-600',
     gbp:       'text-teal-600 border-teal-600',
     line:      'text-green-600 border-green-600',
     lp:        'text-purple-600 border-purple-600',
     google_ads:'text-blue-600 border-blue-600',
+    sales:     'text-amber-600 border-amber-600',
   }[serviceType] ?? 'text-purple-600 border-purple-600'
+
+  const tabInactive =
+    'px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px'
+  const tabActive = `px-4 py-2.5 text-sm font-medium border-b-2 -mb-px ${activeColor}`
+  const svcPath = `/projects/${projectId}/services/${serviceId}`
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -129,29 +139,80 @@ export default function SummaryTemplatePage({
         <span className="text-gray-600">{service?.service_name ?? '...'}</span>
       </nav>
 
-      {/* タブナビ */}
-      {serviceBase && (
-        <div className="flex items-center gap-1 mb-6 border-b border-gray-200">
-          <Link
-            href={summaryDashboardHref(projectId, serviceId, serviceType)}
-            className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px"
-          >
-            ダッシュボード
-          </Link>
-          {serviceType !== 'lp' && (
-            <Link
-              href={summarySettingsHref(projectId, serviceId, serviceType)}
-              className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px"
-            >
-              設定
-            </Link>
+      {/* タブナビ（各サービスのメイン画面と同一セットに揃える） */}
+      {serviceType && (
+        <div className="flex items-center gap-1 mb-6 border-b border-gray-200 flex-wrap">
+          {serviceType === 'instagram' && (
+            <>
+              <Link href={`${svcPath}/instagram/analytics`} className={tabInactive}>
+                ダッシュボード
+              </Link>
+              <Link href={`${svcPath}/instagram/posts`} className={tabInactive}>
+                投稿一覧
+              </Link>
+              <Link href={`${svcPath}/instagram/ai`} className={tabInactive}>
+                AI分析
+              </Link>
+              <Link href={`${svcPath}/instagram`} className={tabInactive}>
+                設定
+              </Link>
+              <Link href={`${svcPath}/summary`} className={tabActive}>
+                サマリー
+              </Link>
+            </>
           )}
-          <Link
-            href={`/projects/${projectId}/services/${serviceId}/summary`}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px ${activeColor}`}
-          >
-            サマリー
-          </Link>
+          {serviceType === 'google_ads' && (
+            <>
+              <Link href={`${svcPath}/google-ads/analytics`} className={tabInactive}>
+                ダッシュボード
+              </Link>
+              <Link href={`${svcPath}/summary`} className={tabActive}>
+                サマリー
+              </Link>
+              <Link href={`${svcPath}/google-ads/ai`} className={tabInactive}>
+                AI分析
+              </Link>
+              <Link href={`${svcPath}/google-ads/ai/chat`} className={tabInactive}>
+                AIチャット
+              </Link>
+              <Link href={`${svcPath}/google-ads/settings`} className={tabInactive}>
+                設定
+              </Link>
+            </>
+          )}
+          {serviceType === 'sales' && (
+            <>
+              <Link href={`${svcPath}/sales/dashboard`} className={tabInactive}>
+                ダッシュボード
+              </Link>
+              <Link href={`${svcPath}/sales/records`} className={tabInactive}>
+                売上登録
+              </Link>
+              <Link href={`${svcPath}/sales/products`} className={tabInactive}>
+                商品マスタ
+              </Link>
+              <Link href={`${svcPath}/summary`} className={tabActive}>
+                サマリー
+              </Link>
+            </>
+          )}
+          {serviceType !== 'instagram' &&
+            serviceType !== 'google_ads' &&
+            serviceType !== 'sales' && (
+            <>
+              <Link href={summaryDashboardHref(projectId, serviceId, serviceType)} className={tabInactive}>
+                ダッシュボード
+              </Link>
+              {serviceType !== 'lp' && (
+                <Link href={summarySettingsHref(projectId, serviceId, serviceType)} className={tabInactive}>
+                  設定
+                </Link>
+              )}
+              <Link href={`${svcPath}/summary`} className={tabActive}>
+                サマリー
+              </Link>
+            </>
+          )}
         </div>
       )}
 

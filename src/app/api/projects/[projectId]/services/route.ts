@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createHash } from 'crypto'
 
-const SERVICE_TYPES = ['instagram', 'lp', 'x', 'line', 'google_ads', 'meta_ads', 'gbp', 'owned_media', 'summary'] as const
+const SERVICE_TYPES = ['instagram', 'lp', 'x', 'line', 'google_ads', 'meta_ads', 'gbp', 'owned_media', 'summary', 'sales'] as const
 
 const LpConfigSchema = z.object({
   lp_name: z.string().min(1).max(255),

@@ -5,7 +5,9 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 // ── バリデーションスキーマ ──────────────────────────────
 const CreateSchema = z.object({
   name:         z.string().min(1).max(100),
-  time_unit:    z.enum(['hour', 'day', 'week', 'month']).default('day'),
+  time_unit:    z.enum(['hour', 'day', 'week', 'month', 'custom_range']).default('day'),
+  range_start:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  range_end:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   rows:         z.array(z.any()).default([]),
   custom_cards: z.array(z.any()).default([]),
 })
@@ -17,6 +19,8 @@ function toTemplate(row: Record<string, unknown>) {
     serviceId:   row.service_id,
     name:        row.name,
     timeUnit:    row.time_unit,
+    rangeStart:  row.range_start ?? null,
+    rangeEnd:    row.range_end ?? null,
     rows:        row.rows         ?? [],
     customCards: row.custom_cards ?? [],
     createdAt:   row.created_at,
@@ -112,6 +116,12 @@ export async function POST(
       { status: 400 },
     )
   }
+  if (parsed.data.time_unit === 'custom_range' && (!parsed.data.range_start || !parsed.data.range_end || parsed.data.range_start > parsed.data.range_end)) {
+    return NextResponse.json(
+      { success: false, error: { code: 'VALIDATION_ERROR', message: 'custom_range では range_start / range_end（YYYY-MM-DD）が必要です' } },
+      { status: 400 },
+    )
+  }
 
   // テンプレート作成
   const { data, error } = await supabase
@@ -120,6 +130,8 @@ export async function POST(
       service_id:   serviceId,
       name:         parsed.data.name,
       time_unit:    parsed.data.time_unit,
+      range_start:  parsed.data.time_unit === 'custom_range' ? parsed.data.range_start : null,
+      range_end:    parsed.data.time_unit === 'custom_range' ? parsed.data.range_end : null,
       rows:         parsed.data.rows,
       custom_cards: parsed.data.custom_cards,
     })

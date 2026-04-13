@@ -158,6 +158,12 @@ export default function GoogleAdsAnalyticsPage({
           AI分析
         </Link>
         <Link
+          href={`/projects/${projectId}/services/${serviceId}/google-ads/ai/chat`}
+          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
+        >
+          AIチャット
+        </Link>
+        <Link
           href={`/projects/${projectId}/services/${serviceId}/google-ads/settings`}
           className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
         >

@@ -18,6 +18,7 @@ const SERVICE_TYPE_LABELS: Record<string, { label: string; icon: string; color: 
   gbp: { label: 'GBP', icon: '🏢', color: 'bg-teal-50 text-teal-700 border-teal-200' },
   owned_media: { label: 'オウンドメディア', icon: '📝', color: 'bg-violet-50 text-violet-700 border-violet-200' },
   summary: { label: 'サマリー', icon: '📋', color: 'bg-gray-50 text-gray-700 border-gray-200' },
+  sales: { label: '売上分析', icon: '💰', color: 'bg-amber-50 text-amber-700 border-amber-200' },
 }
 
 function getServiceHref(projectId: string, serviceId: string, serviceType: string): string {
@@ -32,6 +33,8 @@ function getServiceHref(projectId: string, serviceId: string, serviceType: strin
       return `/projects/${projectId}/services/${serviceId}/line/dashboard`
     case 'google_ads':
       return `/projects/${projectId}/services/${serviceId}/google-ads/analytics`
+    case 'sales':
+      return `/projects/${projectId}/services/${serviceId}/sales/dashboard`
     default:
       return `/projects/${projectId}/services/${serviceId}`
   }

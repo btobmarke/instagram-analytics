@@ -12,6 +12,7 @@ const SERVICE_TYPE_OPTIONS = [
   { value: 'gbp', label: 'Googleビジネス', icon: '🏢', description: 'Google Business Profile' },
   { value: 'owned_media', label: 'オウンドメディア', icon: '📝', description: '自社メディア計測' },
   { value: 'summary', label: 'サマリー', icon: '📋', description: '総合サマリーレポート' },
+  { value: 'sales', label: '売上分析', icon: '💰', description: '売上・注文・商品データ管理' },
 ] as const
 
 type ServiceType = typeof SERVICE_TYPE_OPTIONS[number]['value']

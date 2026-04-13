@@ -11,11 +11,13 @@ import {
 } from '@dnd-kit/core'
 import type {
   ServiceDetail, MetricCard, FormulaNode, FormulaStep, FormulaOperator,
+  FormulaThresholdMode,
   TableRow, TimeUnit, SummaryTemplate,
 } from '../_lib/types'
 import { OPERATOR_SYMBOLS, TIME_UNIT_LABELS, formatFormula } from '../_lib/types'
 import { getMetricCatalog } from '../_lib/catalog'
 import { getTemplate, updateTemplate } from '../_lib/store'
+import { generateJstDayPeriodLabels, generateCustomRangePeriod } from '@/lib/summary/jst-periods'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -86,14 +88,23 @@ function TableDropZone({ children }: { children: React.ReactNode }) {
 }
 
 // ── 時間軸ヘッダ生成 ───────────────────────────────────────────
-function generateTimeHeaders(unit: TimeUnit, count: number): string[] {
+function generateTimeHeaders(
+  unit: TimeUnit,
+  count: number,
+  rangeStart?: string | null,
+  rangeEnd?: string | null,
+): string[] {
+  if (unit === 'custom_range') {
+    if (rangeStart && rangeEnd) return [generateCustomRangePeriod(rangeStart, rangeEnd).label]
+    return ['（開始・終了日を設定）']
+  }
+  if (unit === 'day') return generateJstDayPeriodLabels(count)
   const headers: string[] = []
   const now = new Date()
   for (let i = count - 1; i >= 0; i--) {
     const d = new Date(now)
     switch (unit) {
       case 'hour':  d.setHours(d.getHours() - i);   headers.push(`${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:00`); break
-      case 'day':   d.setDate(d.getDate() - i);      headers.push(`${d.getMonth()+1}/${d.getDate()}`); break
       case 'week': { const s = new Date(d); s.setDate(d.getDate()-i*7); headers.push(`${s.getMonth()+1}/${s.getDate()}週`); break }
       case 'month': d.setMonth(d.getMonth() - i);   headers.push(`${d.getFullYear()}/${d.getMonth()+1}`); break
     }
@@ -129,25 +140,50 @@ function OperatorSelect({ value, onChange }: { value: FormulaOperator; onChange:
 }
 
 // ── フォーミュラビルダーモーダル ───────────────────────────────
-function FormulaBuilderModal({ catalog, customCards, editTarget, onSave, onClose }: {
+function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdControls, onSave, onClose }: {
   catalog: MetricCard[]; customCards: MetricCard[]; editTarget: MetricCard | null
+  showThresholdControls?: boolean
   onSave: (card: MetricCard) => void; onClose: () => void
 }) {
   const allCards = [...catalog, ...customCards]
   const [name, setName] = useState(editTarget?.label ?? '')
   const [baseOperandId, setBaseOperandId] = useState(editTarget?.formula?.baseOperandId ?? '')
   const [steps, setSteps] = useState<FormulaStep[]>(editTarget?.formula?.steps ?? [{ operator: '+', operandId: '' }])
+  const [thresholdMode, setThresholdMode] = useState<FormulaThresholdMode>(editTarget?.formula?.thresholdMode ?? 'none')
+  const [thresholdValueStr, setThresholdValueStr] = useState(
+    editTarget?.formula?.thresholdValue != null && !Number.isNaN(editTarget.formula.thresholdValue)
+      ? String(editTarget.formula.thresholdValue)
+      : '',
+  )
   const findLabel = (id: string) => allCards.find(c => c.id === id)?.label ?? id
   const updateStep = (idx: number, patch: Partial<FormulaStep>) => setSteps(prev => prev.map((s, i) => i === idx ? { ...s, ...patch } : s))
   const addStep = () => setSteps(prev => [...prev, { operator: '+', operandId: '' }])
   const removeStep = (idx: number) => setSteps(prev => prev.filter((_, i) => i !== idx))
-  const canSave = !!(name.trim() && baseOperandId && steps.every(s => s.operandId) && steps.length >= 1)
+  const thresholdNum = Number(thresholdValueStr)
+  const thresholdValid =
+    !showThresholdControls ||
+    thresholdMode === 'none' ||
+    (thresholdValueStr.trim() !== '' && Number.isFinite(thresholdNum))
+  const canSave = !!(name.trim() && baseOperandId && steps.every(s => s.operandId) && steps.length >= 1 && thresholdValid)
   const grouped = allCards.reduce<Record<string, MetricCard[]>>((acc, c) => { if (!c.formula) { ;(acc[c.category] ??= []).push(c) } return acc }, {})
-  const previewFormula: FormulaNode | null = baseOperandId && steps.length > 0 ? { baseOperandId, steps } : null
+  const previewFormula: FormulaNode | null = baseOperandId && steps.length > 0
+    ? (() => {
+        const f: FormulaNode = { baseOperandId, steps }
+        if (showThresholdControls && thresholdMode !== 'none' && Number.isFinite(thresholdNum)) {
+          f.thresholdMode = thresholdMode
+          f.thresholdValue = thresholdNum
+        }
+        return f
+      })()
+    : null
   const handleSave = () => {
     if (!canSave) return
     const id = editTarget?.id ?? `custom.${Date.now()}`
     const formula: FormulaNode = { baseOperandId, steps }
+    if (showThresholdControls && thresholdMode !== 'none' && Number.isFinite(thresholdNum)) {
+      formula.thresholdMode = thresholdMode
+      formula.thresholdValue = thresholdNum
+    }
     onSave({ id, label: name.trim(), category: 'カスタム指標', fieldRef: formatFormula(formula, findLabel, 'id'), formula })
   }
   return (
@@ -180,6 +216,33 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, onSave, onClose
               項を追加
             </button>
           </div>
+          {showThresholdControls && (
+            <div className="rounded-lg border border-green-200 bg-green-50/50 px-3 py-3 space-y-2">
+              <p className="text-xs font-medium text-gray-700">表示条件（計算後の値）</p>
+              <p className="text-[10px] text-gray-500">条件を満たさないセルはサマリーで「—」になります。</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={thresholdMode}
+                  onChange={e => setThresholdMode(e.target.value as FormulaThresholdMode)}
+                  className="flex-1 min-w-[200px] px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
+                >
+                  <option value="none">条件なし（常に表示）</option>
+                  <option value="gte">閾値以上のときだけ表示</option>
+                  <option value="lte">閾値以下のときだけ表示</option>
+                </select>
+                {(thresholdMode === 'gte' || thresholdMode === 'lte') && (
+                  <input
+                    type="number"
+                    step="any"
+                    value={thresholdValueStr}
+                    onChange={e => setThresholdValueStr(e.target.value)}
+                    placeholder="閾値"
+                    className="w-32 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  />
+                )}
+              </div>
+            </div>
+          )}
           {previewFormula && (
             <div className="rounded-lg bg-gray-50 border border-gray-200 p-3">
               <p className="text-[10px] text-gray-400 mb-1">プレビュー</p>
@@ -220,6 +283,8 @@ export default function TemplateEditorPage({
   const [templateName, setTemplateName] = useState('')
   const [rows, setRows] = useState<TableRow[]>([])
   const [timeUnit, setTimeUnit] = useState<TimeUnit>('day')
+  const [rangeStart, setRangeStart] = useState('')
+  const [rangeEnd, setRangeEnd] = useState('')
   const [customCards, setCustomCards] = useState<MetricCard[]>([])
   const [isDirty, setIsDirty] = useState(false)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
@@ -230,25 +295,40 @@ export default function TemplateEditorPage({
       setTemplate(tmpl)
       setTemplateName(tmpl.name)
       setTimeUnit(tmpl.timeUnit)
+      setRangeStart(tmpl.rangeStart?.slice(0, 10) ?? '')
+      setRangeEnd(tmpl.rangeEnd?.slice(0, 10) ?? '')
       setCustomCards(tmpl.customCards)
       // rows を復元（セルは空状態）
-      const headers = generateTimeHeaders(tmpl.timeUnit, 8)
+      const headers = generateTimeHeaders(tmpl.timeUnit, 8, tmpl.rangeStart, tmpl.rangeEnd)
       setRows(tmpl.rows.map(r => ({ id: r.id, label: r.label, cells: Object.fromEntries(headers.map(h => [h, ''])) })))
     })
   }, [templateId, projectId, serviceId, router])
 
   // 保存
   const handleSave = useCallback(async () => {
+    if (timeUnit === 'custom_range') {
+      if (!rangeStart || !rangeEnd || rangeStart > rangeEnd) {
+        alert('期間指定では、開始日・終了日を YYYY-MM-DD で入力し、開始≦終了になるよう設定してください。')
+        return
+      }
+    }
     setSaveState('saving')
     const storedRows = rows.map(r => {
       const custom = customCards.find(c => c.id === r.id)
       return { id: r.id, label: r.label, formula: custom?.formula }
     })
-    await updateTemplate(templateId, serviceId, { name: templateName, timeUnit, rows: storedRows, customCards })
+    await updateTemplate(templateId, serviceId, {
+      name: templateName,
+      timeUnit,
+      rangeStart: timeUnit === 'custom_range' ? rangeStart : null,
+      rangeEnd: timeUnit === 'custom_range' ? rangeEnd : null,
+      rows: storedRows,
+      customCards,
+    })
     setIsDirty(false)
     setSaveState('saved')
     setTimeout(() => setSaveState('idle'), 2000)
-  }, [templateId, serviceId, templateName, timeUnit, rows, customCards])
+  }, [templateId, serviceId, templateName, timeUnit, rangeStart, rangeEnd, rows, customCards])
 
   // フィルタ・タブ・アコーディオン
   const [searchQuery, setSearchQuery] = useState('')
@@ -259,7 +339,11 @@ export default function TemplateEditorPage({
 
   const allCards = [...catalog, ...customCards]
   const TIME_COL_COUNT = 8
-  const timeHeaders = useMemo(() => generateTimeHeaders(timeUnit, TIME_COL_COUNT), [timeUnit])
+  const timeHeaders = useMemo(
+    () => generateTimeHeaders(timeUnit, TIME_COL_COUNT, rangeStart, rangeEnd),
+    [timeUnit, rangeStart, rangeEnd],
+  )
+  const timeColCount = timeUnit === 'custom_range' ? timeHeaders.length : TIME_COL_COUNT
   const addedIds = new Set(rows.map(r => r.id))
 
   const categories = useMemo(() => {
@@ -308,7 +392,10 @@ export default function TemplateEditorPage({
     setRows(prev => [...prev, { id: c.id, label: c.label, cells: Object.fromEntries(timeHeaders.map(h => [h, ''])) }])
     setIsDirty(true)
   }
-  const removeRow = (id: string) => { setRows(prev => prev.filter(r => r.id !== id)); setIsDirty(true) }
+  const removeRowAt = (index: number) => {
+    setRows(prev => prev.filter((_, i) => i !== index))
+    setIsDirty(true)
+  }
 
   const handleSaveCustomCard = useCallback((card: MetricCard) => {
     setCustomCards(prev => { const idx = prev.findIndex(c => c.id === card.id); if (idx >= 0) { const n=[...prev]; n[idx]=card; return n } return [...prev, card] })
@@ -360,6 +447,23 @@ export default function TemplateEditorPage({
             <select value={timeUnit} onChange={e => { setTimeUnit(e.target.value as TimeUnit); setIsDirty(true) }} className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
               {(Object.keys(TIME_UNIT_LABELS) as TimeUnit[]).map(u => <option key={u} value={u}>{TIME_UNIT_LABELS[u]}</option>)}
             </select>
+            {timeUnit === 'custom_range' && (
+              <span className="flex items-center gap-1.5 flex-wrap">
+                <input
+                  type="date"
+                  value={rangeStart}
+                  onChange={e => { setRangeStart(e.target.value); setIsDirty(true) }}
+                  className="px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                <span className="text-xs text-gray-500">〜</span>
+                <input
+                  type="date"
+                  value={rangeEnd}
+                  onChange={e => { setRangeEnd(e.target.value); setIsDirty(true) }}
+                  className="px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </span>
+            )}
             {/* サマリーを見る */}
             <Link href={`/projects/${projectId}/services/${serviceId}/summary/${templateId}/view`} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100 transition">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
@@ -476,17 +580,17 @@ export default function TemplateEditorPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map(row => {
+                  {rows.map((row, idx) => {
                     const srcCard = allCards.find(c => c.id === row.id)
                     return (
-                      <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50/50">
+                      <tr key={`row-${idx}-${row.id}`} className="border-b border-gray-100 hover:bg-gray-50/50">
                         <td className="sticky left-0 bg-white px-4 py-2.5 z-10">
                           <div className="text-xs font-medium text-gray-800">{row.label}</div>
                           {srcCard?.formula && <div className="text-[9px] text-amber-500 font-mono mt-0.5">{formatFormula(srcCard.formula, id => allCards.find(c => c.id === id)?.label ?? id)}</div>}
                         </td>
                         {timeHeaders.map(h => <td key={h} className="px-3 py-2.5 text-center text-xs text-gray-400">—</td>)}
                         <td className="px-2 py-2.5 text-center">
-                          <button onClick={() => removeRow(row.id)} className="text-gray-300 hover:text-red-500 transition" title="行を削除">
+                          <button onClick={() => removeRowAt(idx)} className="text-gray-300 hover:text-red-500 transition" title="行を削除">
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                           </button>
                         </td>
@@ -499,7 +603,14 @@ export default function TemplateEditorPage({
           )}
         </TableDropZone>
 
-        {rows.length > 0 && <p className="text-[10px] text-gray-400 mt-3 text-right">{rows.length} 項目 × {TIME_COL_COUNT} {TIME_UNIT_LABELS[timeUnit]}</p>}
+        {rows.length > 0 && (
+          <p className="text-[10px] text-gray-400 mt-3 text-right">
+            {rows.length} 項目 × {timeColCount}{' '}
+            {timeUnit === 'custom_range' && rangeStart && rangeEnd
+              ? generateCustomRangePeriod(rangeStart, rangeEnd).label
+              : TIME_UNIT_LABELS[timeUnit]}
+          </p>
+        )}
       </div>
 
       {/* ドラッグオーバーレイ */}
@@ -515,7 +626,10 @@ export default function TemplateEditorPage({
       {/* フォーミュラビルダーモーダル */}
       {showFormulaModal && (
         <FormulaBuilderModal
-          catalog={catalog} customCards={customCards} editTarget={editingCustomCard}
+          catalog={catalog}
+          customCards={customCards}
+          editTarget={editingCustomCard}
+          showThresholdControls={serviceType === 'line'}
           onSave={handleSaveCustomCard}
           onClose={() => { setShowFormulaModal(false); setEditingCustomCard(null) }}
         />

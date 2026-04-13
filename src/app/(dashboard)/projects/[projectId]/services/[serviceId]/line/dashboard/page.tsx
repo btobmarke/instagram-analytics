@@ -1,6 +1,6 @@
 'use client'
 
-import { use } from 'react'
+import { use, useState, useMemo } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 import {
@@ -262,6 +262,8 @@ export default function LineOamDashboard({
               ))}
             </div>
           )}
+
+          <TxnThresholdPanel serviceId={serviceId} cards={analytics.cards} />
         </div>
       )}
     </div>
@@ -439,6 +441,139 @@ function MiniStat({ label, value }: { label: string; value: string }) {
     <div className="bg-gray-50 rounded-xl p-3">
       <p className="text-xs text-gray-400 mb-1">{label}</p>
       <p className="text-lg font-bold text-gray-900">{value}</p>
+    </div>
+  )
+}
+
+/** 本日を含む直近30日（ローカル日付） */
+function defaultDateRange() {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  const end = new Date()
+  const start = new Date(end)
+  start.setDate(start.getDate() - 29)
+  return { rangeStart: ymd(start), rangeEnd: ymd(end) }
+}
+
+/** 付与ログを都度集計: 期間内に X 回以上取引のある顧客数 */
+function TxnThresholdPanel({ serviceId, cards }: { serviceId: string; cards: CardSummary[] }) {
+  const defaults = useMemo(() => defaultDateRange(), [])
+  const [rangeStart, setRangeStart] = useState(defaults.rangeStart)
+  const [rangeEnd, setRangeEnd] = useState(defaults.rangeEnd)
+  const [minCount, setMinCount] = useState('3')
+  const [rewardcardId, setRewardcardId] = useState('')
+  const [pointType, setPointType] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [qualifyingUserCount, setQualifyingUserCount] = useState<number | null>(null)
+  const [txnRowCount, setTxnRowCount] = useState<number | null>(null)
+
+  const run = async () => {
+    setLoading(true)
+    setErrorMsg(null)
+    setQualifyingUserCount(null)
+    setTxnRowCount(null)
+    try {
+      const q = new URLSearchParams({ rangeStart, rangeEnd, minCount })
+      if (rewardcardId) q.set('rewardcardId', rewardcardId)
+      if (pointType.trim()) q.set('pointType', pointType.trim())
+      const res = await fetch(`/api/services/${serviceId}/line-oam/txn-threshold-users?${q}`)
+      const json = await res.json()
+      if (!json.success) {
+        setErrorMsg(json.error?.message ?? '集計に失敗しました')
+        return
+      }
+      setQualifyingUserCount(json.data.qualifyingUserCount)
+      setTxnRowCount(json.data.txnRowCountInRange)
+    } catch {
+      setErrorMsg('通信に失敗しました')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 p-6">
+      <h2 className="text-sm font-semibold text-gray-700 mb-1">来店（付与）回数しきい値集計</h2>
+      <p className="text-xs text-gray-500 mb-4 leading-relaxed">
+        リワードカードのポイント取引履歴（バッチで取り込んだ CSV）を元に、指定期間に
+        <strong className="text-gray-700"> 付与が N 回以上ある顧客数 </strong>
+        をその場で集計します。閾値 N は都度変更できます。来店スタンプだけに絞る場合は、LINE の CSV に出ている Point Type をそのまま指定してください。
+      </p>
+      <div className="flex flex-wrap items-end gap-3 mb-4">
+        <label className="text-xs text-gray-500">
+          開始
+          <input
+            type="date"
+            value={rangeStart}
+            onChange={e => setRangeStart(e.target.value)}
+            className="block mt-1 px-2 py-1.5 text-sm border border-gray-200 rounded-lg"
+          />
+        </label>
+        <label className="text-xs text-gray-500">
+          終了
+          <input
+            type="date"
+            value={rangeEnd}
+            onChange={e => setRangeEnd(e.target.value)}
+            className="block mt-1 px-2 py-1.5 text-sm border border-gray-200 rounded-lg"
+          />
+        </label>
+        <label className="text-xs text-gray-500">
+          回以上
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={minCount}
+            onChange={e => setMinCount(e.target.value)}
+            className="block mt-1 w-20 px-2 py-1.5 text-sm border border-gray-200 rounded-lg"
+          />
+        </label>
+        <label className="text-xs text-gray-500">
+          カード
+          <select
+            value={rewardcardId}
+            onChange={e => setRewardcardId(e.target.value)}
+            className="block mt-1 min-w-[180px] px-2 py-1.5 text-sm border border-gray-200 rounded-lg bg-white"
+          >
+            <option value="">全リワードカード合算</option>
+            {cards.map(c => (
+              <option key={c.id} value={c.id}>{c.name ?? c.rewardcard_id}</option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-gray-500 flex-1 min-w-[200px]">
+          Point Type（任意・完全一致）
+          <input
+            type="text"
+            value={pointType}
+            onChange={e => setPointType(e.target.value)}
+            placeholder="空欄なら全種別を1回として数える"
+            className="block mt-1 w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg font-mono"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={run}
+          disabled={loading}
+          className="px-4 py-2 text-sm font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+        >
+          {loading ? '集計中…' : '集計する'}
+        </button>
+      </div>
+      {errorMsg && <p className="text-sm text-red-600 mb-2">{errorMsg}</p>}
+      {qualifyingUserCount != null && txnRowCount != null && (
+        <div className="rounded-xl bg-green-50 border border-green-100 px-4 py-3 text-sm">
+          <p className="text-gray-700">
+            該当顧客数（ユニーク）:{' '}
+            <strong className="text-xl text-green-800">{qualifyingUserCount.toLocaleString()}</strong> 人
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            期間内の取引行数（フィルタ後）: {txnRowCount.toLocaleString()} 行
+          </p>
+        </div>
+      )}
     </div>
   )
 }

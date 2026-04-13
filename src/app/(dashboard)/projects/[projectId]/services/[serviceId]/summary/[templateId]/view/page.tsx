@@ -8,6 +8,7 @@ import type { ServiceDetail, SummaryTemplate, TimeUnit, FormulaNode, MetricCard 
 import { TIME_UNIT_LABELS, OPERATOR_SYMBOLS, formatFormula } from '../../_lib/types'
 import { getMetricCatalog } from '../../_lib/catalog'
 import { getTemplate } from '../../_lib/store'
+import { generateJstDayPeriodLabels, generateCustomRangePeriod } from '@/lib/summary/jst-periods'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -21,14 +22,23 @@ const SERVICE_LABEL: Record<string, string> = { instagram: 'Instagram', gbp: 'GB
 
 const TIME_COL_COUNT = 8
 
-function generateTimeHeaders(unit: TimeUnit, count: number): string[] {
+function generateTimeHeaders(
+  unit: TimeUnit,
+  count: number,
+  rangeStart?: string | null,
+  rangeEnd?: string | null,
+): string[] {
+  if (unit === 'custom_range') {
+    if (rangeStart && rangeEnd) return [generateCustomRangePeriod(rangeStart, rangeEnd).label]
+    return ['（期間未設定）']
+  }
+  if (unit === 'day') return generateJstDayPeriodLabels(count)
   const headers: string[] = []
   const now = new Date()
   for (let i = count - 1; i >= 0; i--) {
     const d = new Date(now)
     switch (unit) {
       case 'hour':  d.setHours(d.getHours() - i);   headers.push(`${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:00`); break
-      case 'day':   d.setDate(d.getDate() - i);      headers.push(`${d.getMonth()+1}/${d.getDate()}`); break
       case 'week': { const s = new Date(d); s.setDate(d.getDate()-i*7); headers.push(`${s.getMonth()+1}/${s.getDate()}週`); break }
       case 'month': d.setMonth(d.getMonth() - i);   headers.push(`${d.getFullYear()}/${d.getMonth()+1}`); break
     }
@@ -36,27 +46,64 @@ function generateTimeHeaders(unit: TimeUnit, count: number): string[] {
   return headers
 }
 
-/** フォーミュラを期間ごとに計算 */
+/** サマリーAPIが返す生フィールドRefか（custom.* はデータ取得対象外） */
+function isSummaryDataFieldRef(ref: string): boolean {
+  if (!ref || !ref.includes('.')) return false
+  if (ref.startsWith('custom.')) return false
+  return true
+}
+
+/**
+ * フォーミュラを期間ごとに計算
+ * + / − は欠損（null）を 0 として足し引き（片方だけデータがある合算を表示するため）
+ * × / ÷ はいずれか欠損なら null
+ */
 function evalFormula(
   formula: FormulaNode,
   rawData: Record<string, Record<string, number | null>>,
   label: string,
 ): number | null {
-  const base = rawData[formula.baseOperandId]?.[label] ?? null
-  if (base === null) return null
+  let sawNumeric = false
+  const get = (id: string): number | null => {
+    const v = rawData[id]?.[label]
+    if (v !== null && v !== undefined) sawNumeric = true
+    return v ?? null
+  }
 
-  let result = base
+  const asPlusMinus = (v: number | null) => (v === null ? 0 : v)
+
+  let result: number | null = get(formula.baseOperandId)
+
   for (const step of formula.steps) {
-    const operand = rawData[step.operandId]?.[label] ?? null
-    if (operand === null) return null
+    const operand = get(step.operandId)
     switch (step.operator) {
-      case '+': result += operand; break
-      case '-': result -= operand; break
-      case '*': result *= operand; break
-      case '/': if (operand === 0) return null; result /= operand; break
+      case '+':
+        result = asPlusMinus(result) + asPlusMinus(operand)
+        break
+      case '-':
+        result = asPlusMinus(result) - asPlusMinus(operand)
+        break
+      case '*': {
+        if (result === null || operand === null) return null
+        result *= operand
+        break
+      }
+      case '/': {
+        if (result === null || operand === null) return null
+        if (operand === 0) return null
+        result /= operand
+        break
+      }
     }
   }
-  return Math.round(result * 100) / 100
+
+  if (!sawNumeric) return null
+  const rounded = Math.round((result ?? 0) * 100) / 100
+  const tm = formula.thresholdMode ?? 'none'
+  const tv = formula.thresholdValue
+  if (tm === 'gte' && tv != null && rounded < tv) return null
+  if (tm === 'lte' && tv != null && rounded > tv) return null
+  return rounded
 }
 
 /** 数値を読みやすい形式にフォーマット */
@@ -162,11 +209,11 @@ function MetricInfoModal({
               </div>
               {/* 使用している指標一覧 */}
               <div className="mt-2 space-y-1">
-                {[formula.baseOperandId, ...formula.steps.map(s => s.operandId)].map(id => {
+                {[formula.baseOperandId, ...formula.steps.map(s => s.operandId)].map((id, opIdx) => {
                   const src = allCards.find(c => c.id === id)
                   if (!src) return null
                   return (
-                    <div key={id} className="flex items-center gap-2 text-xs text-gray-500">
+                    <div key={`${id}#${opIdx}`} className="flex items-center gap-2 text-xs text-gray-500">
                       <span className="font-medium text-gray-700">{src.label}</span>
                       <span className="text-gray-300">·</span>
                       <span className="font-mono text-gray-400">{src.fieldRef}</span>
@@ -240,8 +287,8 @@ export default function SummaryViewPage({
 
   const [template, setTemplate] = useState<SummaryTemplate | null>(null)
 
-  // 「?」モーダルの状態（どの rowId が開いているか）
-  const [infoRowId, setInfoRowId] = useState<string | null>(null)
+  // 「?」モーダル: 行インデックス（同一指標を複数行にしたとき row.id が重複するため）
+  const [infoRowIndex, setInfoRowIndex] = useState<number | null>(null)
 
   useEffect(() => {
     getTemplate(templateId, serviceId).then(tmpl => {
@@ -256,26 +303,40 @@ export default function SummaryViewPage({
     const catalog = getMetricCatalog(serviceType)
     const allCards = [...catalog, ...template.customCards]
     const refs = new Set<string>()
-    for (const row of template.rows) {
-      if (row.formula) {
-        refs.add(row.formula.baseOperandId)
-        for (const step of row.formula.steps) refs.add(step.operandId)
-      } else {
-        refs.add(row.id)
-      }
-      const card = allCards.find(c => c.id === row.id)
-      if (card?.formula) {
-        refs.add(card.formula.baseOperandId)
-        for (const step of card.formula.steps) refs.add(step.operandId)
+    const addFormulaRefs = (f: FormulaNode | undefined) => {
+      if (!f) return
+      if (f.baseOperandId) refs.add(f.baseOperandId)
+      for (const step of f.steps) {
+        if (step.operandId) refs.add(step.operandId)
       }
     }
-    return [...refs].filter(r => r.includes('.'))
+    for (const row of template.rows) {
+      const card = allCards.find(c => c.id === row.id)
+      const effectiveFormula = row.formula ?? card?.formula
+      if (effectiveFormula) {
+        addFormulaRefs(effectiveFormula)
+      } else if (isSummaryDataFieldRef(row.id)) {
+        refs.add(row.id)
+      }
+      if (card?.formula && card.formula !== effectiveFormula) {
+        addFormulaRefs(card.formula)
+      }
+    }
+    return [...refs].filter(isSummaryDataFieldRef)
   }, [template, serviceType])
 
   // 集計データ取得
-  const dataUrl = template && allFieldRefs.length > 0
-    ? `/api/services/${serviceId}/summary/data?fields=${allFieldRefs.join(',')}&timeUnit=${template.timeUnit}&count=${TIME_COL_COUNT}`
-    : null
+  const dataUrl = useMemo(() => {
+    if (!template || allFieldRefs.length === 0) return null
+    if (template.timeUnit === 'custom_range') {
+      if (!template.rangeStart || !template.rangeEnd || template.rangeStart > template.rangeEnd) return null
+    }
+    let u = `/api/services/${serviceId}/summary/data?fields=${encodeURIComponent(allFieldRefs.join(','))}&timeUnit=${template.timeUnit}&count=${TIME_COL_COUNT}`
+    if (template.timeUnit === 'custom_range' && template.rangeStart && template.rangeEnd) {
+      u += `&rangeStart=${encodeURIComponent(template.rangeStart)}&rangeEnd=${encodeURIComponent(template.rangeEnd)}`
+    }
+    return u
+  }, [template, serviceId, allFieldRefs])
 
   const { data: rawDataRes, isLoading: dataLoading } = useSWR<{
     success: boolean
@@ -284,14 +345,29 @@ export default function SummaryViewPage({
 
   const rawData = rawDataRes?.data ?? {}
 
+  const timeHeaders = useMemo(() => {
+    if (!template) return [] as string[]
+    return generateTimeHeaders(template.timeUnit, TIME_COL_COUNT, template.rangeStart, template.rangeEnd)
+  }, [template])
+
+  const axisDescription = useMemo(() => {
+    if (!template) return ''
+    if (template.timeUnit === 'custom_range' && template.rangeStart && template.rangeEnd) {
+      return generateCustomRangePeriod(template.rangeStart, template.rangeEnd).label
+    }
+    return TIME_UNIT_LABELS[template.timeUnit]
+  }, [template])
+
   if (!template) return <div className="p-8 text-center text-gray-400 text-sm">読み込み中...</div>
 
   const catalog = getMetricCatalog(serviceType)
   const allCards = [...catalog, ...template.customCards]
-  const timeHeaders = generateTimeHeaders(template.timeUnit, TIME_COL_COUNT)
 
   // 現在infoが開いている行のデータを取得
-  const infoRow = infoRowId ? template.rows.find(r => r.id === infoRowId) : null
+  const infoRow =
+    infoRowIndex !== null && infoRowIndex >= 0 && infoRowIndex < template.rows.length
+      ? template.rows[infoRowIndex]
+      : null
   const infoCard = infoRow ? allCards.find(c => c.id === infoRow.id) : null
   const infoFormula: FormulaNode | undefined = infoRow?.formula ?? infoCard?.formula
 
@@ -318,7 +394,7 @@ export default function SummaryViewPage({
             <h1 className="text-xl font-bold text-gray-900">{template.name}</h1>
           </div>
           <p className="text-xs text-gray-500">
-            横軸: {TIME_UNIT_LABELS[template.timeUnit]}
+            横軸: {axisDescription}
             {' · '}{template.rows.length}項目
             {template.customCards.length > 0 && ` · カスタム指標${template.customCards.length}件`}
             {' · '}最終更新: {new Date(template.updatedAt).toLocaleDateString('ja-JP')}
@@ -354,12 +430,23 @@ export default function SummaryViewPage({
             テンプレートを編集する
           </Link>
         </div>
+      ) : template.timeUnit === 'custom_range' && (!template.rangeStart || !template.rangeEnd || template.rangeStart > template.rangeEnd) ? (
+        <div className={`rounded-2xl border ${theme.border} ${theme.bg} p-8 text-center`}>
+          <p className="text-sm font-medium text-gray-700 mb-1">集計期間が未設定です</p>
+          <p className="text-xs text-gray-500 mb-4">テンプレート編集で「期間指定」の開始日・終了日を保存してください。</p>
+          <Link
+            href={`/projects/${projectId}/services/${serviceId}/summary/${templateId}`}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 transition"
+          >
+            テンプレートを編集する
+          </Link>
+        </div>
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
           {/* テーブルヘッダ */}
           <div className={`px-4 py-2 ${theme.bg} border-b ${theme.border} flex items-center justify-between`}>
             <span className="text-xs font-medium text-gray-600">
-              横軸: {TIME_UNIT_LABELS[template.timeUnit]}
+              横軸: {axisDescription}
             </span>
             <div className="flex items-center gap-3">
               {dataLoading && (
@@ -372,7 +459,7 @@ export default function SummaryViewPage({
                 </span>
               )}
               <span className="text-[10px] text-gray-400">
-                {template.rows.length}項目 × {TIME_COL_COUNT}期間
+                {template.rows.length}項目 × {timeHeaders.length}期間
               </span>
             </div>
           </div>
@@ -394,12 +481,12 @@ export default function SummaryViewPage({
               <tbody>
                 {template.rows.map((row, rowIdx) => {
                   const srcCard = allCards.find(c => c.id === row.id)
-                  const isCustom = !!row.formula
                   const formula: FormulaNode | undefined = row.formula ?? srcCard?.formula
+                  const isCustom = !!formula
 
                   return (
                     <tr
-                      key={row.id}
+                      key={`row-${rowIdx}-${row.id}`}
                       className={`border-b border-gray-100 ${rowIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'} hover:bg-blue-50/20 transition`}
                     >
                       {/* 行ラベル */}
@@ -420,7 +507,7 @@ export default function SummaryViewPage({
                           </div>
                           {/* ？アイコン */}
                           <button
-                            onClick={() => setInfoRowId(row.id)}
+                            onClick={() => setInfoRowIndex(rowIdx)}
                             className="flex-shrink-0 w-5 h-5 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-400 hover:text-gray-600 flex items-center justify-center text-[10px] font-bold transition ml-1"
                             title="この指標の説明を表示"
                           >
@@ -483,12 +570,12 @@ export default function SummaryViewPage({
       )}
 
       {/* 指標説明モーダル */}
-      {infoRowId && infoCard && (
+      {infoRowIndex !== null && infoCard && (
         <MetricInfoModal
           card={infoCard}
           formula={infoFormula}
           allCards={allCards}
-          onClose={() => setInfoRowId(null)}
+          onClose={() => setInfoRowIndex(null)}
         />
       )}
     </div>

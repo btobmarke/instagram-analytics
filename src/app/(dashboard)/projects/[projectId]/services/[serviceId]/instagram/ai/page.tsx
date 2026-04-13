@@ -114,7 +114,7 @@ export default function InstagramAiReportPage({
   }, [selected, service?.service_name])
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 w-full">
+    <div className="p-6 max-w-6xl mx-auto space-y-6 w-full">
       <nav className="flex items-center gap-2 text-sm text-gray-400 flex-wrap">
         <Link href="/clients" className="hover:text-purple-600">
           クライアント一覧

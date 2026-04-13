@@ -11,6 +11,8 @@ function toTemplate(row: Record<string, unknown>): SummaryTemplate {
     serviceId:   row.serviceId   as string,
     name:        row.name        as string,
     timeUnit:    row.timeUnit    as TimeUnit,
+    rangeStart:  (row.rangeStart ?? null) as string | null,
+    rangeEnd:    (row.rangeEnd ?? null) as string | null,
     rows:        (row.rows        ?? []) as StoredTemplateRow[],
     customCards: (row.customCards ?? []) as MetricCard[],
     createdAt:   row.createdAt   as string,
@@ -61,6 +63,8 @@ export async function createTemplate(params: {
   serviceId: string
   name: string
   timeUnit?: TimeUnit
+  rangeStart?: string | null
+  rangeEnd?: string | null
   rows?: StoredTemplateRow[]
   customCards?: MetricCard[]
 }): Promise<SummaryTemplate> {
@@ -71,6 +75,8 @@ export async function createTemplate(params: {
       body: JSON.stringify({
         name:         params.name,
         time_unit:    params.timeUnit    ?? 'day',
+        range_start:  params.rangeStart ?? undefined,
+        range_end:    params.rangeEnd ?? undefined,
         rows:         params.rows        ?? [],
         custom_cards: params.customCards ?? [],
       }),
@@ -83,7 +89,7 @@ export async function createTemplate(params: {
 export async function updateTemplate(
   templateId: string,
   serviceId: string,
-  patch: Partial<Pick<SummaryTemplate, 'name' | 'timeUnit' | 'rows' | 'customCards'>>,
+  patch: Partial<Pick<SummaryTemplate, 'name' | 'timeUnit' | 'rows' | 'customCards' | 'rangeStart' | 'rangeEnd'>>,
 ): Promise<SummaryTemplate | null> {
   try {
     const row = await apiFetch<Record<string, unknown>>(
@@ -93,6 +99,8 @@ export async function updateTemplate(
         body: JSON.stringify({
           name:         patch.name,
           time_unit:    patch.timeUnit,
+          range_start:  patch.rangeStart,
+          range_end:    patch.rangeEnd,
           rows:         patch.rows,
           custom_cards: patch.customCards,
         }),

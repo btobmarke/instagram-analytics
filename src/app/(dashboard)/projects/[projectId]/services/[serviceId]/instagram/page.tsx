@@ -126,7 +126,7 @@ export default function InstagramServicePage({
   const token = account?.ig_account_tokens?.[0]
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6 max-w-6xl mx-auto">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-sm text-gray-400 mb-4 flex-wrap">
         <Link href="/clients" className="hover:text-purple-600">クライアント一覧</Link>

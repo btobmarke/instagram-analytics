@@ -25,9 +25,16 @@ export interface FormulaStep {
   operandId: string
 }
 
+/** 計算結果に適用する閾値（LINE カスタム指標など）。満たさないときは null 扱い */
+export type FormulaThresholdMode = 'none' | 'gte' | 'lte'
+
 export interface FormulaNode {
   baseOperandId: string
   steps: FormulaStep[]
+  /** 演算後の値が条件を満たすときだけ表示（満たさないセルは —） */
+  thresholdMode?: FormulaThresholdMode
+  /** thresholdMode が gte / lte のとき必須 */
+  thresholdValue?: number | null
 }
 
 export const OPERATOR_SYMBOLS: Record<FormulaOperator, string> = {
@@ -59,7 +66,14 @@ export function formatFormula(
     parts.push(` ${OPERATOR_SYMBOLS[s.operator]} `)
     parts.push(get(s.operandId))
   }
-  return parts.join('')
+  let out = parts.join('')
+  const tm = formula.thresholdMode ?? 'none'
+  if (tm === 'gte' && formula.thresholdValue != null) {
+    out += ` （閾値以上: ${formula.thresholdValue}）`
+  } else if (tm === 'lte' && formula.thresholdValue != null) {
+    out += ` （閾値以下: ${formula.thresholdValue}）`
+  }
+  return out
 }
 
 /** テーブルの行 */
@@ -69,13 +83,14 @@ export interface TableRow {
   cells: Record<string, string>
 }
 
-export type TimeUnit = 'hour' | 'day' | 'week' | 'month'
+export type TimeUnit = 'hour' | 'day' | 'week' | 'month' | 'custom_range'
 
 export const TIME_UNIT_LABELS: Record<TimeUnit, string> = {
   hour: '1 時間',
   day:  '1 日',
   week: '1 週間',
   month:'1 ヶ月',
+  custom_range: '期間指定（YYYYMMDD~YYYYMMDD）',
 }
 
 // ── テンプレート保存形式 ──────────────────────────────────────
@@ -91,6 +106,9 @@ export interface SummaryTemplate {
   serviceId: string
   name: string
   timeUnit: TimeUnit
+  /** timeUnit === custom_range のとき YYYY-MM-DD */
+  rangeStart?: string | null
+  rangeEnd?: string | null
   rows: StoredTemplateRow[]
   customCards: MetricCard[]
   createdAt: string

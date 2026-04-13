@@ -1,8 +1,32 @@
 {
   "crons": [
     {
+      "path": "/api/batch/lp-aggregate",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/batch/google-ads-daily",
+      "schedule": "15 2 * * *"
+    },
+    {
       "path": "/api/batch/media-collector",
       "schedule": "30 2 * * *"
+    },
+    {
+      "path": "/api/batch/ga4-collector",
+      "schedule": "15 3 * * *"
+    },
+    {
+      "path": "/api/batch/clarity-collector",
+      "schedule": "45 3 * * *"
+    },
+    {
+      "path": "/api/batch/gbp-daily",
+      "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/batch/line-oam-daily",
+      "schedule": "30 4 * * *"
     },
     {
       "path": "/api/batch/insight-collector",
@@ -13,16 +37,12 @@
       "schedule": "45 * * * *"
     },
     {
-      "path": "/api/batch/ai-analysis",
-      "schedule": "0 6 * * 1"
-    },
-    {
       "path": "/api/batch/lp-session-cleanup",
       "schedule": "*/30 * * * *"
     },
     {
-      "path": "/api/batch/lp-aggregate",
-      "schedule": "0 2 * * *"
+      "path": "/api/batch/ai-analysis",
+      "schedule": "0 6 * * 1"
     }
   ]
 }
