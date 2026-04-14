@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { validateBatchRequest, logBatchAuthFailure } from '@/lib/utils/batch-auth'
 import { syncGoogleAdsForServiceConfig } from '@/lib/google-ads/sync-service'
+import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 
 export async function GET(request: NextRequest) {
   if (!validateBatchRequest(request)) {
@@ -104,13 +105,30 @@ async function finalize(
   processed: number,
   errors: Array<{ serviceId: string; error: string }>
 ) {
-  if (!jobLogId) return
-  await admin.from('batch_job_logs').update({
-    status: errors.length === 0 ? 'success' : processed > 0 ? 'partial' : 'failed',
-    records_processed: processed,
-    records_failed: errors.length,
-    error_message: errors.length ? JSON.stringify(errors).slice(0, 4000) : null,
-    finished_at: new Date().toISOString(),
-    duration_ms: Date.now() - startedAt.getTime(),
-  }).eq('id', jobLogId)
+  const status = errors.length === 0 ? 'success' : processed > 0 ? 'partial' : 'failed'
+  if (jobLogId) {
+    await admin.from('batch_job_logs').update({
+      status,
+      records_processed: processed,
+      records_failed: errors.length,
+      error_message: errors.length ? JSON.stringify(errors).slice(0, 4000) : null,
+      finished_at: new Date().toISOString(),
+      duration_ms: Date.now() - startedAt.getTime(),
+    }).eq('id', jobLogId)
+  }
+  if (status !== 'success') {
+    await notifyBatchError({
+      jobName: 'google_ads_daily',
+      processed,
+      errorCount: errors.length,
+      errors,
+      executedAt: startedAt,
+    })
+  } else {
+    await notifyBatchSuccess({
+      jobName: 'google_ads_daily',
+      processed,
+      executedAt: startedAt,
+    })
+  }
 }

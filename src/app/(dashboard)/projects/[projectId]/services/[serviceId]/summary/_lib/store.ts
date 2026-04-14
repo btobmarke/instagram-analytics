@@ -85,31 +85,27 @@ export async function createTemplate(params: {
   return toTemplate(row)
 }
 
-/** テンプレートを更新 */
+/** テンプレートを更新（失敗時は例外を throw） */
 export async function updateTemplate(
   templateId: string,
   serviceId: string,
   patch: Partial<Pick<SummaryTemplate, 'name' | 'timeUnit' | 'rows' | 'customCards' | 'rangeStart' | 'rangeEnd'>>,
-): Promise<SummaryTemplate | null> {
-  try {
-    const row = await apiFetch<Record<string, unknown>>(
-      `/api/services/${serviceId}/summary/templates/${templateId}`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({
-          name:         patch.name,
-          time_unit:    patch.timeUnit,
-          range_start:  patch.rangeStart,
-          range_end:    patch.rangeEnd,
-          rows:         patch.rows,
-          custom_cards: patch.customCards,
-        }),
-      },
-    )
-    return toTemplate(row)
-  } catch {
-    return null
-  }
+): Promise<SummaryTemplate> {
+  const row = await apiFetch<Record<string, unknown>>(
+    `/api/services/${serviceId}/summary/templates/${templateId}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        name:         patch.name,
+        time_unit:    patch.timeUnit,
+        range_start:  patch.rangeStart,
+        range_end:    patch.rangeEnd,
+        rows:         patch.rows,
+        custom_cards: patch.customCards,
+      }),
+    },
+  )
+  return toTemplate(row)
 }
 
 /** テンプレートを削除 */

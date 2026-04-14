@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { decrypt } from '@/lib/utils/crypto'
+import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 import {
   fetchClarityDailySummary,
   fetchClarityPageMetrics,
@@ -279,8 +280,8 @@ export async function POST(request: NextRequest) {
   })
 
   // batch_job_logs UPDATE
+  const batchStatus = okCount > 0 && errorCount === 0 ? 'success' : okCount > 0 ? 'partial' : 'failed'
   if (jobLog) {
-    const batchStatus = okCount > 0 && errorCount === 0 ? 'success' : okCount > 0 ? 'partial' : 'failed'
     await supabase.from('batch_job_logs').update({
       status: batchStatus,
       records_processed: okCount,
@@ -288,6 +289,24 @@ export async function POST(request: NextRequest) {
       finished_at: finishedAt,
       duration_ms: new Date(finishedAt).getTime() - new Date(startedAt).getTime(),
     }).eq('id', jobLog.id)
+  }
+
+  if (batchStatus !== 'success') {
+    const errorResults = results.filter(r => r.status === 'error')
+    await notifyBatchError({
+      jobName: 'clarity_collector',
+      processed: okCount,
+      errorCount,
+      errors: errorResults.map(r => ({ serviceId: r.serviceId, error: r.error ?? '不明なエラー' })),
+      executedAt: new Date(startedAt),
+    })
+  } else {
+    await notifyBatchSuccess({
+      jobName: 'clarity_collector',
+      processed: okCount,
+      executedAt: new Date(startedAt),
+      lines: [`対象日: ${targetDate}`, `処理サービス数: ${results.length}`],
+    })
   }
 
   return NextResponse.json({

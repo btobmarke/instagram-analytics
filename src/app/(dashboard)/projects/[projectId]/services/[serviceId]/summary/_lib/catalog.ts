@@ -142,13 +142,36 @@ const LP_USER: [string, string, string][] = [
   ['user_temperature',   'ユーザー温度',          '累計インテントスコアに基づくユーザーの温度感（COLD / WARM / HOT）。'],
 ]
 
+// ── IG 接頭辞ユーティリティ ────────────────────────────────────────
+const IG_LABEL_PREFIXES: Record<string, string> = {
+  'ig_account_insight_fact': 'アカウント',
+  'ig_media_insight_feed':   'フィード',
+  'ig_media_insight_reels':  'リール',
+  'ig_media_insight_story':  'ストーリー',
+}
+const IG_SEP = '：'
+
+/**
+ * テンプレートに保存済みのラベルへ IG 接頭辞を付与する。
+ * metricRef（"テーブル名.フィールド名" 形式）でカテゴリを判定し、
+ * 未付与のときだけ接頭辞を追加する。IG 以外の指標はそのまま返す。
+ */
+export function resolveIGLabel(metricRef: string, storedLabel: string): string {
+  const table  = metricRef.split('.')[0]
+  const prefix = IG_LABEL_PREFIXES[table]
+  if (!prefix) return storedLabel
+  const full = prefix + IG_SEP
+  if (storedLabel.startsWith(full)) return storedLabel // 二重付与防止
+  return full + storedLabel
+}
+
 export function getMetricCatalog(serviceType: string): MetricCard[] {
   switch (serviceType) {
     case 'instagram': return [
-      ...IG_ACCOUNT.map(([f,l,d]) => card('ig_account_insight_fact',  f, l, 'アカウントインサイト', d)),
-      ...IG_FEED   .map(([f,l,d]) => card('ig_media_insight_feed',     f, l, 'フィード投稿',         d)),
-      ...IG_REELS  .map(([f,l,d]) => card('ig_media_insight_reels',    f, l, 'リール投稿',           d)),
-      ...IG_STORY  .map(([f,l,d]) => card('ig_media_insight_story',    f, l, 'ストーリーズ',         d)),
+      ...IG_ACCOUNT.map(([f,l,d]) => card('ig_account_insight_fact',  f, `アカウント${IG_SEP}${l}`, 'アカウントインサイト', d)),
+      ...IG_FEED   .map(([f,l,d]) => card('ig_media_insight_feed',     f, `フィード${IG_SEP}${l}`,   'フィード投稿',         d)),
+      ...IG_REELS  .map(([f,l,d]) => card('ig_media_insight_reels',    f, `リール${IG_SEP}${l}`,     'リール投稿',           d)),
+      ...IG_STORY  .map(([f,l,d]) => card('ig_media_insight_story',    f, `ストーリー${IG_SEP}${l}`, 'ストーリーズ',         d)),
     ]
     case 'gbp': return [
       ...GBP_PERF  .map(([f,l,d]) => card('gbp_performance_daily',     f, l, 'パフォーマンス', d)),

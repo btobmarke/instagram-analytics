@@ -4,6 +4,7 @@ export const maxDuration = 300
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { decryptStorageState, buildCookieHeader, type LineOamSessionRecord } from '@/lib/line-oam/crypto'
+import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 import {
   parseCsv,
   toYYYYMMDD, toYYYYMMDDDash, toUnixMs,
@@ -87,6 +88,12 @@ async function runBatch() {
 
     if (!configs || configs.length === 0) {
       await finalize(admin, batchRunId, 'success', [], 0)
+      await notifyBatchSuccess({
+        jobName: 'line_oam_daily',
+        processed: 0,
+        executedAt: startedAt,
+        lines: [`対象日: ${targetDate}`, 'アクティブな LINE OAM サービスがありません'],
+      })
       return NextResponse.json({ success: true, processed: 0, message: 'No active LINE OAM services' })
     }
 
@@ -131,6 +138,17 @@ async function runBatch() {
         headers: { Cookie: cookieHeader }
       })
 
+      /** 401 を受け取ったらセッションを expired にマーク（一度だけ実行） */
+      let sessionMarkedExpired = false
+      const markSessionExpired = async () => {
+        if (sessionMarkedExpired) return
+        sessionMarkedExpired = true
+        await admin.from('line_oam_sessions')
+          .update({ status: 'expired', updated_at: new Date().toISOString() })
+          .eq('id', session.id)
+        console.warn(`[line-oam] session expired — marked as expired: client=${clientId} service=${serviceId}`)
+      }
+
       try {
         // ---- 1. フレンド数 (contacts) ----
         const contactsUrl = buildUrl(tplMap['contacts'] ?? '', {
@@ -156,6 +174,8 @@ async function runBatch() {
           }
         } else {
           console.warn(`[line-oam] contacts ${contactsRes.status} for service=${serviceId}`)
+          if (contactsRes.status === 401) await markSessionExpired()
+          errors.push({ serviceId, error: `contacts HTTP ${contactsRes.status}` })
         }
 
         // ---- 2. フレンド属性 (friends_attr) ----
@@ -221,6 +241,7 @@ async function runBatch() {
           } else {
             const body = await statusRes.text()
             console.warn(`[line-oam] shopcard_status HTTP ${statusRes.status} card=${rcId} url=${statusUrl} body=${body.slice(0, 200)}`)
+            if (statusRes.status === 401) await markSessionExpired()
             errors.push({ serviceId, error: `shopcard_status HTTP ${statusRes.status} card=${rcId}` })
           }
 
@@ -250,6 +271,7 @@ async function runBatch() {
           } else {
             const body = await pointRes.text()
             console.warn(`[line-oam] shopcard_point HTTP ${pointRes.status} card=${rcId} url=${pointUrl} body=${body.slice(0, 200)}`)
+            if (pointRes.status === 401) await markSessionExpired()
             errors.push({ serviceId, error: `shopcard_point HTTP ${pointRes.status} card=${rcId}` })
           }
 
@@ -308,6 +330,13 @@ async function runBatch() {
         duration_ms: Date.now() - startedAt.getTime(),
       }).eq('id', jobLog.id)
     }
+    await notifyBatchError({
+      jobName: 'line_oam_daily',
+      processed: processedServices,
+      errorCount: 1,
+      errors: [{ error: msg }],
+      executedAt: startedAt,
+    })
     return NextResponse.json({ success: false, error: msg }, { status: 500 })
   }
 
@@ -322,6 +351,23 @@ async function runBatch() {
       finished_at: new Date().toISOString(),
       duration_ms: Date.now() - startedAt.getTime(),
     }).eq('id', jobLog.id)
+  }
+
+  if (status !== 'success') {
+    await notifyBatchError({
+      jobName: 'line_oam_daily',
+      processed: processedServices,
+      errorCount: errors.length,
+      errors,
+      executedAt: startedAt,
+    })
+  } else {
+    await notifyBatchSuccess({
+      jobName: 'line_oam_daily',
+      processed: processedServices,
+      executedAt: startedAt,
+      lines: [`対象日: ${targetDate}`],
+    })
   }
 
   return NextResponse.json({

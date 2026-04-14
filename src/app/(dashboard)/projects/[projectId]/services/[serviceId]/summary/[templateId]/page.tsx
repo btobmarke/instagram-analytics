@@ -286,7 +286,8 @@ export default function TemplateEditorPage({
   const [rangeStart, setRangeStart] = useState('')
   const [rangeEnd, setRangeEnd] = useState('')
   const [isDirty, setIsDirty] = useState(false)
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
     getTemplate(templateId, serviceId).then(tmpl => {
@@ -328,19 +329,27 @@ export default function TemplateEditorPage({
       }
     }
     setSaveState('saving')
+    setSaveError(null)
     // カスタム指標はライブラリで管理するため formula を rows に埋め込まない
     const storedRows = rows.map(r => ({ id: r.id, label: r.label }))
-    await updateTemplate(templateId, serviceId, {
-      name: templateName,
-      timeUnit,
-      rangeStart: timeUnit === 'custom_range' ? rangeStart : null,
-      rangeEnd: timeUnit === 'custom_range' ? rangeEnd : null,
-      rows: storedRows,
-      customCards: [],  // ライブラリ移行後は空配列
-    })
-    setIsDirty(false)
-    setSaveState('saved')
-    setTimeout(() => setSaveState('idle'), 2000)
+    try {
+      await updateTemplate(templateId, serviceId, {
+        name: templateName,
+        timeUnit,
+        rangeStart: timeUnit === 'custom_range' ? rangeStart : null,
+        rangeEnd: timeUnit === 'custom_range' ? rangeEnd : null,
+        rows: storedRows,
+        customCards: [],  // ライブラリ移行後は空配列
+      })
+      setIsDirty(false)
+      setSaveState('saved')
+      setTimeout(() => setSaveState('idle'), 2000)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '保存に失敗しました'
+      setSaveError(msg)
+      setSaveState('error')
+      setTimeout(() => setSaveState('idle'), 4000)
+    }
   }, [templateId, serviceId, templateName, timeUnit, rangeStart, rangeEnd, rows])
 
   // フィルタ・タブ・アコーディオン
@@ -510,9 +519,24 @@ export default function TemplateEditorPage({
               サマリーを見る
             </Link>
             {/* 保存 */}
-            <button onClick={handleSave} className={`flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-lg transition shadow-sm ${saveState === 'saved' ? 'bg-green-500 text-white' : isDirty ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-gray-100 text-gray-400 cursor-default'}`}>
-              {saveState === 'saving' ? '保存中...' : saveState === 'saved' ? '✓ 保存済み' : isDirty ? '保存' : '保存済み'}
-            </button>
+            <div className="flex flex-col items-end gap-0.5">
+              <button
+                onClick={handleSave}
+                disabled={saveState === 'saving'}
+                className={`flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-lg transition shadow-sm ${
+                  saveState === 'saved'  ? 'bg-green-500 text-white' :
+                  saveState === 'error'  ? 'bg-red-500 text-white' :
+                  saveState === 'saving' ? 'bg-gray-300 text-gray-500 cursor-not-allowed' :
+                  isDirty ? 'bg-purple-600 text-white hover:bg-purple-700' :
+                  'bg-gray-100 text-gray-400 cursor-default'
+                }`}
+              >
+                {saveState === 'saving' ? '保存中...' : saveState === 'saved' ? '✓ 保存済み' : saveState === 'error' ? '✗ 保存失敗' : isDirty ? '保存' : '保存済み'}
+              </button>
+              {saveState === 'error' && saveError && (
+                <p className="text-[10px] text-red-600 max-w-[200px] text-right">{saveError}</p>
+              )}
+            </div>
           </div>
         </div>
 

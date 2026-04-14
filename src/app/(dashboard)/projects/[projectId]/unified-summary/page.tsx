@@ -4,6 +4,10 @@ import { useState, use, useMemo, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import useSWR, { mutate as swrMutate } from 'swr'
+import {
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  CartesianGrid,
+} from 'recharts'
 import { wmoCodeToEmoji } from '@/lib/external/weather'
 import type { ProjectSummaryTemplate } from './_lib/types'
 import { TIME_UNIT_LABELS } from './_lib/types'
@@ -183,6 +187,13 @@ function ChangeBadge({ change }: { change: number | null }) {
   )
 }
 
+// ── グラフカラーパレット ──────────────────────────────────────────────────────
+const REPORT_CHART_COLORS = [
+  '#7c3aed', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444',
+  '#8b5cf6', '#06b6d4', '#84cc16', '#f97316', '#ec4899',
+]
+
+// ── サービスカード（カードモード） ────────────────────────────────────────────
 function ServiceCard({ service, periods }: { service: UnifiedService; periods: string[] }) {
   const info = SERVICE_TYPE_INFO[service.serviceType] ?? {
     label: service.serviceType, abbr: service.serviceType, icon: '⚙️',
@@ -235,9 +246,124 @@ function ServiceCard({ service, periods }: { service: UnifiedService; periods: s
   )
 }
 
+// ── サービスチャート（グラフモード） ──────────────────────────────────────────
+function ServiceChart({ service, periods }: { service: UnifiedService; periods: string[] }) {
+  const info = SERVICE_TYPE_INFO[service.serviceType] ?? {
+    label: service.serviceType, abbr: service.serviceType, icon: '⚙️',
+    color: 'text-gray-700', bgColor: 'bg-gray-50 border-gray-200',
+  }
+  const defaultRefs = SERVICE_DEFAULT_METRICS[service.serviceType] ?? []
+  const displayRefs = defaultRefs.filter(ref => service.metrics[ref])
+
+  if (displayRefs.length === 0) {
+    return (
+      <div className={`rounded-xl border p-4 ${info.bgColor}`}>
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-lg">{info.icon}</span>
+          <p className="text-sm font-bold text-gray-800">{service.name}</p>
+        </div>
+        <p className="text-xs text-gray-400">データがありません</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className={`rounded-xl border p-4 ${info.bgColor}`}>
+      {/* ヘッダ */}
+      <div className="flex items-center gap-2 mb-4">
+        <span className="text-lg">{info.icon}</span>
+        <div>
+          <p className={`text-[10px] font-semibold ${info.color}`}>{info.label}</p>
+          <p className="text-sm font-bold text-gray-800">{service.name}</p>
+        </div>
+      </div>
+
+      {/* 指標ごとにミニグラフ */}
+      <div className="space-y-4">
+        {displayRefs.map((ref, idx) => {
+          const m = service.metrics[ref]
+          const color = REPORT_CHART_COLORS[idx % REPORT_CHART_COLORS.length]
+          const chartData = periods.map(p => ({ period: p, value: m.values[p] ?? null }))
+          const hasData   = chartData.some(d => d.value !== null)
+          const latest    = getLatestValue(m.values, periods)
+          const change    = calcChange(m.values, periods)
+
+          const nums = chartData.map(d => d.value).filter((v): v is number => v !== null)
+          const yMin = nums.length > 0 ? Math.floor(Math.min(...nums) * 0.9) : 0
+          const yMax = nums.length > 0 ? Math.ceil(Math.max(...nums) * 1.1) : 10
+
+          return (
+            <div key={ref} className="bg-white/80 rounded-lg p-3">
+              {/* 指標ラベル + 最新値 */}
+              <div className="flex items-baseline justify-between mb-2">
+                <p className="text-xs text-gray-500 truncate">{m.label}</p>
+                <div className="flex items-baseline gap-1.5 flex-shrink-0 ml-2">
+                  <span className="text-sm font-bold text-gray-900">
+                    {formatValue(latest, ref)}
+                  </span>
+                  <ChangeBadge change={change} />
+                </div>
+              </div>
+
+              {/* 折れ線グラフ */}
+              {hasData ? (
+                <ResponsiveContainer width="100%" height={80}>
+                  <LineChart data={chartData} margin={{ top: 2, right: 4, left: -28, bottom: 0 }}>
+                    <YAxis domain={[yMin, yMax]} hide />
+                    <Tooltip
+                      formatter={(v) => [formatValue(v as number | null, ref), m.label]}
+                      labelStyle={{ fontSize: 9 }}
+                      contentStyle={{ fontSize: 9, borderRadius: 6, border: '1px solid #e5e7eb', padding: '2px 6px' }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="value"
+                      stroke={color}
+                      strokeWidth={1.5}
+                      dot={false}
+                      activeDot={{ r: 3 }}
+                      connectNulls={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-[80px] flex items-center justify-center text-xs text-gray-300">
+                  データなし
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ── レポートタブ ──────────────────────────────────────────────────────────────
 
-function ReportTab({ data, isLoading }: { data: UnifiedSummaryData | null; isLoading: boolean }) {
+function weatherEmoji(code: number | null): string {
+  if (code == null) return '—'
+  if (code === 0)          return '☀️'
+  if (code <= 3)           return '⛅'
+  if (code <= 48)          return '🌫️'
+  if (code <= 55)          return '🌦️'
+  if (code <= 65)          return '🌧️'
+  if (code <= 77)          return '❄️'
+  if (code <= 82)          return '🌦️'
+  return '⛈️'
+}
+
+function ReportTab({
+  data,
+  isLoading,
+  externalData,
+}: {
+  data: UnifiedSummaryData | null
+  isLoading: boolean
+  externalData: ExternalData | null
+}) {
+  const [displayMode, setDisplayMode] = useState<'card' | 'chart'>('card')
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -252,11 +378,77 @@ function ReportTab({ data, isLoading }: { data: UnifiedSummaryData | null; isLoa
       </div>
     )
   }
+
+  // 今日（JST）の外因変数
+  const todayKey = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10)
+  const todayExt = externalData?.dates[todayKey] ?? null
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-      {data.services.map(svc => (
-        <ServiceCard key={svc.id} service={svc} periods={data.periods} />
-      ))}
+    <div>
+      {/* 今日の祝日・天気バナー */}
+      {(todayExt?.is_holiday || (externalData?.hasWeather && todayExt?.temperature_max != null)) && (
+        <div className="flex flex-wrap items-center gap-2 mb-4 px-1">
+          {todayExt?.is_holiday && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-pink-50 text-pink-700 border border-pink-200">
+              🎌 {todayExt.holiday_name ?? '祝日'}
+            </span>
+          )}
+          {externalData?.hasWeather && todayExt?.temperature_max != null && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-sky-50 text-sky-700 border border-sky-200">
+              {weatherEmoji(todayExt.weather_code)}&nbsp;
+              {todayExt.temperature_max}° / {todayExt.temperature_min}°
+              {todayExt.precipitation_mm != null && todayExt.precipitation_mm > 0 && (
+                <span className="ml-1 text-sky-500">💧{todayExt.precipitation_mm}mm</span>
+              )}
+            </span>
+          )}
+          <span className="text-[10px] text-gray-400">今日の状況</span>
+        </div>
+      )}
+
+      {/* 表示モード切替 */}
+      <div className="flex justify-end mb-4">
+        <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
+          <button
+            onClick={() => setDisplayMode('card')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+              displayMode === 'card'
+                ? 'bg-white text-gray-800 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+            </svg>
+            カード
+          </button>
+          <button
+            onClick={() => setDisplayMode('chart')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+              displayMode === 'chart'
+                ? 'bg-white text-gray-800 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4v16" />
+            </svg>
+            グラフ
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {data.services.map(svc =>
+          displayMode === 'card' ? (
+            <ServiceCard key={svc.id} service={svc} periods={data.periods} />
+          ) : (
+            <ServiceChart key={svc.id} service={svc} periods={data.periods} />
+          ),
+        )}
+      </div>
     </div>
   )
 }
@@ -830,7 +1022,7 @@ export default function UnifiedSummaryPage({
     success: boolean
     data: ExternalData
   }>(
-    externalParams && activeTab === 'table'
+    externalParams && activeTab === 'report'
       ? `/api/projects/${projectId}/unified-summary/external?${externalParams}`
       : null,
     fetcher,
@@ -935,7 +1127,7 @@ export default function UnifiedSummaryPage({
 
       {/* コンテンツ */}
       {activeTab === 'report' ? (
-        <ReportTab data={summaryData} isLoading={isLoading} />
+        <ReportTab data={summaryData} isLoading={isLoading} externalData={externalData} />
       ) : activeTab === 'templates' ? (
         <TemplateListTab projectId={projectId} />
       ) : (

@@ -83,6 +83,7 @@ export default function SummaryTemplatePage({
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
 
   // テンプレート一覧を読み込む
@@ -97,11 +98,14 @@ export default function SummaryTemplatePage({
   const handleCreate = async () => {
     if (!newName.trim() || creating) return
     setCreating(true)
+    setCreateError(null)
     try {
       const tmpl = await createTemplate({ serviceId, name: newName.trim() })
       setNewName('')
       setShowCreateModal(false)
       router.push(`/projects/${projectId}/services/${serviceId}/summary/${tmpl.id}`)
+    } catch (e) {
+      setCreateError(e instanceof Error ? e.message : 'テンプレートの作成に失敗しました')
     } finally {
       setCreating(false)
     }
@@ -323,25 +327,30 @@ export default function SummaryTemplatePage({
 
       {/* 新規作成モーダル */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowCreateModal(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { setShowCreateModal(false); setCreateError(null) }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden" onClick={e => e.stopPropagation()}>
             <div className="px-6 py-4 border-b border-gray-100">
               <h2 className="text-base font-bold text-gray-900">新規テンプレート</h2>
               <p className="text-xs text-gray-500 mt-0.5">テンプレート名を入力してください</p>
             </div>
-            <div className="px-6 py-5">
+            <div className="px-6 py-5 space-y-3">
               <input
                 type="text"
                 value={newName}
-                onChange={e => setNewName(e.target.value)}
+                onChange={e => { setNewName(e.target.value); setCreateError(null) }}
                 onKeyDown={e => e.key === 'Enter' && handleCreate()}
                 placeholder="例: 月次サマリー"
                 autoFocus
                 className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
+              {createError && (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  ⚠️ {createError}
+                </p>
+              )}
             </div>
             <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
-              <button onClick={() => setShowCreateModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">
+              <button onClick={() => { setShowCreateModal(false); setCreateError(null) }} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">
                 キャンセル
               </button>
               <button

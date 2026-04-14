@@ -376,6 +376,104 @@ export async function fetchGbpPerformance(
 }
 
 /**
+ * gbp_reviews
+ * date軸: create_time TIMESTAMPTZ
+ * star_rating は 'ONE'→1 … 'FIVE'→5 に変換して avg
+ * テキスト系フィールド（comment, reviewer_name, reply_comment等）は non-null 件数を返す
+ */
+const STAR_RATING_MAP: Record<string, number> = {
+  ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5,
+}
+export async function fetchGbpReviews(
+  supabase: SupabaseServerClient,
+  serviceId: string,
+  fields: string[],
+  periods: Period[],
+): Promise<Record<string, Record<string, number | null>>> {
+  const result: Record<string, Record<string, number | null>> = {}
+
+  const { data: siteRow } = await supabase
+    .from('gbp_sites')
+    .select('id')
+    .eq('service_id', serviceId)
+    .single()
+  if (!siteRow) return result
+
+  const siteId = siteRow.id
+  const rangeStart = periods[0].start.toISOString()
+  const rangeEnd   = periods[periods.length - 1].end.toISOString()
+  // create_time はカタログフィールドにも含まれるため Set で重複を排除
+  const selectCols = [...new Set(['create_time', ...fields])].join(',')
+
+  const { data: rawRows } = await supabase
+    .from('gbp_reviews')
+    .select(selectCols)
+    .eq('gbp_site_id', siteId)
+    .gte('create_time', rangeStart)
+    .lte('create_time', rangeEnd)
+  const rows = (rawRows ?? []) as unknown as Record<string, unknown>[]
+
+  for (const field of fields) {
+    const accum = emptyAccum(periods)
+    for (const row of rows) {
+      const label = bucketDate(new Date(row.create_time as string), periods)
+      if (field === 'star_rating') {
+        const num = STAR_RATING_MAP[row[field] as string] ?? null
+        addValue(accum, label, num)
+      } else {
+        // テキスト系: non-null なら 1 としてカウント
+        addValue(accum, label, row[field] != null ? 1 : null)
+      }
+    }
+    // star_rating のみ平均、その他はカウント（sum）
+    result[`gbp_reviews.${field}`] = finalizeAccum(accum, field === 'star_rating' ? 'avg' : 'sum')
+  }
+  return result
+}
+
+/**
+ * line_oam_friends_attr
+ * date DATE, service_id FK
+ * gender / age はカテゴリ文字列なので non-null カウント
+ * percentage は AVG_FIELDS に含まれるため avg
+ */
+export async function fetchLineAttr(
+  supabase: SupabaseServerClient,
+  serviceId: string,
+  fields: string[],
+  periods: Period[],
+): Promise<Record<string, Record<string, number | null>>> {
+  const result: Record<string, Record<string, number | null>> = {}
+
+  const rangeStart = periods[0].start.toISOString().slice(0, 10)
+  const rangeEnd   = periods[periods.length - 1].end.toISOString().slice(0, 10)
+  const selectCols = ['date', ...fields].join(',')
+
+  const { data: rawRows } = await supabase
+    .from('line_oam_friends_attr')
+    .select(selectCols)
+    .eq('service_id', serviceId)
+    .gte('date', rangeStart)
+    .lte('date', rangeEnd)
+  const rows = (rawRows ?? []) as unknown as Record<string, unknown>[]
+
+  for (const field of fields) {
+    const accum = emptyAccum(periods)
+    for (const row of rows) {
+      const label = bucketDate(new Date(row.date as string), periods)
+      if (field === 'percentage') {
+        addValue(accum, label, row[field] as number)
+      } else {
+        // gender / age: non-null なら 1 としてカウント
+        addValue(accum, label, row[field] != null ? 1 : null)
+      }
+    }
+    result[`line_oam_friends_attr.${field}`] = finalizeAccum(accum, AVG_FIELDS.has(field) ? 'avg' : 'sum')
+  }
+  return result
+}
+
+/**
  * line_oam_friends_daily
  * 直接カラム、date DATE, service_id FK
  */
@@ -448,7 +546,14 @@ export async function fetchLineRewardcardTable(
     for (const row of rows) {
       const rawDate = row[dateCol] as string
       const label = bucketDate(new Date(rawDate), periods)
-      addValue(accum, label, row[field] as number)
+      const rawVal = row[field]
+      // テキスト型フィールド（customer_id, point_type 等）は non-null カウント
+      // 数値型フィールドはそのまま加算
+      const numVal: number | null | undefined =
+        typeof rawVal === 'string'
+          ? 1          // テキスト値は「存在する = 1」としてカウント
+          : (rawVal as number | null | undefined)
+      addValue(accum, label, numVal)
     }
     result[`${tableName}.${field}`] = finalizeAccum(accum, AVG_FIELDS.has(field) ? 'avg' : 'sum')
   }
@@ -585,8 +690,14 @@ export async function fetchMetricsByRefs(
       case 'gbp_performance_daily':
         queries.push(fetchGbpPerformance(supabase, serviceId, fields, periods))
         break
+      case 'gbp_reviews':
+        queries.push(fetchGbpReviews(supabase, serviceId, fields, periods))
+        break
       case 'line_oam_friends_daily':
         queries.push(fetchLineFriendsDaily(supabase, serviceId, fields, periods))
+        break
+      case 'line_oam_friends_attr':
+        queries.push(fetchLineAttr(supabase, serviceId, fields, periods))
         break
       case 'line_oam_shopcard_status':
       case 'line_oam_shopcard_point':
@@ -616,10 +727,15 @@ export async function fetchMetricsByRefs(
     }
   }
 
-  const results = await Promise.all(queries)
+  // allSettled で実行: 1テーブルが失敗しても他テーブルの結果は反映する
+  const settled = await Promise.allSettled(queries)
   const merged: Record<string, Record<string, number | null>> = {}
-  for (const r of results) {
-    Object.assign(merged, r)
+  for (const result of settled) {
+    if (result.status === 'fulfilled') {
+      Object.assign(merged, result.value)
+    } else {
+      console.error('[fetchMetricsByRefs] handler error:', result.reason)
+    }
   }
 
   // 未実装テーブルのフィールドは null で埋める

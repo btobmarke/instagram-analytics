@@ -6,6 +6,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { getAccessTokenFromCredential, type GbpCredentialRow } from '@/lib/gbp/auth'
 import { fetchPerformance, fetchReviews, listLocations } from '@/lib/gbp/api'
 import { METRIC_TO_COLUMN } from '@/lib/gbp/constants'
+import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 
 // JSTで「今日」の日付文字列を返す
 function jstToday(): Date {
@@ -260,6 +261,13 @@ async function runBatch(_request: NextRequest) {
         duration_ms: Date.now() - startedAt.getTime(),
       }).eq('id', jobLog.id)
     }
+    await notifyBatchError({
+      jobName: 'gbp_daily',
+      processed: processedSites,
+      errorCount: 1,
+      errors: [{ error: msg }],
+      executedAt: startedAt,
+    })
     return NextResponse.json({ success: false, error: msg }, { status: 500 })
   }
 
@@ -274,6 +282,23 @@ async function runBatch(_request: NextRequest) {
       finished_at: new Date().toISOString(),
       duration_ms: Date.now() - startedAt.getTime(),
     }).eq('id', jobLog.id)
+  }
+
+  if (status !== 'success') {
+    await notifyBatchError({
+      jobName: 'gbp_daily',
+      processed: processedSites,
+      errorCount: errors.length,
+      errors,
+      executedAt: startedAt,
+    })
+  } else {
+    await notifyBatchSuccess({
+      jobName: 'gbp_daily',
+      processed: processedSites,
+      executedAt: startedAt,
+      lines: [`対象日: ${targetDateStr}`, `集計日数: ${days} 日分`],
+    })
   }
 
   return NextResponse.json({

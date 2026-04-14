@@ -120,15 +120,21 @@ async function runBatch(request: NextRequest) {
 
         // UPSERT 行を構築
         // custom_range のラベルは "YYYYMMDD~YYYYMMDD" 形式なので period label で値を取る
+        // null 値はキャッシュしない（バッチ未取得日と「値=0」を区別するため & stale null 汚染を防ぐ）
         const periodLabel = targetPeriods[0].label
-        const upsertRows = fieldRefs.map(ref => ({
-          project_id: svc.project_id,
-          service_id: svc.id,
-          date:       targetDate,
-          metric_ref: ref,
-          value:      rawData[ref]?.[periodLabel] ?? null,
-          updated_at: new Date().toISOString(),
-        }))
+        const upsertRows = fieldRefs
+          .map(ref => ({
+            project_id: svc.project_id,
+            service_id: svc.id,
+            date:       targetDate,
+            metric_ref: ref,
+            value:      rawData[ref]?.[periodLabel] ?? null,
+            updated_at: new Date().toISOString(),
+          }))
+          .filter(row => row.value !== null)
+
+        // upsertRows が空（全フィールドが null）ならスキップ
+        if (upsertRows.length === 0) continue
 
         // 500件ずつに分割して UPSERT（Supabase の上限対策）
         const CHUNK = 500
@@ -197,6 +203,4 @@ async function runBatch(request: NextRequest) {
     return NextResponse.json({ success: false, error: msg }, { status: 500 })
   }
 
-  // TypeScript の exhaustive check 用（到達しない）
-  void periodsOrError
 }

@@ -4,11 +4,15 @@ import { use, useEffect, useState, useMemo } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
+import {
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  CartesianGrid, Legend,
+} from 'recharts'
 import type { ServiceDetail, SummaryTemplate, TimeUnit, FormulaNode, MetricCard } from '../../_lib/types'
 import { TIME_UNIT_LABELS, OPERATOR_SYMBOLS, formatFormula } from '../../_lib/types'
 import { getMetricCatalog } from '../../_lib/catalog'
 import { getTemplate } from '../../_lib/store'
-import { generateJstDayPeriodLabels, generateCustomRangePeriod } from '@/lib/summary/jst-periods'
+import { generateJstDayPeriodLabels, generateJstDayPeriods, generateCustomRangePeriod } from '@/lib/summary/jst-periods'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -267,6 +271,307 @@ function MetricInfoModal({
   )
 }
 
+// ── チャートカラーパレット ─────────────────────────────────────────────────────
+// ── 外因変数（祝日・天気）────────────────────────────────────────────────────
+interface ExternalDayData {
+  is_holiday:       boolean | null
+  holiday_name:     string | null
+  temperature_max:  number | null
+  temperature_min:  number | null
+  precipitation_mm: number | null
+  weather_code:     number | null
+  weather_desc:     string | null
+}
+interface ExternalData {
+  hasWeather: boolean
+  dates: Record<string, ExternalDayData>
+}
+function weatherEmoji(code: number | null): string {
+  if (code == null) return '—'
+  if (code === 0)   return '☀️'
+  if (code <= 3)    return '⛅'
+  if (code <= 48)   return '🌫️'
+  if (code <= 55)   return '🌦️'
+  if (code <= 65)   return '🌧️'
+  if (code <= 77)   return '❄️'
+  if (code <= 82)   return '🌦️'
+  return '⛈️'
+}
+
+const CHART_COLORS = [
+  '#7c3aed', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444',
+  '#8b5cf6', '#06b6d4', '#84cc16', '#f97316', '#ec4899',
+]
+
+// ── グラフモード: 指標ごとに折れ線グラフを並べる ─────────────────────────────
+
+interface ChartRow {
+  id: string
+  label: string
+  formula?: FormulaNode
+}
+
+function ServiceSummaryChartView({
+  rows,
+  allCards,
+  timeHeaders,
+  rawData,
+  dataLoading,
+  themeAccent,
+  evalFormula: evalFn,
+  formatCell: fmtCell,
+}: {
+  rows: ChartRow[]
+  allCards: MetricCard[]
+  timeHeaders: string[]
+  rawData: Record<string, Record<string, number | null>>
+  dataLoading: boolean
+  themeAccent: string
+  evalFormula: (f: FormulaNode, d: Record<string, Record<string, number | null>>, label: string) => number | null
+  formatCell: (v: number | null) => string
+}) {
+  if (dataLoading) {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {rows.map((_, i) => (
+          <div key={i} className="bg-white rounded-xl border border-gray-200 p-4 h-48 animate-pulse">
+            <div className="h-4 bg-gray-100 rounded w-1/3 mb-4" />
+            <div className="h-32 bg-gray-100 rounded" />
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  // 全指標を2列グリッドで並べる（1指標 = 1カード）
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {rows.map((row, rowIdx) => {
+        const srcCard = allCards.find(c => c.id === row.id)
+        const formula: FormulaNode | undefined = row.formula ?? srcCard?.formula
+        const isCustom = !!formula
+        const color = CHART_COLORS[rowIdx % CHART_COLORS.length]
+        // カタログの最新ラベル優先（接頭辞付き）。旧テンプレートは保存ラベルで代替
+        const displayLabel = srcCard?.label ?? row.label
+
+        // Recharts 用データ配列
+        const chartData = timeHeaders.map(h => {
+          const v = formula ? evalFn(formula, rawData, h) : (rawData[row.id]?.[h] ?? null)
+          return { period: h, value: v }
+        })
+
+        const hasData = chartData.some(d => d.value !== null)
+
+        // Y軸の最小値を少し下にパディング
+        const vals = chartData.map(d => d.value).filter((v): v is number => v !== null)
+        const yMin = vals.length > 0 ? Math.floor(Math.min(...vals) * 0.9) : 0
+        const yMax = vals.length > 0 ? Math.ceil(Math.max(...vals) * 1.1) : 10
+
+        return (
+          <div key={`chart-${rowIdx}-${row.id}`} className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+            {/* カードヘッダ */}
+            <div className="flex items-center gap-1.5 mb-3">
+              {isCustom && (
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" title="カスタム指標" />
+              )}
+              <span style={{ color }} className="text-sm font-semibold truncate">
+                {displayLabel}
+              </span>
+              {vals.length > 0 && (
+                <span className="ml-auto text-xs font-mono text-gray-500 flex-shrink-0">
+                  最新: {fmtCell(vals[vals.length - 1])}
+                </span>
+              )}
+            </div>
+
+            {/* グラフ or データなし */}
+            {hasData ? (
+              <ResponsiveContainer width="100%" height={180}>
+                <LineChart data={chartData} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis
+                    dataKey="period"
+                    tick={{ fontSize: 9, fill: '#9ca3af' }}
+                    interval="preserveStartEnd"
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    domain={[yMin, yMax]}
+                    tick={{ fontSize: 9, fill: '#9ca3af' }}
+                    tickLine={false}
+                    axisLine={false}
+                    width={50}
+                    tickFormatter={(v: number) => fmtCell(v)}
+                  />
+                  <Tooltip
+                    formatter={(v) => [fmtCell(v as number | null), displayLabel]}
+                    labelStyle={{ fontSize: 10 }}
+                    contentStyle={{ fontSize: 10, borderRadius: 8, border: '1px solid #e5e7eb' }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="value"
+                    stroke={color}
+                    strokeWidth={2}
+                    dot={{ r: 3, fill: color, strokeWidth: 0 }}
+                    activeDot={{ r: 5 }}
+                    connectNulls={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-[180px] flex items-center justify-center text-xs text-gray-400">
+                データがありません
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── 複合グラフモード: チェックボックスで選択した指標を1枚のグラフに重ねて表示 ──
+
+function ServiceSummaryCombinedChart({
+  rows,
+  allCards,
+  timeHeaders,
+  rawData,
+  dataLoading,
+  evalFormula: evalFn,
+  formatCell: fmtCell,
+}: {
+  rows: ChartRow[]
+  allCards: MetricCard[]
+  timeHeaders: string[]
+  rawData: Record<string, Record<string, number | null>>
+  dataLoading: boolean
+  evalFormula: (f: FormulaNode, d: Record<string, Record<string, number | null>>, label: string) => number | null
+  formatCell: (v: number | null) => string
+}) {
+  const [selected, setSelected] = useState<Set<number>>(
+    () => new Set(rows.map((_, i) => i)),
+  )
+
+  const toggle = (i: number) =>
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(i)) {
+        if (next.size > 1) next.delete(i) // 最低1つは選択を維持
+      } else {
+        next.add(i)
+      }
+      return next
+    })
+
+  // { period: h, m_0: val, m_1: val, ... }
+  const chartData = timeHeaders.map(h => {
+    const point: Record<string, string | number | null> = { period: h }
+    rows.forEach((row, i) => {
+      const srcCard = allCards.find(c => c.id === row.id)
+      const formula = row.formula ?? srcCard?.formula
+      point[`m_${i}`] = formula ? evalFn(formula, rawData, h) : (rawData[row.id]?.[h] ?? null)
+    })
+    return point
+  })
+
+  if (dataLoading) {
+    return (
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 h-80 animate-pulse">
+        <div className="h-4 bg-gray-100 rounded w-1/4 mb-6" />
+        <div className="h-64 bg-gray-100 rounded" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+      {/* ── チェックボックスパネル ── */}
+      <p className="text-[11px] text-gray-400 mb-3">表示する指標を選択（複数可）</p>
+      <div className="flex flex-wrap gap-2 mb-5 pb-4 border-b border-gray-100">
+        {rows.map((row, i) => {
+          const color        = CHART_COLORS[i % CHART_COLORS.length]
+          const checked      = selected.has(i)
+          const displayLabel = allCards.find(c => c.id === row.id)?.label ?? row.label
+          return (
+            <label
+              key={i}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer select-none transition-all text-xs font-medium ${
+                checked ? 'bg-white shadow-sm' : 'bg-gray-50 opacity-40'
+              }`}
+              style={{ borderColor: checked ? color : '#e5e7eb' }}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => toggle(i)}
+                className="sr-only"
+              />
+              {/* カスタムチェックボックス */}
+              <span
+                className="w-3.5 h-3.5 rounded-sm flex-shrink-0 flex items-center justify-center transition-colors"
+                style={{ backgroundColor: checked ? color : '#d1d5db' }}
+              >
+                {checked && (
+                  <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 12 12">
+                    <polyline points="2,6 5,9 10,3" />
+                  </svg>
+                )}
+              </span>
+              <span style={{ color: checked ? color : '#9ca3af' }}>{displayLabel}</span>
+            </label>
+          )
+        })}
+      </div>
+
+      {/* ── 複合折れ線グラフ ── */}
+      <ResponsiveContainer width="100%" height={340}>
+        <LineChart data={chartData} margin={{ top: 8, right: 20, left: -8, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+          <XAxis
+            dataKey="period"
+            tick={{ fontSize: 9, fill: '#9ca3af' }}
+            interval="preserveStartEnd"
+            tickLine={false}
+            axisLine={false}
+          />
+          <YAxis
+            tick={{ fontSize: 9, fill: '#9ca3af' }}
+            tickLine={false}
+            axisLine={false}
+            width={52}
+            tickFormatter={(v: number) => fmtCell(v)}
+          />
+          <Tooltip
+            formatter={(v, name) => [fmtCell(v as number | null), name as string]}
+            labelStyle={{ fontSize: 10 }}
+            contentStyle={{ fontSize: 10, borderRadius: 8, border: '1px solid #e5e7eb' }}
+          />
+          <Legend wrapperStyle={{ fontSize: 10, paddingTop: 12 }} />
+          {rows.map((row, i) => {
+            const displayLabel = allCards.find(c => c.id === row.id)?.label ?? row.label
+            return selected.has(i) ? (
+              <Line
+                key={i}
+                type="monotone"
+                dataKey={`m_${i}`}
+                name={displayLabel}
+                stroke={CHART_COLORS[i % CHART_COLORS.length]}
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 4 }}
+                connectNulls={false}
+              />
+            ) : null
+          })}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
 export default function SummaryViewPage({
   params,
 }: {
@@ -286,6 +591,7 @@ export default function SummaryViewPage({
   }
 
   const [template, setTemplate] = useState<SummaryTemplate | null>(null)
+  const [displayMode, setDisplayMode] = useState<'table' | 'chart' | 'combined'>('table')
 
   // 「?」モーダル: 行インデックス（同一指標を複数行にしたとき row.id が重複するため）
   const [infoRowIndex, setInfoRowIndex] = useState<number | null>(null)
@@ -363,10 +669,38 @@ export default function SummaryViewPage({
 
   const rawData = rawDataRes?.data ?? {}
 
+  /** 全フィールドが全期間 null → データ未取得状態 */
+  const allNullData = useMemo(() => {
+    if (!rawDataRes || dataLoading) return false
+    const vals = Object.values(rawData)
+    if (vals.length === 0) return false
+    return vals.every(fieldMap => Object.values(fieldMap).every(v => v === null))
+  }, [rawData, rawDataRes, dataLoading])
+
   const timeHeaders = useMemo(() => {
     if (!template) return [] as string[]
     return generateTimeHeaders(template.timeUnit, TIME_COL_COUNT, template.rangeStart, template.rangeEnd)
   }, [template])
+
+  // day 単位のとき: ヘッダラベル → dateKey（YYYY-MM-DD）マッピング
+  const labelToDateKey = useMemo<Map<string, string>>(() => {
+    if (!template || template.timeUnit !== 'day') return new Map()
+    return new Map(generateJstDayPeriods(TIME_COL_COUNT).map(p => [p.label, p.dateKey]))
+  }, [template])
+
+  // 外因変数取得（day 単位のみ）
+  const externalDataUrl = useMemo(() => {
+    if (!template || template.timeUnit !== 'day' || timeHeaders.length === 0) return null
+    const keys = timeHeaders.map(h => labelToDateKey.get(h)).filter((k): k is string => !!k)
+    if (keys.length === 0) return null
+    return `/api/projects/${projectId}/unified-summary/external?from=${keys[0]}&to=${keys[keys.length - 1]}`
+  }, [template, timeHeaders, labelToDateKey, projectId])
+
+  const { data: externalResp } = useSWR<{ success: boolean; data: ExternalData }>(
+    externalDataUrl,
+    fetcher,
+  )
+  const externalData = externalResp?.success ? externalResp.data : null
 
   const axisDescription = useMemo(() => {
     if (!template) return ''
@@ -420,6 +754,54 @@ export default function SummaryViewPage({
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          {/* 表示モード切替 */}
+          <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
+            <button
+              onClick={() => setDisplayMode('table')}
+              title="テーブル表示"
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                displayMode === 'table'
+                  ? 'bg-white text-gray-800 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M3 10h18M3 14h18M10 3v18M14 3v18" />
+              </svg>
+              表
+            </button>
+            <button
+              onClick={() => setDisplayMode('chart')}
+              title="指標ごとにグラフ表示"
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                displayMode === 'chart'
+                  ? 'bg-white text-gray-800 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4v16" />
+              </svg>
+              個別
+            </button>
+            <button
+              onClick={() => setDisplayMode('combined')}
+              title="複数指標を1枚のグラフで表示"
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                displayMode === 'combined'
+                  ? 'bg-white text-gray-800 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 16l4-5 4 3 4-7 4 4" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} strokeOpacity={0.4} d="M3 19l4-3 4 1 4-4 4 2" />
+              </svg>
+              複合
+            </button>
+          </div>
           <Link
             href={`/projects/${projectId}/services/${serviceId}/summary/${templateId}`}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 transition"
@@ -461,131 +843,188 @@ export default function SummaryViewPage({
           </Link>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-          {/* テーブルヘッダ */}
-          <div className={`px-4 py-2 ${theme.bg} border-b ${theme.border} flex items-center justify-between`}>
-            <span className="text-xs font-medium text-gray-600">
-              横軸: {axisDescription}
-            </span>
-            <div className="flex items-center gap-3">
-              {dataLoading && (
-                <span className="text-[10px] text-gray-400 flex items-center gap-1">
-                  <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                  </svg>
-                  データ取得中...
+        <>
+          {/* ── テーブルモード ─────────────────────────────────────── */}
+          {displayMode === 'table' && (
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+              {/* テーブルヘッダ */}
+              <div className={`px-4 py-2 ${theme.bg} border-b ${theme.border} flex items-center justify-between`}>
+                <span className="text-xs font-medium text-gray-600">
+                  横軸: {axisDescription}
                 </span>
-              )}
-              <span className="text-[10px] text-gray-400">
-                {template.rows.length}項目 × {timeHeaders.length}期間
-              </span>
-            </div>
-          </div>
+                <div className="flex items-center gap-3">
+                  {dataLoading && (
+                    <span className="text-[10px] text-gray-400 flex items-center gap-1">
+                      <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                      </svg>
+                      データ取得中...
+                    </span>
+                  )}
+                  <span className="text-[10px] text-gray-400">
+                    {template.rows.length}項目 × {timeHeaders.length}期間
+                  </span>
+                </div>
+              </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 bg-gray-50/50">
-                  <th className="sticky left-0 bg-gray-50 px-4 py-3 text-left text-xs font-bold text-gray-600 min-w-[220px] z-10 border-r border-gray-100">
-                    項目
-                  </th>
-                  {timeHeaders.map(h => (
-                    <th key={h} className="px-3 py-3 text-center text-[11px] font-medium text-gray-500 min-w-[90px] whitespace-nowrap">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {template.rows.map((row, rowIdx) => {
-                  const srcCard = allCards.find(c => c.id === row.id)
-                  const formula: FormulaNode | undefined = row.formula ?? srcCard?.formula
-                  const isCustom = !!formula
-
-                  return (
-                    <tr
-                      key={`row-${rowIdx}-${row.id}`}
-                      className={`border-b border-gray-100 ${rowIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'} hover:bg-blue-50/20 transition`}
-                    >
-                      {/* 行ラベル */}
-                      <td className="sticky left-0 bg-inherit px-4 py-3 z-10 border-r border-gray-100">
-                        <div className="flex items-center gap-1.5">
-                          {isCustom && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" title="カスタム指標" />
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <div className="text-xs font-medium text-gray-800">{row.label}</div>
-                            {formula ? (
-                              <div className="text-[9px] text-amber-500 font-mono mt-0.5 truncate">
-                                {formatFormula(formula, id => allCards.find(c => c.id === id)?.label ?? id)}
-                              </div>
-                            ) : srcCard && (
-                              <div className="text-[9px] text-gray-400 font-mono mt-0.5">{srcCard.fieldRef}</div>
-                            )}
-                          </div>
-                          {/* ？アイコン */}
-                          <button
-                            onClick={() => setInfoRowIndex(rowIdx)}
-                            className="flex-shrink-0 w-5 h-5 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-400 hover:text-gray-600 flex items-center justify-center text-[10px] font-bold transition ml-1"
-                            title="この指標の説明を表示"
-                          >
-                            ?
-                          </button>
-                        </div>
-                      </td>
-
-                      {/* データセル */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200 bg-gray-50/50">
+                      <th className="sticky left-0 bg-gray-50 px-4 py-3 text-left text-xs font-bold text-gray-600 min-w-[220px] z-10 border-r border-gray-100">
+                        項目
+                      </th>
                       {timeHeaders.map(h => {
-                        let value: number | null = null
-                        if (dataLoading) {
-                          return (
-                            <td key={h} className="px-3 py-3 text-center">
-                              <div className="h-3 bg-gray-100 rounded animate-pulse mx-auto w-10" />
-                            </td>
-                          )
-                        }
-                        if (formula) {
-                          value = evalFormula(formula, rawData, h)
-                        } else {
-                          value = rawData[row.id]?.[h] ?? null
-                        }
+                        const dk  = labelToDateKey.get(h)
+                        const ext = dk ? externalData?.dates[dk] : null
                         return (
-                          <td
-                            key={h}
-                            className={`px-3 py-3 text-center text-xs font-mono ${
-                              value !== null ? 'text-gray-800' : 'text-gray-300'
-                            }`}
-                          >
-                            {formatCell(value)}
-                          </td>
+                          <th key={h} className="px-3 py-2 text-center text-[11px] font-medium text-gray-500 min-w-[90px]">
+                            <div className="whitespace-nowrap">{h}</div>
+                            {ext?.is_holiday && (
+                              <div className="mt-0.5 text-[9px] font-normal text-pink-600 whitespace-nowrap">
+                                🎌 {ext.holiday_name ?? '祝日'}
+                              </div>
+                            )}
+                            {externalData?.hasWeather && ext?.temperature_max != null && (
+                              <div className="mt-0.5 text-[9px] font-normal text-sky-500 whitespace-nowrap">
+                                {weatherEmoji(ext.weather_code)} {ext.temperature_max}°/{ext.temperature_min}°
+                              </div>
+                            )}
+                          </th>
                         )
                       })}
                     </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody>
+                    {template.rows.map((row, rowIdx) => {
+                      const srcCard = allCards.find(c => c.id === row.id)
+                      const formula: FormulaNode | undefined = row.formula ?? srcCard?.formula
+                      const isCustom = !!formula
 
-          {/* フッタ */}
-          <div className="px-4 py-2.5 border-t border-gray-100 bg-gray-50/50 flex items-center justify-between">
-            <div className="flex items-center gap-3 text-[10px] text-gray-400">
-              <span className="flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                カスタム指標
-              </span>
-              <span>— はデータなし</span>
-              <span className="flex items-center gap-1">
-                <span className="w-4 h-4 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center text-[9px] font-bold">?</span>
-                指標の説明
-              </span>
+                      return (
+                        <tr
+                          key={`row-${rowIdx}-${row.id}`}
+                          className={`border-b border-gray-100 ${rowIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'} hover:bg-blue-50/20 transition`}
+                        >
+                          {/* 行ラベル */}
+                          <td className="sticky left-0 bg-inherit px-4 py-3 z-10 border-r border-gray-100">
+                            <div className="flex items-center gap-1.5">
+                              {isCustom && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" title="カスタム指標" />
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-medium text-gray-800">{srcCard?.label ?? row.label}</div>
+                                {formula ? (
+                                  <div className="text-[9px] text-amber-500 font-mono mt-0.5 truncate">
+                                    {formatFormula(formula, id => allCards.find(c => c.id === id)?.label ?? id)}
+                                  </div>
+                                ) : srcCard && (
+                                  <div className="text-[9px] text-gray-400 font-mono mt-0.5">{srcCard.fieldRef}</div>
+                                )}
+                              </div>
+                              {/* ？アイコン */}
+                              <button
+                                onClick={() => setInfoRowIndex(rowIdx)}
+                                className="flex-shrink-0 w-5 h-5 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-400 hover:text-gray-600 flex items-center justify-center text-[10px] font-bold transition ml-1"
+                                title="この指標の説明を表示"
+                              >
+                                ?
+                              </button>
+                            </div>
+                          </td>
+
+                          {/* データセル */}
+                          {timeHeaders.map(h => {
+                            let value: number | null = null
+                            if (dataLoading) {
+                              return (
+                                <td key={h} className="px-3 py-3 text-center">
+                                  <div className="h-3 bg-gray-100 rounded animate-pulse mx-auto w-10" />
+                                </td>
+                              )
+                            }
+                            if (formula) {
+                              value = evalFormula(formula, rawData, h)
+                            } else {
+                              value = rawData[row.id]?.[h] ?? null
+                            }
+                            return (
+                              <td
+                                key={h}
+                                className={`px-3 py-3 text-center text-xs font-mono ${
+                                  value !== null ? 'text-gray-800' : 'text-gray-300'
+                                }`}
+                              >
+                                {formatCell(value)}
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* フッタ */}
+              <div className="px-4 py-2.5 border-t border-gray-100 bg-gray-50/50 flex items-center justify-between">
+                <div className="flex items-center gap-3 text-[10px] text-gray-400">
+                  <span className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                    カスタム指標
+                  </span>
+                  <span>— はデータなし</span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-4 h-4 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center text-[9px] font-bold">?</span>
+                    指標の説明
+                  </span>
+                </div>
+                <span className="text-[10px] text-gray-400">
+                  テンプレートID: {template.id}
+                </span>
+              </div>
+
+              {/* 全データ null の場合の警告 */}
+              {allNullData && (
+                <div className="px-4 py-3 bg-amber-50 border-t border-amber-200">
+                  <p className="text-xs text-amber-800 font-medium">⚠️ データが取得できていません</p>
+                  <p className="text-[11px] text-amber-700 mt-0.5">
+                    バッチが実行されていないか、このサービスのデータソース（GBP・Instagram等）がまだ同期されていない可能性があります。
+                    バッチを手動実行するか、しばらく待ってから再度確認してください。
+                  </p>
+                </div>
+              )}
             </div>
-            <span className="text-[10px] text-gray-400">
-              テンプレートID: {template.id}
-            </span>
-          </div>
-        </div>
+          )}
+
+          {/* ── 個別グラフモード ──────────────────────────────────── */}
+          {displayMode === 'chart' && (
+            <ServiceSummaryChartView
+              rows={template.rows}
+              allCards={allCards}
+              timeHeaders={timeHeaders}
+              rawData={rawData}
+              dataLoading={dataLoading}
+              themeAccent={theme.accent}
+              evalFormula={evalFormula}
+              formatCell={formatCell}
+            />
+          )}
+
+          {/* ── 複合グラフモード ──────────────────────────────────── */}
+          {displayMode === 'combined' && (
+            <ServiceSummaryCombinedChart
+              rows={template.rows}
+              allCards={allCards}
+              timeHeaders={timeHeaders}
+              rawData={rawData}
+              dataLoading={dataLoading}
+              evalFormula={evalFormula}
+              formatCell={formatCell}
+            />
+          )}
+        </>
       )}
 
       {/* 指標説明モーダル */}

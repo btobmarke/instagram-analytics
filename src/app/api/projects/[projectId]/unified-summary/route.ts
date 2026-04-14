@@ -166,9 +166,12 @@ export async function GET(
   // ── キャッシュ戦略の判定 ────────────────────────────────────────────────
   //
   // day 単位のとき:
-  //   - 各 Period の dateKey を確認
   //   - JST 今日 は常にリアルタイム取得（バッチ未実行のため）
-  //   - それ以外の日はキャッシュ優先
+  //   - 昨日以前はキャッシュ優先。ただしサービス単位で判定:
+  //       * そのサービスに non-null キャッシュエントリが 1件もない日
+  //         → そのサービスのみリアルタイム取得に回す
+  //       * null キャッシュが存在する場合もリアルタイムにフォールバック
+  //         （aggregate バッチ失敗日の stale null を読まないようにするため）
   //
   // week / month / custom_range のとき:
   //   - 集計済みキャッシュがないのでリアルタイム取得
@@ -176,9 +179,9 @@ export async function GET(
   const today = jstToday()
   const isDayUnit = timeUnit === 'day'
 
-  // キャッシュを使う dateKey の集合（day 単位 かつ nocache=false の場合のみ）
+  // 今日は全サービス共通でリアルタイム、それ以外はキャッシュ候補
   const cachedDateKeys: string[] = []
-  const realtimePeriods: Period[] = []
+  const globalRealtimePeriods: Period[] = []  // 全サービス共通のリアルタイム期間
 
   if (isDayUnit && !noCache) {
     for (const p of periods) {
@@ -186,12 +189,12 @@ export async function GET(
       if (dk && dk !== today) {
         cachedDateKeys.push(dk)  // 昨日以前 → キャッシュ候補
       } else {
-        realtimePeriods.push(p)  // 今日 → リアルタイム
+        globalRealtimePeriods.push(p)  // 今日 → リアルタイム
       }
     }
   } else {
     // week/month/custom_range はすべてリアルタイム
-    realtimePeriods.push(...periods)
+    globalRealtimePeriods.push(...periods)
   }
 
   const serviceIds = services.map(s => s.id)
@@ -204,54 +207,65 @@ export async function GET(
     cacheMap = await readCache(supabase, projectId, serviceIds, cachedDateKeys)
   }
 
-  // キャッシュに存在しない dateKey（バッチ未実行日）はリアルタイム取得に追加
-  const missingDateKeys: string[] = []
-  if (cachedDateKeys.length > 0) {
-    for (const dk of cachedDateKeys) {
-      const anySvcHasCache = serviceIds.some(sid => {
-        const byRef = cacheMap.get(sid)
-        if (!byRef) return false
-        // 1件でもキャッシュエントリがあればOK
-        for (const byDate of byRef.values()) {
-          if (byDate.has(dk)) return true
+  // ── サービス別リアルタイム期間の決定 ──────────────────────────────────
+  //
+  // cachedDateKeys のうち、そのサービスに non-null キャッシュが存在しない日を
+  // そのサービス専用のリアルタイム期間として追加する。
+  //
+  // 理由: aggregate バッチが null でキャッシュした日や、
+  //       バッチ失敗でキャッシュが全く存在しない日は、
+  //       DB のリアルタイムデータにフォールバックすることで最新値を返す。
+
+  // svcId → そのサービス専用の追加リアルタイム期間 (globalRealtimePeriods との合算で使う)
+  const svcExtraPeriods = new Map<string, Period[]>()
+
+  if (isDayUnit && !noCache && cachedDateKeys.length > 0) {
+    for (const svc of services) {
+      const byRef = cacheMap.get(svc.id)
+      const extra: Period[] = []
+      for (const dk of cachedDateKeys) {
+        // non-null キャッシュが 1件でもあれば「キャッシュ済み」と判断
+        const hasNonNullCache = byRef
+          ? [...byRef.values()].some(byDate => byDate.has(dk) && byDate.get(dk) !== null)
+          : false
+        if (!hasNonNullCache) {
+          const p = periods.find(pp => pp.dateKey === dk)
+          if (p) extra.push(p)
         }
-        return false
-      })
-      if (!anySvcHasCache) {
-        missingDateKeys.push(dk)
+      }
+      if (extra.length > 0) {
+        svcExtraPeriods.set(svc.id, extra)
       }
     }
   }
 
-  // missingDateKeys に対応する Period をリアルタイムへ
-  for (const p of periods) {
-    const dk = periodDateKey(p)
-    if (dk && missingDateKeys.includes(dk) && !realtimePeriods.includes(p)) {
-      realtimePeriods.push(p)
-    }
-  }
+  // ── リアルタイム取得（サービス別） ─────────────────────────────────────
 
-  // ── リアルタイム取得 ───────────────────────────────────────────────────
-
-  // サービス × リアルタイムperiod のデータ
+  // サービス × リアルタイム period のデータ
   const realtimeMap = new Map<string, Record<string, Record<string, number | null>>>()
 
-  if (realtimePeriods.length > 0) {
-    await Promise.all(
-      services.map(async svc => {
-        const catalog = getMetricCatalog(svc.service_type)
-        if (catalog.length === 0) return
+  await Promise.all(
+    services.map(async svc => {
+      const extra = svcExtraPeriods.get(svc.id) ?? []
+      // 全サービス共通 + このサービス専用の追加期間
+      const svcPeriods = [
+        ...globalRealtimePeriods,
+        ...extra.filter(p => !globalRealtimePeriods.includes(p)),
+      ]
+      if (svcPeriods.length === 0) return
 
-        const fieldRefs = catalog.map(c => c.id)
-        try {
-          const rawData = await fetchMetricsByRefs(supabase, svc.id, fieldRefs, realtimePeriods)
-          realtimeMap.set(svc.id, rawData)
-        } catch (err) {
-          console.error(`[unified-summary] realtime fetch failed for service ${svc.id}:`, err)
-        }
-      }),
-    )
-  }
+      const catalog = getMetricCatalog(svc.service_type)
+      if (catalog.length === 0) return
+
+      const fieldRefs = catalog.map(c => c.id)
+      try {
+        const rawData = await fetchMetricsByRefs(supabase, svc.id, fieldRefs, svcPeriods)
+        realtimeMap.set(svc.id, rawData)
+      } catch (err) {
+        console.error(`[unified-summary] realtime fetch failed for service ${svc.id}:`, err)
+      }
+    }),
+  )
 
   // ── 結果マージ ─────────────────────────────────────────────────────────
 
@@ -261,8 +275,14 @@ export async function GET(
       return { id: svc.id, name: svc.service_name, serviceType: svc.service_type, metrics: {} }
     }
 
-    const byRefCache = cacheMap.get(svc.id)   // Map<metricRef, Map<dateKey, value>>
+    const byRefCache = cacheMap.get(svc.id)    // Map<metricRef, Map<dateKey, value>>
     const realtimeData = realtimeMap.get(svc.id) // { metricRef: { periodLabel: value } }
+    // このサービスのリアルタイム期間ラベルセット（キャッシュより優先する期間）
+    const extra = svcExtraPeriods.get(svc.id) ?? []
+    const realtimeLabels = new Set([
+      ...globalRealtimePeriods.map(p => p.label),
+      ...extra.map(p => p.label),
+    ])
 
     const metrics: ServiceResult['metrics'] = {}
 
@@ -272,17 +292,26 @@ export async function GET(
       for (const p of periods) {
         const dk = periodDateKey(p)  // YYYY-MM-DD or null
 
-        // キャッシュから取得できるか判定（day単位 かつ 今日以外 かつ cacheMap にある）
-        if (dk && dk !== today && !noCache && byRefCache?.has(card.id)) {
+        // リアルタイム期間（今日 or このサービスのキャッシュ欠損日）はキャッシュを使わない
+        const isRealtimePeriod = realtimeLabels.has(p.label)
+
+        // キャッシュ優先: day 単位 かつ nocache=false かつ リアルタイム対象外の期間
+        if (!isRealtimePeriod && dk && !noCache && byRefCache?.has(card.id)) {
           const byDate = byRefCache.get(card.id)!
           if (byDate.has(dk)) {
-            values[p.label] = byDate.get(dk) ?? null
-            continue
+            // null キャッシュはリアルタイムにフォールバック（stale null 対策）
+            // Map.get() は undefined を返す可能性があるので ?? null で正規化
+            const cached = byDate.get(dk) ?? null
+            if (cached !== null) {
+              values[p.label] = cached
+              continue
+            }
           }
         }
 
-        // リアルタイムデータから取得
-        values[p.label] = realtimeData?.[card.id]?.[p.label] ?? null
+        // リアルタイムデータから取得（キャッシュなし・null キャッシュ・今日・欠損日）
+        const raw = realtimeData?.[card.id]?.[p.label]
+        values[p.label] = raw !== undefined ? raw : null
       }
 
       metrics[card.id] = {

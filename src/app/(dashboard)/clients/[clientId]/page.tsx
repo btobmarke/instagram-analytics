@@ -536,7 +536,7 @@ interface LineOamSession {
   id: string
   client_id: string
   label: string | null
-  status: 'active' | 'revoked'
+  status: 'active' | 'revoked' | 'expired'
   last_used_at: string | null
   created_at: string
   updated_at: string
@@ -612,6 +612,11 @@ function LineOamSessionSection({ clientId }: { clientId: string }) {
             無効化
           </button>
         )}
+        {session && session.status === 'expired' && (
+          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+            期限切れ
+          </span>
+        )}
       </div>
 
       {/* 未登録 or 無効化済み */}
@@ -625,6 +630,25 @@ function LineOamSessionSection({ clientId }: { clientId: string }) {
             className="px-4 py-2 text-sm font-medium text-green-700 border border-green-300 rounded-lg hover:bg-green-50 transition"
           >
             セッションを登録
+          </button>
+        </div>
+      )}
+
+      {/* セッション期限切れ */}
+      {session && session.status === 'expired' && !showForm && (
+        <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 mb-3">
+          <p className="text-sm font-semibold text-amber-800 mb-1">⚠️ セッションの Cookie が期限切れです</p>
+          <p className="text-xs text-amber-700 mb-3">
+            LINE OAM バッチが 401 エラーを検出しました。Python スクリプトで新しい storage_state を取得し、再登録してください。
+            {session.last_used_at && (
+              <> 最終成功使用: {new Date(session.last_used_at).toLocaleDateString('ja-JP')}</>
+            )}
+          </p>
+          <button
+            onClick={() => setShowForm(true)}
+            className="px-4 py-2 text-sm font-medium text-amber-800 border border-amber-400 bg-white rounded-lg hover:bg-amber-50 transition"
+          >
+            セッションを再登録
           </button>
         </div>
       )}

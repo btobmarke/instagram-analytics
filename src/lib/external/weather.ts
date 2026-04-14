@@ -125,6 +125,64 @@ export async function fetchWeather(params: {
 }
 
 /**
+ * Open-Meteo Forecast API で過去数日〜未来予報を一括取得する。
+ *
+ * Archive API と異なり、直近5日以内・未来の日付にも対応。
+ * バッチで「過去 N 日 + 未来 N 日」を取得する際はこちらを使用。
+ *
+ * @param params.pastDays     取得する過去の日数（0〜92）
+ * @param params.forecastDays 取得する未来の日数（1〜16）
+ */
+export async function fetchWeatherForecast(params: {
+  latitude:     number
+  longitude:    number
+  pastDays:     number
+  forecastDays: number
+}): Promise<Record<string, WeatherData>> {
+  const result: Record<string, WeatherData> = {}
+
+  try {
+    const url = new URL('https://api.open-meteo.com/v1/forecast')
+    url.searchParams.set('latitude',      String(params.latitude))
+    url.searchParams.set('longitude',     String(params.longitude))
+    url.searchParams.set('past_days',     String(params.pastDays))
+    url.searchParams.set('forecast_days', String(params.forecastDays))
+    url.searchParams.set('daily',         'temperature_2m_max,temperature_2m_min,precipitation_sum,weather_code')
+    url.searchParams.set('timezone',      'Asia/Tokyo')
+
+    const res = await fetch(url.toString(), {
+      headers: { 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(15000),
+    })
+
+    if (!res.ok) {
+      console.warn(`[weather] Open-Meteo forecast error: ${res.status} ${res.statusText}`)
+      return result
+    }
+
+    const json = await res.json()
+    const daily = json?.daily
+    if (!daily?.time) return result
+
+    const times: string[] = daily.time
+    times.forEach((dateStr: string, i: number) => {
+      const wc = daily.weather_code?.[i] ?? null
+      result[dateStr] = {
+        temperature_max:  daily.temperature_2m_max?.[i]  ?? null,
+        temperature_min:  daily.temperature_2m_min?.[i]  ?? null,
+        precipitation_mm: daily.precipitation_sum?.[i]   ?? null,
+        weather_code:     wc,
+        weather_desc:     wc != null ? wmoCodeToDesc(wc) : null,
+      }
+    })
+  } catch (err) {
+    console.warn('[weather] fetchWeatherForecast failed:', err)
+  }
+
+  return result
+}
+
+/**
  * 複数日分の天気を順次取得する（APIレート制限を考慮して直列で処理）
  * @param dates YYYY-MM-DD の配列
  */
