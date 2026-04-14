@@ -206,10 +206,20 @@ function KpiNodeCard({
         </div>
 
         <select
-          value={node.metricRef ? `${node.serviceId}::${node.metricRef}` : ''}
+          value={
+            node.metricRef
+              // 外生変数（serviceId=null）は metricRef のみ、通常は "serviceId::metricRef"
+              ? (node.serviceId ? `${node.serviceId}::${node.metricRef}` : node.metricRef)
+              : ''
+          }
           onChange={e => {
             const v = e.target.value
             if (!v) { onUpdate(node.id, { serviceId: null, metricRef: null }); return }
+            // 外生変数は "::" を含まないので serviceId=null として扱う
+            if (!v.includes('::')) {
+              onUpdate(node.id, { serviceId: null, metricRef: v })
+              return
+            }
             const [svcId, ...rest] = v.split('::')
             onUpdate(node.id, { serviceId: svcId, metricRef: rest.join('::') })
           }}

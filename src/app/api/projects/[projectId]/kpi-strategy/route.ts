@@ -40,12 +40,13 @@ interface Coefficient {
 }
 
 interface AllocationResult {
-  ref:       string
-  label:     string
-  current:   number
-  target:    number
-  delta:     number
-  deltaPct:  number
+  ref:         string
+  label:       string
+  current:     number
+  target:      number
+  delta:       number   // 変化量（elasticity モードでは 0 固定）
+  deltaPct:    number   // 変化率 % （elasticity モードでは 0 固定）
+  elasticity?: number   // 弾力性（ β_i * X_i / Y）。elasticity モードのみ付与
 }
 
 /**
@@ -172,22 +173,26 @@ function manualAllocation(
  * 各 X を 1% 変化させたときの Y の変化率（弾力性）を計算・表示
  * ΔX_i = X_i * 0.01 → ΔY_i = β_i * ΔX_i
  * 弾力性 = (ΔY/Y) / (ΔX/X) = β_i * X_i / Y
+ *
+ * delta / deltaPct は「変化量/変化率」ではなく 0 固定。
+ * 弾力性の値は専用フィールド elasticity に格納する。
  */
 function elasticityDisplay(
-  yTarget: number,  // Y の現在値（参照用）
+  yCurrent: number,
   coefficients: Coefficient[],
   xCurrents: Record<string, number>,
 ): AllocationResult[] {
   return coefficients.map(c => {
-    const current   = xCurrents[c.label] ?? 0
-    const elasticity = yTarget !== 0 ? (c.coef * current) / yTarget : 0
+    const current    = xCurrents[c.label] ?? 0
+    const elasticity = yCurrent !== 0 ? (c.coef * current) / yCurrent : 0
     return {
-      ref:      c.label,
-      label:    c.label,
+      ref:        c.label,
+      label:      c.label,
       current,
-      target:   current,  // 弾力性表示なので目標は変えない
-      delta:    elasticity,  // delta フィールドを弾力性として流用
-      deltaPct: Math.round(elasticity * 10000) / 100,  // % 表示
+      target:     current,   // 目標値変化なし（参照用）
+      delta:      0,         // 変化量なし（フロントで変化量として表示しないよう 0 固定）
+      deltaPct:   0,
+      elasticity: Math.round(elasticity * 10000) / 10000,
     }
   })
 }

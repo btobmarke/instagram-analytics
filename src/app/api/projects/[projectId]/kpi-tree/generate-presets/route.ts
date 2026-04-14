@@ -65,10 +65,11 @@ export async function POST(
   const childParentIds = new Set(nodes.filter(n => n.parentId).map(n => n.parentId!))
 
   // colKey を組み立て: serviceId が設定されていれば "{serviceId}::{metricRef}"、なければ "{metricRef}"
+  // metricRef が空文字の場合も null 扱いにして除外する
   const toColKey = (node: TreeNode): string | null => {
-    if (!node.metricRef) return null
-    if (node.serviceId) return `${node.serviceId}::${node.metricRef}`
-    return node.metricRef
+    if (!node.metricRef || node.metricRef.trim() === '') return null
+    if (node.serviceId) return `${node.serviceId}::${node.metricRef.trim()}`
+    return node.metricRef.trim()
   }
 
   // ── 3. 親ノードごとにプリセット候補を組み立て ─────────────────────────────────

@@ -29,9 +29,20 @@ const BodySchema = z.object({
   days:    z.number().int().min(7).max(90).default(30),
 })
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-
 /** AI が返すノード形式（UUID 不使用） */
+const AiTreeNodeSchema: z.ZodType<AiTreeNode> = z.lazy(() =>
+  z.object({
+    label:       z.string().min(1).max(100),
+    metricId:    z.string().max(200).nullable(),
+    serviceName: z.string().max(100).nullable(),
+    children:    z.array(AiTreeNodeSchema).optional(),
+  })
+)
+
+const AiResponseSchema = z.object({
+  tree: z.array(AiTreeNodeSchema).min(1).max(20),
+})
+
 interface AiTreeNode {
   label:       string
   metricId:    string | null   // カタログの metric.id（例: ig_account.reach）
@@ -39,21 +50,35 @@ interface AiTreeNode {
   children?:   AiTreeNode[]
 }
 
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+
 // ── 統計ユーティリティ ─────────────────────────────────────────────────────────
 
 function calcStats(values: number[]): {
   avg: number; latest: number; max: number; min: number; trend: '↑' | '↓' | '→'
 } | null {
   if (values.length === 0) return null
+
   const avg    = values.reduce((s, v) => s + v, 0) / values.length
   const latest = values[values.length - 1]
   const max    = Math.max(...values)
   const min    = Math.min(...values)
 
+  // データが 1 件の場合はトレンド判定不可 → '→' で確定
+  if (values.length < 2) {
+    return {
+      avg:    Math.round(avg * 10) / 10,
+      latest: Math.round(latest * 10) / 10,
+      max:    Math.round(max * 10) / 10,
+      min:    Math.round(min * 10) / 10,
+      trend:  '→',
+    }
+  }
+
   const half   = Math.floor(values.length / 2)
-  const first  = values.slice(0, half).reduce((s, v) => s + v, 0) / (half || 1)
-  const second = values.slice(half).reduce((s, v) => s + v, 0) / (values.length - half || 1)
-  const change = first > 0 ? (second - first) / first : 0
+  const first  = values.slice(0, half).reduce((s, v) => s + v, 0) / half
+  const second = values.slice(half).reduce((s, v) => s + v, 0) / (values.length - half)
+  const change = first !== 0 ? (second - first) / Math.abs(first) : 0
   const trend  = change > 0.05 ? '↑' : change < -0.05 ? '↓' : '→'
 
   return {
@@ -69,6 +94,26 @@ function fmtNum(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}K`
   return String(Math.round(n * 10) / 10)
+}
+
+/**
+ * AI レスポンステキストから JSON オブジェクトを抽出する。
+ * - コードブロック（```json ... ```）を優先
+ * - なければテキスト全体を貪欲マッチで { ... } を抽出
+ */
+function extractJson(text: string): unknown | null {
+  // コードブロック内の JSON を優先（貪欲マッチ）
+  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]+?)\s*```/)
+  if (codeBlockMatch?.[1]) {
+    try { return JSON.parse(codeBlockMatch[1]) } catch { /* continue */ }
+  }
+  // テキスト全体から { } を貪欲抽出（最初の { から最後の } まで）
+  const start = text.indexOf('{')
+  const end   = text.lastIndexOf('}')
+  if (start !== -1 && end > start) {
+    try { return JSON.parse(text.slice(start, end + 1)) } catch { /* continue */ }
+  }
+  return null
 }
 
 // ── メインハンドラ ─────────────────────────────────────────────────────────────
@@ -105,7 +150,7 @@ export async function POST(
   // ── 2. サービス一覧 ──────────────────────────────────────────────────────────
   const { data: services } = await supabase
     .from('services')
-    .select('id, name, service_type')
+    .select('id, service_name, service_type')  // カラム名は service_name
     .eq('project_id', projectId)
 
   const svcList = services ?? []
@@ -115,7 +160,7 @@ export async function POST(
     svcList.map(s => [
       s.id as string,
       {
-        name:        s.name as string,
+        name:        (s.service_name ?? '') as string,
         serviceType: s.service_type as string,
         catalog:     getMetricCatalog(s.service_type as string),
       },
@@ -161,7 +206,7 @@ export async function POST(
 
   // ── 5. 指標ごとの統計を組み立て ──────────────────────────────────────────────
   interface MetricEntry {
-    metricId:   string    // カタログの metric.id（例: ig_account.reach）
+    metricId:   string
     svcId:      string
     svcName:    string
     label:      string
@@ -190,8 +235,6 @@ export async function POST(
   const withoutData = metricEntries.filter(m => m.stats === null)
 
   // ── 6. プロンプト構築 ────────────────────────────────────────────────────────
-  // AI には UUID を渡さず、metricId（カタログID）とサービス名だけ渡す
-
   const svcSection = svcList
     .map(s => `- サービス名="${s.name}"（タイプ: ${s.service_type}）`)
     .join('\n') || '（なし）'
@@ -289,7 +332,7 @@ ${extSection}
 `.trim()
 
   // ── 7. AI 呼び出し ───────────────────────────────────────────────────────────
-  let aiTreeJson: { tree: AiTreeNode[] } | null = null
+  let aiTree: AiTreeNode[] | null = null
 
   try {
     const response = await anthropic.messages.create({
@@ -300,21 +343,27 @@ ${extSection}
 
     const text = response.content[0].type === 'text' ? response.content[0].text : ''
 
-    // JSON ブロックまたはオブジェクトを抽出
-    const jsonMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) ??
-                      text.match(/(\{[\s\S]*\})/)
-    if (jsonMatch) {
-      aiTreeJson = JSON.parse(jsonMatch[1] ?? jsonMatch[0])
+    // JSON 抽出（コードブロック優先 → 全体から貪欲マッチ）
+    const rawJson = extractJson(text)
+
+    // Zod でスキーマ検証
+    const validated = AiResponseSchema.safeParse(rawJson)
+    if (!validated.success) {
+      console.error('[ai-generate] AI レスポンスのスキーマ検証失敗:', validated.error.flatten())
+      return NextResponse.json({
+        success: false,
+        error: 'AI が有効なツリー構造を返しませんでした。もう一度お試しください。',
+      }, { status: 500 })
     }
+
+    aiTree = validated.data.tree
   } catch (err) {
+    // 内部エラーはログに記録するが、詳細はユーザーに返さない
+    console.error('[ai-generate] AI 呼び出しエラー:', err)
     return NextResponse.json({
       success: false,
-      error: `AI 生成に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+      error: 'AI によるツリー生成に失敗しました。しばらく待ってから再試行してください。',
     }, { status: 500 })
-  }
-
-  if (!aiTreeJson?.tree) {
-    return NextResponse.json({ success: false, error: 'AI が有効な JSON を返しませんでした' }, { status: 500 })
   }
 
   // ── 8. metricId + serviceName → 実際の (service_id, metric_ref) に変換 ──────
@@ -341,10 +390,10 @@ ${extSection}
     // サービス名一致優先
     if (serviceName) {
       for (const [svcId, { name, catalog }] of svcMap) {
-        const nameMatch =
-          name === serviceName ||
-          name.includes(serviceName) ||
-          serviceName.includes(name)
+        // name が空文字の場合は名前マッチをスキップ（null/undefined 安全）
+        const nameMatch = name
+          ? name === serviceName || name.includes(serviceName) || serviceName.includes(name)
+          : false
         if (nameMatch && catalog.find(m => m.id === metricId)) {
           return { serviceId: svcId, metricRef: metricId }
         }
@@ -364,17 +413,27 @@ ${extSection}
 
   // ── 9. 既存ツリー削除（replace=true の場合）──────────────────────────────────
   if (replace) {
-    await supabase
+    const { error: delErr } = await supabase
       .from('project_kpi_tree_nodes')
       .delete()
       .eq('project_id', projectId)
+
+    if (delErr) {
+      console.error('[ai-generate] 既存ツリー削除エラー:', delErr)
+      return NextResponse.json({
+        success: false,
+        error: '既存ツリーの削除に失敗しました。',
+      }, { status: 500 })
+    }
   }
 
-  // ── 10. ツリーを DB に保存 ────────────────────────────────────────────────────
-  async function insertNode(node: AiTreeNode, parentId: string | null, sortOrder: number): Promise<void> {
+  // ── 10. ツリーを DB に保存（エラー時はロールバックに近い処理）───────────────
+  const insertErrors: string[] = []
+
+  async function insertNode(node: AiTreeNode, parentId: string | null, sortOrder: number): Promise<string | null> {
     const { serviceId, metricRef } = resolveMetric(node.metricId, node.serviceName)
 
-    const { data: inserted } = await supabase
+    const { data: inserted, error: insertErr } = await supabase
       .from('project_kpi_tree_nodes')
       .insert({
         project_id: projectId,
@@ -388,15 +447,29 @@ ${extSection}
       .select('id')
       .single()
 
-    if (inserted && node.children) {
+    if (insertErr || !inserted) {
+      const msg = `ノード「${node.label}」の保存に失敗: ${insertErr?.message ?? '不明なエラー'}`
+      console.error('[ai-generate] insertNode エラー:', msg)
+      insertErrors.push(msg)
+      return null
+    }
+
+    if (node.children && node.children.length > 0) {
       for (let i = 0; i < node.children.length; i++) {
         await insertNode(node.children[i], inserted.id, i)
       }
     }
+
+    return inserted.id
   }
 
-  for (let i = 0; i < aiTreeJson.tree.length; i++) {
-    await insertNode(aiTreeJson.tree[i], null, i)
+  for (let i = 0; i < aiTree.length; i++) {
+    await insertNode(aiTree[i], null, i)
+  }
+
+  // 部分的な挿入エラーがあれば警告として返す（すでに保存済みノードは残す）
+  if (insertErrors.length > 0) {
+    console.warn('[ai-generate] 一部ノードの保存に失敗しました:', insertErrors)
   }
 
   // ── 11. 保存後ツリーを返す ───────────────────────────────────────────────────
@@ -409,10 +482,11 @@ ${extSection}
   return NextResponse.json({
     success: true,
     data: {
-      aiTree:     aiTreeJson.tree,
-      nodes:      newNodes ?? [],
-      dataPoints: withData.length,
-      period:     { start: startStr, end: endStr, days },
+      aiTree,
+      nodes:        newNodes ?? [],
+      dataPoints:   withData.length,
+      period:       { start: startStr, end: endStr, days },
+      insertWarnings: insertErrors.length > 0 ? insertErrors : undefined,
     },
   })
 }

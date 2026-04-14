@@ -75,7 +75,9 @@ function invertMatrix(A: number[][]): number[][] | null {
       if (Math.abs(M[row][col]) > Math.abs(M[pivot][col])) pivot = row
     }
     ;[M[col], M[pivot]] = [M[pivot], M[col]]
-    if (Math.abs(M[col][col]) < 1e-12) return null
+    // 相対的な閾値でゼロ判定（大スケールの行列でも正しく機能させる）
+    const maxAbs = Math.max(...M[col].map(v => Math.abs(v)))
+    if (Math.abs(M[col][col]) < 1e-10 * (maxAbs || 1)) return null
     const scale = M[col][col]
     M[col] = M[col].map(v => v / scale)
     for (let row = 0; row < n; row++) {
@@ -303,14 +305,18 @@ async function buildWideTable(
   warnings.push(`週次/月次集計（sum:${modeSummary.sum}, avg:${modeSummary.avg}, last:${modeSummary.last}）`)
 
   for (const [dateStr, values] of Object.entries(rawMap)) {
-    const d = new Date(dateStr)
+    // UTC で統一してタイムゾーン混在を防ぐ
+    const d = new Date(dateStr + 'T00:00:00Z')
     let bucketKey: string
     if (timeUnit === 'week') {
-      const mon = new Date(d)
-      mon.setDate(d.getDate() - ((d.getDay() + 6) % 7))
+      // 月曜始まりの週バケット（UTC で計算）
+      const dayOfWeek = d.getUTCDay()              // 0=日, 1=月, ..., 6=土
+      const daysToMonday = (dayOfWeek + 6) % 7     // 月曜までの差分
+      const mon = new Date(d.getTime() - daysToMonday * 86400_000)
       bucketKey = mon.toISOString().slice(0, 10)
     } else {
-      bucketKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      // 月バケット（UTC）
+      bucketKey = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
     }
     if (!grouped[bucketKey]) grouped[bucketKey] = { sums: {}, counts: {}, last: {} }
     for (const [col, val] of Object.entries(values)) {

@@ -46,29 +46,67 @@ export interface GbpReview {
 }
 
 // ------------------------------------------------
-// 共通フェッチ
+// 共通フェッチ（429/503 はリトライ）
 // ------------------------------------------------
-async function gbpFetch(url: string, accessToken: string, options?: RequestInit): Promise<unknown> {
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      ...(options?.headers ?? {}),
-    },
-  })
 
-  if (!res.ok) {
-    const body = await res.text()
-    // 認証エラーは特別扱い（バッチ側でキャッチして auth_status=error に）
+const GBP_FETCH_MAX_ATTEMPTS = Math.min(
+  8,
+  Math.max(1, parseInt(process.env.GBP_API_MAX_RETRIES ?? '5', 10) || 5)
+)
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function gbpFetch(url: string, accessToken: string, options?: RequestInit): Promise<unknown> {
+  let lastBody = ''
+  let lastStatus = 0
+
+  for (let attempt = 1; attempt <= GBP_FETCH_MAX_ATTEMPTS; attempt++) {
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        ...(options?.headers ?? {}),
+      },
+    })
+
+    lastStatus = res.status
+    lastBody = await res.text()
+
+    if (res.ok) {
+      const t = lastBody.trim()
+      return (t ? (JSON.parse(t) as unknown) : ({} as unknown))
+    }
+
+    // 認証エラーはリトライしない（バッチ側で auth_status=error に）
     if (res.status === 401 || res.status === 403) {
-      const err = new Error(`GBP API auth error: ${res.status} ${body}`)
+      const err = new Error(`GBP API auth error: ${res.status} ${lastBody}`)
       ;(err as Error & { isAuthError: boolean }).isAuthError = true
       throw err
     }
-    throw new Error(`GBP API error: ${res.status} ${body}`)
+
+    const retryable = res.status === 429 || res.status === 503
+    if (retryable && attempt < GBP_FETCH_MAX_ATTEMPTS) {
+      const retryAfter = res.headers.get('Retry-After')
+      let delayMs = Math.min(60_000, 1000 * 2 ** (attempt - 1))
+      if (retryAfter) {
+        const sec = parseInt(retryAfter, 10)
+        if (!Number.isNaN(sec)) delayMs = Math.min(120_000, sec * 1000)
+      }
+      console.warn(
+        `[gbpFetch] ${res.status} retry ${attempt}/${GBP_FETCH_MAX_ATTEMPTS} in ${delayMs}ms`,
+        url.slice(0, 120)
+      )
+      await sleep(delayMs)
+      continue
+    }
+
+    throw new Error(`GBP API error: ${res.status} ${lastBody}`)
   }
-  return res.json()
+
+  throw new Error(`GBP API error: ${lastStatus} ${lastBody}`)
 }
 
 // ------------------------------------------------
