@@ -149,7 +149,35 @@ export class InstagramClient {
       throw new Error('ユーザー名が空です。アカウントに username（@なし）を登録してください。')
     }
 
+    // graph.instagram.com（Instagram Login / Basic Display系）では、
+    // graph.facebook.com の IG User ノード（business_discovery 等）が前提のID/権限を持たない。
+    // そのため business_discovery 取得はスキップし、/me で取れる範囲のみ同期する。
+    if (this.useInstagramHost) {
+      const { data: me, rateUsage } = await this.getMe()
+      const m = me as Record<string, unknown>
+      return {
+        data: {
+          id: m.id,
+          username: normalized,
+          name: (m.name as string | null | undefined) ?? null,
+          // followers_count / follows_count は graph.instagram.com では取得できない
+          followers_count: undefined,
+          follows_count: undefined,
+          media_count: typeof m.media_count === 'number' ? m.media_count : undefined,
+        },
+        rateUsage,
+      }
+    }
+
     const igUserId = await this.resolveIgUserIdForProfile()
+    // Graph API の IG User ノードIDは数値文字列。違う場合はほぼ確実に設定ミス。
+    if (!/^\d+$/.test(String(igUserId))) {
+      throw new Error(
+        'platform_account_id が IG User ID ではない可能性があります。' +
+          '（graph.facebook.com を使う場合、platform_account_id には Instagramビジネスアカウントの「IG User ID（数値）」を設定してください。' +
+          'Instagram Login（graph.instagram.com）の /me.id や、別種のIDを入れるとエラーになります）'
+      )
+    }
 
     const { data: dispData, rateUsage: rateDisp } = await this.getProfileDisplayFields(igUserId)
     const d = dispData as Record<string, unknown>
@@ -167,6 +195,16 @@ export class InstagramClient {
         | Record<string, unknown>
         | undefined
     } catch (e) {
+      const isInvalidUserId =
+        e instanceof InstagramApiError && e.apiError?.code === 110
+      if (isInvalidUserId) {
+        throw new Error(
+          'Meta API error (code 110): Invalid user id. ' +
+            'platform_account_id が IG User ID ではない可能性があります。' +
+            '（graph.facebook.com を使う場合、platform_account_id は Instagramビジネスアカウントの IG User ID（数値）にしてください。' +
+            'もし Instagram Login（graph.instagram.com）のトークン/ID運用なら、アカウント設定の api_base_url を graph.instagram.com に合わせてください）'
+        )
+      }
       const isNoBusinessDiscovery =
         e instanceof InstagramApiError &&
         e.apiError?.code === 100 &&

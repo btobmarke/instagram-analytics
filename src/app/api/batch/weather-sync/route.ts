@@ -24,6 +24,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseAdminClient }  from '@/lib/supabase/admin'
 import { getHolidayInfo }             from '@/lib/external/holidays'
 import { fetchWeatherForecast }       from '@/lib/external/weather'
+import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 
 // GET /api/batch/weather-sync ← Vercel Cron
 export async function GET(request: NextRequest) {
@@ -152,6 +153,23 @@ async function runBatch(request: NextRequest) {
     const finalStatus = errors === 0 ? 'success' : processed > 0 ? 'partial' : 'failed'
     await finalizeJob(admin, jobLogId, finalStatus, startedAt, processed, errors, null)
 
+    if (finalStatus === 'success') {
+      await notifyBatchSuccess({
+        jobName: 'weather_sync',
+        processed,
+        executedAt: startedAt,
+        lines: [`past_days: ${pastDays}`, `forecast_days: ${forecastDays}`],
+      })
+    } else {
+      await notifyBatchError({
+        jobName: 'weather_sync',
+        processed,
+        errorCount: errors,
+        errors: [{ error: `${errors} 件のプロジェクトでエラー` }],
+        executedAt: startedAt,
+      })
+    }
+
     return NextResponse.json({
       success:      true,
       processed,
@@ -166,6 +184,13 @@ async function runBatch(request: NextRequest) {
     const msg = fatalErr instanceof Error ? fatalErr.message : String(fatalErr)
     console.error('[weather-sync] fatal error:', fatalErr)
     await finalizeJob(admin, jobLogId, 'failed', startedAt, processed, errors, msg)
+    await notifyBatchError({
+      jobName: 'weather_sync',
+      processed: 0,
+      errorCount: 1,
+      errors: [{ error: msg }],
+      executedAt: startedAt,
+    })
     return NextResponse.json({ success: false, error: msg }, { status: 500 })
   }
 }

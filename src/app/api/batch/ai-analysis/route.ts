@@ -5,6 +5,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { analyzeAccount } from '@/lib/claude/client'
 import { validateBatchRequest } from '@/lib/utils/batch-auth'
 import { getAiModelIdForAccountId } from '@/lib/ai/resolve-ai-model'
+import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 
 // POST /api/batch/ai-analysis — 週次AI分析バッチ
 export async function POST(request: Request) {
@@ -103,6 +104,13 @@ export async function POST(request: Request) {
       }).eq('id', jobLog.id)
     }
 
+    await notifyBatchSuccess({
+      jobName: 'weekly_ai_analysis',
+      processed,
+      executedAt: startedAt,
+      lines: ['種別: account_weekly'],
+    })
+
     return NextResponse.json({ success: true, processed })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
@@ -114,6 +122,13 @@ export async function POST(request: Request) {
         duration_ms: Date.now() - startedAt.getTime(),
       }).eq('id', jobLog.id)
     }
+    await notifyBatchError({
+      jobName: 'weekly_ai_analysis',
+      processed: 0,
+      errorCount: 1,
+      errors: [{ error: message }],
+      executedAt: startedAt,
+    })
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

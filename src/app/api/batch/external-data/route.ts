@@ -19,6 +19,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { getHolidayInfo } from '@/lib/external/holidays'
 import { fetchWeather } from '@/lib/external/weather'
+import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 
 /** JST の昨日 YYYY-MM-DD */
 function jstYesterday(): string {
@@ -156,6 +157,23 @@ async function runBatch(_request: NextRequest) {
         .eq('id', jobLogId)
     }
 
+    if (finalStatus === 'success') {
+      await notifyBatchSuccess({
+        jobName: 'external_data',
+        processed,
+        executedAt: startedAt,
+        lines: [`対象日: ${targetDate}`],
+      })
+    } else {
+      await notifyBatchError({
+        jobName: 'external_data',
+        processed,
+        errorCount: errors,
+        errors: [{ error: `${errors} 件のプロジェクトでエラー` }],
+        executedAt: startedAt,
+      })
+    }
+
     return NextResponse.json({
       success: true,
       date:       targetDate,
@@ -178,6 +196,14 @@ async function runBatch(_request: NextRequest) {
         })
         .eq('id', jobLogId)
     }
+
+    await notifyBatchError({
+      jobName: 'external_data',
+      processed: 0,
+      errorCount: 1,
+      errors: [{ error: msg }],
+      executedAt: startedAt,
+    })
 
     return NextResponse.json({ success: false, error: msg }, { status: 500 })
   }

@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import useSWR from 'swr'
+import { KpiTreeTabManager } from './KpiTreeTabManager'
+import { PresetAnalysisTab } from './PresetAnalysisTab'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -1462,10 +1464,13 @@ export function AnalysisTab({
   const [selectedPreset, setSelectedPreset] = useState<Preset | null>(null)
   const [presetRefreshKey, setPresetRefreshKey] = useState(0)
 
-  // タブ
-  const [activeTab, setActiveTab] = useState<'analysis' | 'weights' | 'eval'>('analysis')
+  // 選択中ツリー（KpiTreeTabManager と共有）
+  const [selectedTreeId, setSelectedTreeId] = useState<string | null>(null)
 
-  // 分析設定
+  // タブ
+  const [activeTab, setActiveTab] = useState<'tree' | 'preset-analysis' | 'analysis' | 'weights' | 'eval'>('tree')
+
+  // 分析設定（旧「分析」タブ用）
   const today          = new Date().toISOString().slice(0, 10)
   const thirtyDaysAgo  = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
   const [startDate, setStartDate] = useState(thirtyDaysAgo)
@@ -1520,27 +1525,22 @@ export function AnalysisTab({
   }
 
   const tabs = [
-    { key: 'analysis', label: '📈 分析' },
-    { key: 'weights',  label: '⚖️ 重み・戦略' },
-    { key: 'eval',     label: '🤖 AI評価' },
+    { key: 'tree',             label: '🌳 KPI ツリー' },
+    { key: 'preset-analysis',  label: '📊 プリセット分析' },
+    { key: 'analysis',         label: '📈 詳細分析' },
+    { key: 'weights',          label: '⚖️ 重み・戦略' },
+    { key: 'eval',             label: '🤖 AI評価' },
   ] as const
 
   return (
     <div className="space-y-5">
-      {/* KPI ツリー（全幅） */}
-      <KpiTreeEditor
-        projectId={projectId}
-        metricOptions={metricOptions}
-        onPresetsGenerated={() => setPresetRefreshKey(k => k + 1)}
-      />
-
       {/* タブナビゲーション */}
       <div className="border-b border-gray-200">
-        <nav className="flex gap-1">
+        <nav className="flex gap-1 overflow-x-auto">
           {tabs.map(tab => (
             <button key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
+              className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px flex-shrink-0 ${
                 activeTab === tab.key
                   ? 'text-purple-700 border-purple-600'
                   : 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300'
@@ -1550,6 +1550,30 @@ export function AnalysisTab({
           ))}
         </nav>
       </div>
+
+      {/* KPI ツリータブ */}
+      {activeTab === 'tree' && (
+        <KpiTreeTabManager
+          projectId={projectId}
+          metricOptions={metricOptions}
+          selectedTreeId={selectedTreeId}
+          onTreeChange={setSelectedTreeId}
+          onPresetsGenerated={(treeId) => {
+            setPresetRefreshKey(k => k + 1)
+            // プリセット分析タブに切り替えるとスムーズ
+            void treeId
+          }}
+        />
+      )}
+
+      {/* プリセット分析タブ */}
+      {activeTab === 'preset-analysis' && (
+        <PresetAnalysisTab
+          projectId={projectId}
+          treeId={selectedTreeId}
+          metricOptions={metricOptions}
+        />
+      )}
 
       {/* 分析タブ */}
       {activeTab === 'analysis' && (

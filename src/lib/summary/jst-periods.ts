@@ -47,6 +47,28 @@ export function generateJstDayPeriods(count: number, now: Date = new Date()): Js
   return periods
 }
 
+/**
+ * JST の日付範囲（両端含む）から日次 period を生成する。
+ * 例: 2026-04-01 〜 2026-04-03 → 3日分。
+ */
+export function generateJstDayPeriodsFromRange(rangeStart: string, rangeEnd: string): JstDayPeriod[] {
+  const startKey = rangeStart.slice(0, 10)
+  const endKey = rangeEnd.slice(0, 10)
+  const periods: JstDayPeriod[] = []
+  if (startKey > endKey) return periods
+
+  let cur = startKey
+  while (cur <= endKey) {
+    const start = new Date(`${cur}T00:00:00+09:00`)
+    const end = new Date(start.getTime() + 86400000)
+    const [, mm, dd] = cur.split('-')
+    const label = `${Number(mm)}/${Number(dd)}`
+    periods.push({ label, start, end, dateKey: cur })
+    cur = addDaysToJstDateKey(cur, 1)
+  }
+  return periods
+}
+
 /** テーブルヘッダ用ラベル列（API の data キーと同一） */
 export function generateJstDayPeriodLabels(count: number, now?: Date): string[] {
   return generateJstDayPeriods(count, now).map(p => p.label)

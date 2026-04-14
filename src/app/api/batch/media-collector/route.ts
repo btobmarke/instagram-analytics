@@ -5,6 +5,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { InstagramApiError, InstagramClient, isRateLimitExceeded } from '@/lib/instagram/client'
 import { decrypt } from '@/lib/utils/crypto'
 import { validateBatchRequest } from '@/lib/utils/batch-auth'
+import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 
 // POST /api/batch/media-collector
 // Vercel Cron or manual trigger: 投稿一覧の同期
@@ -133,6 +134,26 @@ export async function POST(request: Request) {
       status: totalFailed === 0 ? 'success' : 'partial',
     })
 
+    if (totalFailed === 0) {
+      await notifyBatchSuccess({
+        jobName: 'daily_media_collector',
+        processed: totalProcessed,
+        executedAt: startedAt,
+        lines: [
+          `対象: アカウント数 ${(accounts ?? []).length} 件`,
+          `トークン未設定でスキップ: ${skippedNoToken} 件`,
+        ],
+      })
+    } else {
+      await notifyBatchError({
+        jobName: 'daily_media_collector',
+        processed: totalProcessed,
+        errorCount: totalFailed,
+        errors: [{ error: lastErrorMessage ?? `${totalFailed} 件の処理で失敗しました` }],
+        executedAt: startedAt,
+      })
+    }
+
     return NextResponse.json({
       success: totalFailed === 0,
       processed: totalProcessed,
@@ -159,6 +180,13 @@ export async function POST(request: Request) {
         duration_ms: Date.now() - startedAt.getTime(),
       }).eq('id', jobLog.id)
     }
+    await notifyBatchError({
+      jobName: 'daily_media_collector',
+      processed: 0,
+      errorCount: 1,
+      errors: [{ error: message }],
+      executedAt: startedAt,
+    })
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

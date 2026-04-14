@@ -7,7 +7,7 @@
  */
 
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-import { generateCustomRangePeriod, generateJstDayPeriods } from '@/lib/summary/jst-periods'
+import { generateCustomRangePeriod, generateJstDayPeriods, generateJstDayPeriodsFromRange } from '@/lib/summary/jst-periods'
 
 export type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>
 export type TimeUnit = 'hour' | 'day' | 'week' | 'month' | 'custom_range'
@@ -46,6 +46,7 @@ function generatePeriods(unit: TimeUnit, count: number): Period[] {
         break
       }
       case 'week': {
+        // 既存仕様: 「直近N週間」表現。週の境界は range 指定のときに ISO週へ揃える。
         d.setDate(d.getDate() - i * 7)
         d.setHours(0, 0, 0, 0)
         start = new Date(d)
@@ -85,6 +86,61 @@ export function buildPeriods(
     const cr = generateCustomRangePeriod(rangeStartParam, rangeEndParam)
     return [{ label: cr.label, start: cr.start, end: cr.end, rangeStart: cr.rangeStart, rangeEnd: cr.rangeEnd }]
   }
+
+  // day/week/month の場合も、rangeStart/rangeEnd が指定されていれば範囲から periods を生成する。
+  // 目的: 分析画面などで YYYY-MM-DD~YYYY-MM-DD の範囲指定を可能にする。
+  if (rangeStartParam && rangeEndParam) {
+    const rs = rangeStartParam.slice(0, 10)
+    const re = rangeEndParam.slice(0, 10)
+    if (rs > re) return { error: 'rangeStart は rangeEnd 以下である必要があります' }
+
+    if (unit === 'day') {
+      return generateJstDayPeriodsFromRange(rs, re)
+    }
+
+    if (unit === 'week') {
+      // ISO週（月曜開始）で範囲を区切る。部分週も含める（range にかかる週は全部出す）。
+      const periods: Period[] = []
+      const startDate = new Date(`${rs}T12:00:00+09:00`)
+      const endDate = new Date(`${re}T12:00:00+09:00`)
+
+      // 月曜開始へ寄せる
+      const day = (startDate.getDay() + 6) % 7 // Mon=0 ... Sun=6
+      const monday = new Date(startDate)
+      monday.setDate(monday.getDate() - day)
+      monday.setHours(0, 0, 0, 0)
+
+      let cur = monday
+      while (cur <= endDate) {
+        const start = new Date(cur)
+        const end = new Date(cur); end.setDate(end.getDate() + 7)
+        const label = `${start.getMonth() + 1}/${start.getDate()}週`
+        periods.push({ label, start, end })
+        cur = new Date(cur); cur.setDate(cur.getDate() + 7)
+      }
+      return periods
+    }
+
+    if (unit === 'month') {
+      // 暦月で範囲を区切る。部分月も含める。
+      const periods: Period[] = []
+      const startDate = new Date(`${rs}T12:00:00+09:00`)
+      const endDate = new Date(`${re}T12:00:00+09:00`)
+
+      const cur = new Date(startDate)
+      cur.setDate(1); cur.setHours(0, 0, 0, 0)
+
+      while (cur <= endDate) {
+        const start = new Date(cur)
+        const end = new Date(cur); end.setMonth(end.getMonth() + 1)
+        const label = `${start.getFullYear()}/${start.getMonth() + 1}`
+        periods.push({ label, start, end })
+        cur.setMonth(cur.getMonth() + 1)
+      }
+      return periods
+    }
+  }
+
   return generatePeriods(unit, count)
 }
 

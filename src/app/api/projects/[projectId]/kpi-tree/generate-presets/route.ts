@@ -22,7 +22,7 @@ interface TreeNode {
 }
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
   const { projectId } = await params
@@ -33,11 +33,19 @@ export async function POST(
     return NextResponse.json({ success: false, error: 'UNAUTHORIZED' }, { status: 401 })
   }
 
+  // treeId を body から取得（必須）
+  const body = await req.json().catch(() => null)
+  const treeId: string | null = body?.treeId ?? null
+  if (!treeId) {
+    return NextResponse.json({ success: false, error: 'treeId は必須です' }, { status: 400 })
+  }
+
   // ── 1. ツリー全体を取得 ──────────────────────────────────────────────────────
   const { data: rawNodes, error: nodesErr } = await supabase
     .from('project_kpi_tree_nodes')
     .select('id, parent_id, label, metric_ref, service_id, sort_order')
     .eq('project_id', projectId)
+    .eq('kpi_tree_id', treeId)
     .order('sort_order', { ascending: true })
     .order('created_at', { ascending: true })
 
@@ -148,6 +156,7 @@ export async function POST(
         .from('project_analysis_presets')
         .insert({
           project_id:          projectId,
+          kpi_tree_id:         treeId,
           name:                preset.name,
           target_metric_ref:   preset.targetMetricRef,
           feature_metric_refs: preset.featureMetricRefs,

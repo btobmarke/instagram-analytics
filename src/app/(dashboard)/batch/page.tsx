@@ -148,7 +148,10 @@ const BATCH_ENDPOINTS: Record<string, string> = {
   project_metrics_aggregate: '/api/batch/project-metrics-aggregate',
   daily_media_collector:          '/api/batch/media-collector',
   hourly_media_insight_collector: '/api/batch/insight-collector',
+  // 注: 現状の実装では account insights は insight-collector 内で収集しているため同一エンドポイントに紐づける
+  hourly_account_insight_collector: '/api/batch/insight-collector',
   kpi_calc_batch:                 '/api/batch/kpi-calc',
+  weekly_ai_analysis:             '/api/batch/ai-analysis',
   lp_aggregate:                   '/api/batch/lp-aggregate',
   ga4_collector:                  '/api/batch/ga4-collector',
   clarity_collector:              '/api/batch/clarity-collector',
@@ -160,7 +163,7 @@ const BATCH_ENDPOINTS: Record<string, string> = {
 }
 
 const BATCH_GROUPS: { category: Category; jobs: string[] }[] = [
-  { category: 'Instagram', jobs: ['daily_media_collector', 'hourly_media_insight_collector', 'kpi_calc_batch'] },
+  { category: 'Instagram', jobs: ['daily_media_collector', 'hourly_media_insight_collector', 'hourly_account_insight_collector', 'kpi_calc_batch', 'weekly_ai_analysis'] },
   { category: 'LP / MA',   jobs: ['lp_aggregate'] },
   { category: 'GA4',       jobs: ['ga4_collector'] },
   { category: 'Clarity',   jobs: ['clarity_collector'] },

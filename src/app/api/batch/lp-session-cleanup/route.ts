@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { logBatchAuthFailure, validateBatchRequest } from '@/lib/utils/batch-auth'
+import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 
 function createServiceRoleClient() {
   return createClient(
@@ -116,6 +117,26 @@ export async function POST(request: NextRequest) {
   console.log(
     `[lp-session-cleanup] 完了 サイト数=${lpSites?.length ?? 0} 終了セッション合計=${totalClosed} エラー=${totalErrors}`
   )
+
+  if (totalErrors === 0) {
+    await notifyBatchSuccess({
+      jobName: 'lp_session_cleanup',
+      processed: totalClosed,
+      executedAt: new Date(startedAt),
+      lines: [
+        `対象サイト数: ${lpSites?.length ?? 0}`,
+        `終了セッション合計: ${totalClosed}`,
+      ],
+    })
+  } else {
+    await notifyBatchError({
+      jobName: 'lp_session_cleanup',
+      processed: totalClosed,
+      errorCount: totalErrors,
+      errors: [{ error: `${totalErrors} 件のサイトでクリーンアップに失敗しました` }],
+      executedAt: new Date(startedAt),
+    })
+  }
 
   return NextResponse.json({
     success: true,

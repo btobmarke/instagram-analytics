@@ -24,6 +24,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 
 const BodySchema = z.object({
+  treeId:  z.string().uuid(),                          // 必須: どのツリーか
   goal:    z.string().max(500).optional(),
   replace: z.boolean().default(false),
   days:    z.number().int().min(7).max(90).default(30),
@@ -133,7 +134,7 @@ export async function POST(
     return NextResponse.json({ success: false, error: parsed.error.flatten() }, { status: 400 })
   }
 
-  const { goal, replace, days } = parsed.data
+  const { treeId, goal, replace, days } = parsed.data
 
   const endDate   = new Date()
   const startDate = new Date(endDate.getTime() - days * 86400_000)
@@ -411,12 +412,13 @@ ${extSection}
     return { serviceId: null, metricRef: metricId }
   }
 
-  // ── 9. 既存ツリー削除（replace=true の場合）──────────────────────────────────
+  // ── 9. 既存ノード削除（replace=true の場合、対象ツリーのみ）───────────────────
   if (replace) {
     const { error: delErr } = await supabase
       .from('project_kpi_tree_nodes')
       .delete()
       .eq('project_id', projectId)
+      .eq('kpi_tree_id', treeId)
 
     if (delErr) {
       console.error('[ai-generate] 既存ツリー削除エラー:', delErr)
@@ -436,13 +438,14 @@ ${extSection}
     const { data: inserted, error: insertErr } = await supabase
       .from('project_kpi_tree_nodes')
       .insert({
-        project_id: projectId,
-        parent_id:  parentId,
-        sort_order: sortOrder,
-        label:      node.label,
-        node_type:  node.children && node.children.length > 0 ? 'folder' : 'leaf',
-        metric_ref: metricRef,
-        service_id: serviceId,
+        project_id:  projectId,
+        kpi_tree_id: treeId,
+        parent_id:   parentId,
+        sort_order:  sortOrder,
+        label:       node.label,
+        node_type:   node.children && node.children.length > 0 ? 'folder' : 'leaf',
+        metric_ref:  metricRef,
+        service_id:  serviceId,
       })
       .select('id')
       .single()
@@ -477,6 +480,7 @@ ${extSection}
     .from('project_kpi_tree_nodes')
     .select('*')
     .eq('project_id', projectId)
+    .eq('kpi_tree_id', treeId)
     .order('sort_order', { ascending: true })
 
   return NextResponse.json({

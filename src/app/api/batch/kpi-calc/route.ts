@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { validateBatchRequest } from '@/lib/utils/batch-auth'
+import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 
 // POST /api/batch/kpi-calc — KPI計算バッチ
 export async function POST(request: Request) {
@@ -217,6 +218,12 @@ export async function POST(request: Request) {
       }).eq('id', jobLog.id)
     }
 
+    await notifyBatchSuccess({
+      jobName: 'kpi_calc_batch',
+      processed: totalProcessed,
+      executedAt: startedAt,
+    })
+
     return NextResponse.json({ success: true, processed: totalProcessed })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
@@ -228,6 +235,13 @@ export async function POST(request: Request) {
         duration_ms: Date.now() - startedAt.getTime(),
       }).eq('id', jobLog.id)
     }
+    await notifyBatchError({
+      jobName: 'kpi_calc_batch',
+      processed: 0,
+      errorCount: 1,
+      errors: [{ error: message }],
+      executedAt: startedAt,
+    })
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { logBatchAuthFailure, validateBatchRequest } from '@/lib/utils/batch-auth'
+import { notifyBatchSuccess } from '@/lib/batch-notify'
 
 // バッチは service_role キーで実行（RLS bypass）
 function createServiceRoleClient() {
@@ -145,6 +146,15 @@ export async function POST(request: NextRequest) {
       finished_at: finishedAt,
       duration_ms: new Date(finishedAt).getTime() - new Date(startedAt).getTime(),
     }).eq('id', jobLog.id)
+  }
+
+  if (errorCount === 0) {
+    await notifyBatchSuccess({
+      jobName: 'lp_aggregate',
+      processed: okSites,
+      executedAt: new Date(startedAt),
+      lines: [`集計日: ${today}`, `レンジ: ${RANGES.join(', ')}`],
+    })
   }
 
   return NextResponse.json({

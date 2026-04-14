@@ -1131,7 +1131,20 @@ export default function UnifiedSummaryPage({
       ) : activeTab === 'templates' ? (
         <TemplateListTab projectId={projectId} />
       ) : (
-        <AnalysisTab projectId={projectId} configServices={configSvcs} />
+        <div>
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="text-sm text-gray-600">
+              KPIツリーから生成されるサマリカード分析は別ページに移動しました。
+            </div>
+            <Link
+              href={`/projects/${projectId}/unified-summary/analysis`}
+              className="text-sm px-3 py-1.5 rounded-md border bg-white hover:bg-gray-50"
+            >
+              サマリカード分析を開く
+            </Link>
+          </div>
+          <AnalysisTab projectId={projectId} configServices={configSvcs} />
+        </div>
       )}
     </div>
   )

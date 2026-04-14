@@ -22,6 +22,7 @@ import {
   buildPeriods,
 } from '@/lib/summary/fetch-metrics'
 import { getMetricCatalog } from '@/app/(dashboard)/projects/[projectId]/services/[serviceId]/summary/_lib/catalog'
+import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 
 /** JST の昨日 YYYY-MM-DD */
 function jstYesterday(): string {
@@ -176,6 +177,27 @@ async function runBatch(request: NextRequest) {
         .eq('id', jobLogId)
     }
 
+    if (finalStatus === 'success') {
+      await notifyBatchSuccess({
+        jobName: 'project_metrics_aggregate',
+        processed: totalUpserted,
+        executedAt: startedAt,
+        lines: [
+          `対象日: ${targetDate}`,
+          `対象サービス数: ${services.length}`,
+          ...(targetProject ? [`project: ${targetProject}`] : []),
+        ],
+      })
+    } else {
+      await notifyBatchError({
+        jobName: 'project_metrics_aggregate',
+        processed: totalUpserted,
+        errorCount: totalErrors,
+        errors: [{ error: `${totalErrors} サービスでエラー` }],
+        executedAt: startedAt,
+      })
+    }
+
     return NextResponse.json({
       success:      true,
       date:         targetDate,
@@ -199,6 +221,14 @@ async function runBatch(request: NextRequest) {
         })
         .eq('id', jobLogId)
     }
+
+    await notifyBatchError({
+      jobName: 'project_metrics_aggregate',
+      processed: 0,
+      errorCount: 1,
+      errors: [{ error: msg }],
+      executedAt: startedAt,
+    })
 
     return NextResponse.json({ success: false, error: msg }, { status: 500 })
   }
