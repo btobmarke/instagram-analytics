@@ -33,6 +33,10 @@
       "schedule": "0 * * * *"
     },
     {
+      "path": "/api/batch/story-insight-collector",
+      "schedule": "10 * * * *"
+    },
+    {
       "path": "/api/batch/kpi-calc",
       "schedule": "45 * * * *"
     },
