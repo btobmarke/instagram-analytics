@@ -19,6 +19,7 @@ export async function POST(request: Request) {
   let totalProcessed = 0
   let totalFailed = 0
   let skippedNoToken = 0
+  let skippedNoClient = 0
   let lastErrorMessage: string | null = null
   let tokenInvalid = false
 
@@ -37,22 +38,42 @@ export async function POST(request: Request) {
     // アクティブなアカウント一覧取得
     const { data: accounts } = await admin
       .from('ig_accounts')
-      .select('id, platform_account_id, api_base_url, api_version')
+      .select('id, platform_account_id, api_base_url, api_version, service_id')
       .eq('status', 'active')
+      .not('service_id', 'is', null)
 
     for (const account of (accounts ?? [])) {
       try {
-        // トークン取得
+        // service_id → project_id → client_id → client_ig_tokens
+        const { data: svcRow } = await admin
+          .from('services')
+          .select('project_id, projects!inner(client_id)')
+          .eq('id', account.service_id!)
+          .single()
+
+        const clientId = (svcRow?.projects as { client_id: string } | null)?.client_id
+        if (!clientId) {
+          skippedNoClient++
+          console.warn('[media-collector] skip account (cannot resolve client)', {
+            account_id: account.id,
+            service_id: account.service_id,
+          })
+          continue
+        }
+
         const { data: tokenRow } = await admin
-          .from('ig_account_tokens')
+          .from('client_ig_tokens')
           .select('access_token_enc')
-          .eq('account_id', account.id)
+          .eq('client_id', clientId)
           .eq('is_active', true)
           .single()
 
         if (!tokenRow) {
           skippedNoToken++
-          console.warn('[media-collector] skip account (no active token)', { account_id: account.id })
+          console.warn('[media-collector] skip account (no active token for client)', {
+            account_id: account.id,
+            client_id: clientId,
+          })
           continue
         }
 
@@ -129,6 +150,7 @@ export async function POST(request: Request) {
       processed: totalProcessed,
       failed: totalFailed,
       skipped_no_token: skippedNoToken,
+      skipped_no_client: skippedNoClient,
       token_invalid: tokenInvalid,
       duration_ms: duration,
       status: totalFailed === 0 ? 'success' : 'partial',
@@ -141,6 +163,7 @@ export async function POST(request: Request) {
         executedAt: startedAt,
         lines: [
           `対象: アカウント数 ${(accounts ?? []).length} 件`,
+          `クライアント解決不可でスキップ: ${skippedNoClient} 件`,
           `トークン未設定でスキップ: ${skippedNoToken} 件`,
         ],
       })
@@ -160,6 +183,7 @@ export async function POST(request: Request) {
       failed: totalFailed,
       accounts: (accounts ?? []).length,
       skipped_no_token: skippedNoToken,
+      skipped_no_client: skippedNoClient,
       ...(tokenInvalid ? { token_invalid: true as const } : {}),
       ...(lastErrorMessage ? { last_error: lastErrorMessage } : {}),
       ...(tokenInvalid
