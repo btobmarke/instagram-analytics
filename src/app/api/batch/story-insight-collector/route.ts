@@ -152,6 +152,47 @@ export async function POST(request: Request) {
               }, { onConflict: 'media_id,metric_code,fetched_at' })
             }
 
+            try {
+              const { data: navData, rateUsage: navRate } = await igClient.getMediaStoryNavigationInsights(
+                story.platform_media_id,
+              )
+              if (isRateLimitExceeded(navRate, 70)) {
+                console.warn('[story-insight-collector] rate usage high after story navigation fetch', {
+                  account_id: account.id,
+                  rate_usage: navRate,
+                })
+              } else {
+                type NavInsight = {
+                  name: string
+                  total_value?: {
+                    breakdowns?: Array<{
+                      results?: Array<{ dimension_values?: string[]; value?: number }>
+                    }>
+                  }
+                }
+                const navArr = (navData as { data: NavInsight[] })?.data ?? []
+                const nav = navArr.find(n => n.name === 'navigation')
+                const results = nav?.total_value?.breakdowns?.flatMap(b => b.results ?? []) ?? []
+                for (const r of results) {
+                  const action = (r.dimension_values?.[0] ?? '').toLowerCase()
+                  if (!action) continue
+                  await admin.from('ig_story_insight_fact').upsert({
+                    media_id: story.id,
+                    metric_code: `navigation_${action}`,
+                    value: typeof r.value === 'number' ? r.value : null,
+                    fetched_at: snapshotAtIso,
+                  }, { onConflict: 'media_id,metric_code,fetched_at' })
+                }
+              }
+            } catch (navErr) {
+              console.warn('[story-insight-collector] story navigation insights failed (non-fatal)', {
+                account_id: account.id,
+                media_id: story.id,
+                platform_media_id: story.platform_media_id,
+                error: navErr instanceof Error ? navErr.message : String(navErr),
+              })
+            }
+
             totalProcessed++
           } catch (err) {
             totalFailed++

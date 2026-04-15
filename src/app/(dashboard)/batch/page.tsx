@@ -107,7 +107,7 @@ const JOB_META: Record<string, JobMeta> = {
   },
   gbp_daily: {
     label: 'GBP日次データ収集',
-    description: 'GBP Performance API からインプレッション・アクション指標を取得し、レビューを同期',
+    description: 'GBP Performance API から日次指標・検索キーワード月次インプレッションを取得し、レビューを同期',
     category: 'GBP',
     frequency: '毎日',
   },

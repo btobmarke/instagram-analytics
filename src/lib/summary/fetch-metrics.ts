@@ -206,6 +206,65 @@ export async function fetchIgAccountInsight(
 ): Promise<Record<string, Record<string, number | null>>> {
   const result: Record<string, Record<string, number | null>> = {}
 
+  type IgAccountInsightSpec = {
+    /** fetchMetricsByRefs の返却キー（= 元の fieldRef の table 以降） */
+    refKey: string
+    metric_code: string
+    dimension_code: string
+    dimension_value: string
+    period_code: 'day' | 'lifetime'
+  }
+
+  const parseIgAccountInsightSpec = (rawField: string, refKey: string): IgAccountInsightSpec => {
+    // 例:
+    // - reach                              => 合計（dimension 空）/ day
+    // - reach@@media_product_type=REELS    => breakdown 行 / day
+    // - views@@follower_type=FOLLOWER      => breakdown 行 / day
+    // - engaged_audience_demographics@@dimension_code=country@@dimension_value=US@@period=lifetime
+    const parts = rawField.split('@@').map(s => s.trim()).filter(Boolean)
+    let metric_code = parts[0] && !parts[0].includes('=') ? parts[0] : ''
+    const kv: Record<string, string> = {}
+    for (const p of parts) {
+      if (!p.includes('=')) {
+        if (!metric_code) metric_code = p
+        continue
+      }
+      const idx = p.indexOf('=')
+      const k = p.slice(0, idx).trim()
+      const v = p.slice(idx + 1).trim()
+      if (k) kv[k] = v
+    }
+    if (!metric_code) metric_code = rawField
+
+    const periodRaw = (kv.period ?? 'day').toLowerCase()
+    const period_code: 'day' | 'lifetime' = periodRaw === 'lifetime' ? 'lifetime' : 'day'
+
+    const dimension_code = kv.dimension_code ?? kv.dc ?? ''
+    const dimension_value = kv.dimension_value ?? kv.dv ?? ''
+
+    // 互換: reach@@media_product_type=REELS のような “breakdownKey=value” を dimension に正規化
+    let dimCode = dimension_code
+    let dimVal = dimension_value
+    if (!dimCode) {
+      const breakdownKeys = new Set(['media_product_type', 'follow_type', 'follower_type', 'country', 'age', 'gender', 'city'])
+      for (const [k, v] of Object.entries(kv)) {
+        if (breakdownKeys.has(k)) {
+          dimCode = k
+          dimVal = v
+          break
+        }
+      }
+    }
+
+    return {
+      refKey,
+      metric_code,
+      dimension_code: dimCode,
+      dimension_value: dimVal,
+      period_code,
+    }
+  }
+
   const { data: igRow } = await supabase
     .from('ig_accounts')
     .select('id')
@@ -234,15 +293,49 @@ export async function fetchIgAccountInsight(
   }
 
   for (const field of fields) {
+    const spec = parseIgAccountInsightSpec(field, field)
     const accum = emptyAccum(periods)
-    const { data: rows } = await supabase
+
+    if (spec.period_code === 'lifetime') {
+      // lifetime は「最新スナップショット1件」を期間全体に割り当てる（短いレンジでも欠損しにくい）
+      let q = supabase
+        .from('ig_account_insight_fact')
+        .select('value_date, value')
+        .eq('account_id', accountId)
+        .eq('metric_code', spec.metric_code)
+        .eq('period_code', 'lifetime')
+
+      if (spec.dimension_code) q = q.eq('dimension_code', spec.dimension_code)
+      else q = q.eq('dimension_code', '')
+      if (spec.dimension_value) q = q.eq('dimension_value', spec.dimension_value)
+      else q = q.eq('dimension_value', '')
+
+      const { data: row } = await q.order('value_date', { ascending: false }).limit(1).maybeSingle()
+      const v = row?.value
+      if (v != null) {
+        for (const p of periods) {
+          addValue(accum, p.label, v as number)
+        }
+      }
+      result[`ig_account_insight_fact.${spec.refKey}`] = finalizeAccum(accum, 'sum')
+      continue
+    }
+
+    let q = supabase
       .from('ig_account_insight_fact')
       .select('value_date, value')
       .eq('account_id', accountId)
-      .eq('metric_code', field)
+      .eq('metric_code', spec.metric_code)
       .eq('period_code', 'day')
-      .gte('value_date', rangeStart)
-      .lte('value_date', rangeEnd)
+
+    if (spec.dimension_code) q = q.eq('dimension_code', spec.dimension_code)
+    else q = q.eq('dimension_code', '')
+    if (spec.dimension_value) q = q.eq('dimension_value', spec.dimension_value)
+    else q = q.eq('dimension_value', '')
+
+    q = q.gte('value_date', rangeStart).lte('value_date', rangeEnd)
+
+    const { data: rows } = await q
 
     for (const row of rows ?? []) {
       const vd = String(row.value_date).slice(0, 10)
@@ -257,7 +350,7 @@ export async function fetchIgAccountInsight(
       }
       addValue(accum, label, row.value)
     }
-    result[`ig_account_insight_fact.${field}`] = finalizeAccum(accum, 'sum')
+    result[`ig_account_insight_fact.${spec.refKey}`] = finalizeAccum(accum, 'sum')
   }
   return result
 }
@@ -280,6 +373,12 @@ export async function fetchIgMediaInsightByProduct(
 ): Promise<Record<string, Record<string, number | null>>> {
   const result: Record<string, Record<string, number | null>> = {}
   const fieldUniq = [...new Set(fields)]
+
+  const metricCodesForField = (field: string): string[] => {
+    if (field.startsWith('profile_activity_')) return [field]
+    if (field.startsWith('navigation_')) return [field]
+    return [field, `profile_activity_${field}`]
+  }
 
   const fillAllNull = () => {
     for (const f of fieldUniq) {
@@ -321,12 +420,13 @@ export async function fetchIgMediaInsightByProduct(
     snapshot_at: string
   }> = []
   const pageSize = 1000
+  const metricCodes = [...new Set(fieldUniq.flatMap(metricCodesForField))]
   for (let from = 0; ; from += pageSize) {
     const { data: page, error } = await supabase
       .from('ig_media_insight_fact')
       .select('media_id, metric_code, value, snapshot_at')
       .in('media_id', mediaIds)
-      .in('metric_code', fieldUniq)
+      .in('metric_code', metricCodes)
       .lt('snapshot_at', rangeEndIso)
       .order('snapshot_at', { ascending: true })
       .range(from, from + pageSize - 1)
@@ -342,7 +442,15 @@ export async function fetchIgMediaInsightByProduct(
   const timelines = new Map<string, { t: number; v: number }[]>()
   for (const row of allFacts) {
     if (row.value == null) continue
-    const k = `${row.media_id}\0${row.metric_code}`
+    const fieldForRow = (() => {
+      if (fieldUniq.includes(row.metric_code)) return row.metric_code
+      if (row.metric_code.startsWith('profile_activity_')) {
+        const tail = row.metric_code.slice('profile_activity_'.length)
+        if (fieldUniq.includes(tail)) return tail
+      }
+      return row.metric_code
+    })()
+    const k = `${row.media_id}\0${fieldForRow}`
     let arr = timelines.get(k)
     if (!arr) {
       arr = []
@@ -484,6 +592,109 @@ export async function fetchGbpReviews(
     // star_rating のみ平均、その他はカウント（sum）
     result[`gbp_reviews.${field}`] = finalizeAccum(accum, field === 'star_rating' ? 'avg' : 'sum')
   }
+  return result
+}
+
+/**
+ * gbp_search_keyword_monthly
+ * field 例: impressions@@search_keyword=pizza@@year=2025@@month=3
+ * 暦月の期間バケットが完全一致するか、単一期間 custom_range がその月と重なる場合に値を入れる。
+ */
+export async function fetchGbpSearchKeywordMonthly(
+  supabase: SupabaseServerClient,
+  serviceId: string,
+  fields: string[],
+  periods: Period[],
+): Promise<Record<string, Record<string, number | null>>> {
+  const result: Record<string, Record<string, number | null>> = {}
+
+  const parseSpec = (
+    raw: string,
+  ): { refKey: string; searchKeyword: string; year: number; month: number } | null => {
+    const parts = raw.split('@@').map(s => s.trim()).filter(Boolean)
+    const kv: Record<string, string> = {}
+    for (const p of parts) {
+      if (!p.includes('=')) continue
+      const idx = p.indexOf('=')
+      const k = p.slice(0, idx).trim()
+      const v = p.slice(idx + 1).trim()
+      if (k) kv[k] = v
+    }
+    const sk = kv.search_keyword ?? kv.q ?? ''
+    const year = parseInt(kv.year ?? '', 10)
+    const month = parseInt(kv.month ?? '', 10)
+    if (!sk || !Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null
+    return { refKey: raw, searchKeyword: sk, year, month }
+  }
+
+  const monthStartJst = (y: number, m: number) =>
+    new Date(`${y}-${String(m).padStart(2, '0')}-01T00:00:00+09:00`)
+  const monthEndJst = (y: number, m: number) => {
+    const s = monthStartJst(y, m)
+    const e = new Date(s)
+    e.setMonth(e.getMonth() + 1)
+    return e
+  }
+
+  const assignMonthlyImpressions = (
+    accum: Record<string, { sum: number; count: number } | null>,
+    year: number,
+    month: number,
+    impressions: number | null,
+  ) => {
+    const ms = monthStartJst(year, month)
+    const me = monthEndJst(year, month)
+
+    const fullMonthPeriod = periods.find(p => p.start <= ms && p.end >= me)
+    if (fullMonthPeriod) {
+      addValue(accum, fullMonthPeriod.label, impressions)
+      return
+    }
+    if (periods.length === 1) {
+      const p = periods[0]!
+      if (p.start < me && p.end > ms) addValue(accum, p.label, impressions)
+    }
+  }
+
+  const { data: siteRow } = await supabase
+    .from('gbp_sites')
+    .select('id')
+    .eq('service_id', serviceId)
+    .maybeSingle()
+
+  const fillNull = (refKey: string) => {
+    result[`gbp_search_keyword_monthly.${refKey}`] = Object.fromEntries(periods.map(p => [p.label, null]))
+  }
+
+  if (!siteRow) {
+    for (const f of fields) fillNull(f)
+    return result
+  }
+
+  const siteId = siteRow.id
+
+  for (const rawField of fields) {
+    const spec = parseSpec(rawField)
+    const accum = emptyAccum(periods)
+    if (!spec) {
+      fillNull(rawField)
+      continue
+    }
+
+    const { data: row } = await supabase
+      .from('gbp_search_keyword_monthly')
+      .select('impressions')
+      .eq('gbp_site_id', siteId)
+      .eq('year', spec.year)
+      .eq('month', spec.month)
+      .eq('search_keyword', spec.searchKeyword)
+      .maybeSingle()
+
+    const impressions = row?.impressions != null ? Number(row.impressions) : null
+    assignMonthlyImpressions(accum, spec.year, spec.month, impressions)
+    result[`gbp_search_keyword_monthly.${spec.refKey}`] = finalizeAccum(accum, 'sum')
+  }
+
   return result
 }
 
@@ -748,6 +959,9 @@ export async function fetchMetricsByRefs(
         break
       case 'gbp_reviews':
         queries.push(fetchGbpReviews(supabase, serviceId, fields, periods))
+        break
+      case 'gbp_search_keyword_monthly':
+        queries.push(fetchGbpSearchKeywordMonthly(supabase, serviceId, fields, periods))
         break
       case 'line_oam_friends_daily':
         queries.push(fetchLineFriendsDaily(supabase, serviceId, fields, periods))

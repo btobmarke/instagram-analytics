@@ -45,6 +45,13 @@ export interface GbpReview {
   }
 }
 
+/** Performance API: locations.searchkeywords.impressions.monthly（1カ月分） */
+export interface GbpSearchKeywordMonthlyItem {
+  searchKeyword: string
+  impressions:  number | null
+  threshold:    string | null
+}
+
 // ------------------------------------------------
 // 共通フェッチ（429/503 はリトライ）
 // ------------------------------------------------
@@ -249,6 +256,58 @@ export async function fetchPerformance(params: {
     metrics,
     rawPayload: data,
   }))
+}
+
+// ------------------------------------------------
+// 検索キーワード月次インプレッション（1カ月ずつ取得して月を確定）
+// GET .../v1/{location}:searchkeywords/impressions/monthly
+// ------------------------------------------------
+export async function fetchSearchKeywordImpressionsMonthly(params: {
+  accessToken:  string
+  locationName: string // "locations/123..."
+  year:         number
+  month:        number // 1-12
+}): Promise<GbpSearchKeywordMonthlyItem[]> {
+  const { accessToken, locationName, year, month } = params
+  const out: GbpSearchKeywordMonthlyItem[] = []
+  let pageToken: string | undefined
+
+  do {
+    const query = new URLSearchParams()
+    query.set('monthlyRange.start_month.year', String(year))
+    query.set('monthlyRange.start_month.month', String(month))
+    query.set('monthlyRange.end_month.year', String(year))
+    query.set('monthlyRange.end_month.month', String(month))
+    query.set('pageSize', '100')
+    if (pageToken) query.set('pageToken', pageToken)
+
+    const url = `${GBP_API_BASE}/v1/${locationName}/searchkeywords/impressions/monthly?${query}`
+    const data = await gbpFetch(url, accessToken) as Record<string, unknown>
+    const rows = (data.searchKeywordsCounts ?? data.search_keywords_counts) as Array<{
+      searchKeyword?: string
+      search_keyword?: string
+      insightsValue?: { value?: string; threshold?: string }
+      insights_value?: { value?: string; threshold?: string }
+    }> | undefined
+    const list = rows ?? []
+    for (const row of list) {
+      const kw = String(row.searchKeyword ?? row.search_keyword ?? '').trim()
+      if (!kw) continue
+      const iv = row.insightsValue ?? row.insights_value
+      let impressions: number | null = null
+      let threshold: string | null = null
+      if (iv?.value != null && iv.value !== '') {
+        const n = Number(iv.value)
+        impressions = Number.isFinite(n) ? n : null
+      } else if (iv?.threshold != null && iv.threshold !== '') {
+        threshold = String(iv.threshold)
+      }
+      out.push({ searchKeyword: kw, impressions, threshold })
+    }
+    pageToken = (data.nextPageToken ?? data.next_page_token) as string | undefined
+  } while (pageToken)
+
+  return out
 }
 
 // ------------------------------------------------

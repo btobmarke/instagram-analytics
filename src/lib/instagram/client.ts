@@ -34,6 +34,13 @@ export type InstagramRequestStep =
   | 'getProfileDisplayFields'
   | 'getMediaList'
   | 'getMediaInsights'
+  | 'getMediaStoryNavigationInsights'
+  | 'getMediaProfileActivityInsights'
+  | 'getAccountInsightsTimeSeries'
+  | 'getAccountInsightsTotalValue'
+  | 'getAccountInsightsBreakdownTotalValue'
+  | 'getAccountInsightsDemographics'
+  | 'getAccountInsightsOnlineFollowers'
   | 'getAccountInsights'
   | 'refreshLongLivedToken'
 
@@ -270,6 +277,41 @@ export class InstagramClient {
     )
   }
 
+  /**
+   * ストーリー: 公式推奨の `navigation` + `story_navigation_action_type` breakdown。
+   * @see https://developers.facebook.com/docs/instagram-platform/reference/instagram-media/insights/
+   */
+  async getMediaStoryNavigationInsights(mediaId: string) {
+    return this.fetch(
+      `/${mediaId}/insights`,
+      {
+        metric: 'navigation',
+        breakdown: 'story_navigation_action_type',
+        period: 'lifetime',
+      },
+      undefined,
+      'getMediaStoryNavigationInsights'
+    )
+  }
+
+  /**
+   * 投稿→プロフィール行動（内訳あり）
+   * `GET /{media-id}/insights?metric=profile_activity&breakdown=action_type&period=lifetime`
+   * @see https://developers.facebook.com/docs/instagram-platform/reference/instagram-media/insights/
+   */
+  async getMediaProfileActivityInsights(mediaId: string) {
+    return this.fetch(
+      `/${mediaId}/insights`,
+      {
+        metric: 'profile_activity',
+        breakdown: 'action_type',
+        period: 'lifetime',
+      },
+      undefined,
+      'getMediaProfileActivityInsights'
+    )
+  }
+
   // ========== Account Insights ==========
 
   /**
@@ -296,11 +338,15 @@ export class InstagramClient {
     )
   }
 
-  async getAccountInsightsTotalValue(since: string, until: string) {
+  async getAccountInsightsTotalValue(
+    since: string,
+    until: string,
+    metrics = 'accounts_engaged,total_interactions,likes,comments,shares,saves',
+  ) {
     return this.fetch(
       `/${this.accountId}/insights`,
       {
-        metric: 'accounts_engaged,total_interactions,likes,comments,shares,saves',
+        metric: metrics,
         metric_type: 'total_value',
         period: 'day',
         since,
@@ -308,6 +354,81 @@ export class InstagramClient {
       },
       undefined,
       'getAccountInsightsTotalValue'
+    )
+  }
+
+  /** v22+ 相当: アカウント日次の不足メトリクス（impressions は非推奨のため含めない） */
+  async getAccountInsightsTotalValueExtended(since: string, until: string) {
+    const metrics =
+      'views,replies,profile_links_taps,follows_and_unfollows,reposts,' +
+      'accounts_engaged,total_interactions,likes,comments,shares,saves'
+    return this.getAccountInsightsTotalValue(since, until, metrics)
+  }
+
+  /**
+   * アカウント日次: breakdown 付き total_value（1日レンジ推奨）
+   * 例: reach + media_product_type / follow_type、views + follower_type 等
+   */
+  async getAccountInsightsBreakdownTotalValue(params: {
+    since: string
+    until: string
+    metric: 'reach' | 'views'
+    breakdown: 'media_product_type' | 'follow_type' | 'follower_type'
+  }) {
+    return this.fetch(
+      `/${this.accountId}/insights`,
+      {
+        metric: params.metric,
+        metric_type: 'total_value',
+        period: 'day',
+        since: params.since,
+        until: params.until,
+        breakdown: params.breakdown,
+      },
+      undefined,
+      'getAccountInsightsBreakdownTotalValue'
+    )
+  }
+
+  /**
+   * デモグラフィック系（lifetime + timeframe）
+   * 例: engaged_audience_demographics / follower_demographics + breakdown=country|age|gender
+   */
+  async getAccountInsightsDemographics(params: {
+    metric: 'engaged_audience_demographics' | 'follower_demographics'
+    timeframe: 'last_90_days' | 'last_30_days' | 'this_month' | 'this_week'
+    breakdown: 'country' | 'age' | 'gender' | 'city'
+  }) {
+    return this.fetch(
+      `/${this.accountId}/insights`,
+      {
+        metric: params.metric,
+        period: 'lifetime',
+        metric_type: 'total_value',
+        timeframe: params.timeframe,
+        breakdown: params.breakdown,
+      },
+      undefined,
+      'getAccountInsightsDemographics'
+    )
+  }
+
+  /**
+   * online_followers（条件付きで利用可能）
+   * 公式: period=day, metric_type=time_series
+   */
+  async getAccountInsightsOnlineFollowers(since: string, until: string) {
+    return this.fetch(
+      `/${this.accountId}/insights`,
+      {
+        metric: 'online_followers',
+        metric_type: 'time_series',
+        period: 'day',
+        since,
+        until,
+      },
+      undefined,
+      'getAccountInsightsOnlineFollowers'
     )
   }
 

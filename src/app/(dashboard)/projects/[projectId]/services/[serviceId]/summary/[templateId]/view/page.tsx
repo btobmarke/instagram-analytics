@@ -125,6 +125,7 @@ function tableDisplayName(tableId: string): string {
     ig_media_insight_reels:  'Instagram リール投稿インサイト',
     ig_media_insight_story:  'Instagram ストーリーズインサイト',
     gbp_performance_daily:   'GBP パフォーマンス（日次）',
+    gbp_search_keyword_monthly: 'GBP 検索キーワード（月次）',
     gbp_reviews:             'GBP クチコミ',
     line_oam_friends_daily:  'LINE OAM 友だち数（日次）',
     line_oam_friends_attr:   'LINE OAM 友だち属性',

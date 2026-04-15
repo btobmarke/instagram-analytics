@@ -19,6 +19,16 @@ const IG_ACCOUNT: [string, string, string][] = [
   ['follower_count',     'フォロワー数',             'アカウントをフォローしているユーザーの人数（日次スナップショット）。'],
   ['reach',              'リーチ',                   'コンテンツが届いたユニークアカウントの数。同じアカウントが複数回見ても1としてカウント。'],
   ['views',              '閲覧数',                   'コンテンツが閲覧された総回数。同一アカウントの複数回閲覧も全てカウント。'],
+  ['reach@@media_product_type=FEED', 'リーチ（フィード）', '日次リーチのうち、フィード表面に起因する推定内訳。'],
+  ['reach@@media_product_type=REELS', 'リーチ（リール）', '日次リーチのうち、リール表面に起因する推定内訳。'],
+  ['reach@@media_product_type=STORY', 'リーチ（ストーリー）', '日次リーチのうち、ストーリー表面に起因する推定内訳。'],
+  ['reach@@follow_type=FOLLOWER', 'リーチ（フォロワー）', '日次リーチのうち、フォロワー由来の推定内訳。'],
+  ['reach@@follow_type=NON_FOLLOWER', 'リーチ（非フォロワー）', '日次リーチのうち、非フォロワー由来の推定内訳。'],
+  ['views@@follower_type=FOLLOWER', '閲覧数（フォロワー）', '日次閲覧数のうち、フォロワー由来の推定内訳。'],
+  ['views@@follower_type=NON_FOLLOWER', '閲覧数（非フォロワー）', '日次閲覧数のうち、非フォロワー由来の推定内訳。'],
+  ['views@@media_product_type=FEED', '閲覧数（フィード）', '日次閲覧数のうち、フィード表面に起因する推定内訳。'],
+  ['views@@media_product_type=REELS', '閲覧数（リール）', '日次閲覧数のうち、リール表面に起因する推定内訳。'],
+  ['views@@media_product_type=STORY', '閲覧数（ストーリー）', '日次閲覧数のうち、ストーリー表面に起因する推定内訳。'],
   ['profile_views',      'プロフィール閲覧数',       'プロフィールページが閲覧された回数。'],
   ['accounts_engaged',   'エンゲージしたアカウント数','いいね・コメント・保存・シェアなど何らかのアクションをとったユニークアカウント数。'],
   ['total_interactions', 'インタラクション合計',      'いいね・コメント・保存・シェアなど全アクションの合計数。'],
@@ -28,7 +38,25 @@ const IG_ACCOUNT: [string, string, string][] = [
   ['saves',              '保存数',                   'コンテンツがコレクションに保存された回数。'],
   ['replies',            '返信数',                   'ストーリーズやリールへのDM返信数。'],
   ['profile_links_taps', 'プロフィールリンクタップ', 'プロフィールに設置したリンクがタップされた回数。'],
+  ['online_followers',   'オンラインフォロワー',     'オンライン状態に近いフォロワー推定（取得できるアカウントのみ）。'],
+  ['engaged_audience_demographics@@dimension_code=country@@dimension_value=US@@period=lifetime', 'エンゲージ層（国: US）', '直近90日のエンゲージしたユーザーの国別内訳（該当セグメント）。'],
+  ['follower_demographics@@dimension_code=gender@@dimension_value=FEMALE@@period=lifetime', 'フォロワー層（性別: 女性）', '直近90日のフォロワー属性（該当セグメント）。'],
 ]
+
+/**
+ * メディア `profile_activity`（action_type breakdown）を ig_media_insight_fact に保存する際の metric_code。
+ * 値はAPIの breakdown 次元（小文字化）に追従する。
+ */
+const IG_MEDIA_PROFILE_ACTIVITY: [string, string, string][] = [
+  ['profile_activity_bio_link_click', 'プロフィール行動（リンク）', 'プロフィール上のリンク（bio link 等）に関するアクション推定。'],
+  ['profile_activity_call', 'プロフィール行動（電話）', 'プロフィール上の通話アクション推定。'],
+  ['profile_activity_direction', 'プロフィール行動（道順）', 'プロフィール上の道順/ナビゲーション起動に関するアクション推定。'],
+  ['profile_activity_email', 'プロフィール行動（メール）', 'プロフィール上のメール起動等に関するアクション推定。'],
+  ['profile_activity_text_message', 'プロフィール行動（SMS）', 'プロフィール上のSMS/テキストメッセージ起動に関するアクション推定。'],
+  ['profile_activity_address', 'プロフィール行動（住所）', 'プロフィール上の住所表示/操作に関するアクション推定。'],
+  ['profile_activity_website_click', 'プロフィール行動（Web）', 'プロフィール上のウェブサイト遷移に関するアクション推定。'],
+]
+
 const IG_FEED: [string, string, string][] = [
   ['views',              '閲覧数',                   'フィード投稿が表示（閲覧）された延べ回数。'],
   ['reach',              'リーチ',                   'フィード投稿が届いたユニークアカウント数。'],
@@ -39,6 +67,7 @@ const IG_FEED: [string, string, string][] = [
   ['profile_visits',     'プロフィール訪問数',       'フィード投稿からプロフィールページへ遷移した回数。'],
   ['follows',            'フォロー数',               'フィード投稿を見てフォローしたアカウント数。'],
   ['total_interactions', 'インタラクション合計',      'いいね・コメント・保存・シェア等、全アクションの合計数。'],
+  ...IG_MEDIA_PROFILE_ACTIVITY,
 ]
 const IG_REELS: [string, string, string][] = [
   ['views',                          '閲覧数',         'リールが再生された延べ回数。'],
@@ -50,6 +79,7 @@ const IG_REELS: [string, string, string][] = [
   ['ig_reels_video_view_total_time', '総再生時間',     '全ユーザーによるリールの合計再生時間（ミリ秒）。'],
   ['ig_reels_avg_watch_time',        '平均視聴時間',   '1再生あたりの平均視聴時間（ミリ秒）。動画の完成度の目安。'],
   ['total_interactions',             'インタラクション合計', 'いいね・コメント・保存・シェア等の合計数。'],
+  ...IG_MEDIA_PROFILE_ACTIVITY,
 ]
 const IG_STORY: [string, string, string][] = [
   ['views',        '閲覧数',       'ストーリーが閲覧された延べ回数。'],
@@ -58,6 +88,11 @@ const IG_STORY: [string, string, string][] = [
   ['taps_back',    '前へタップ',   '前のストーリーに戻った回数。見返されるほど興味を引いているコンテンツの指標。'],
   ['exits',        '離脱数',       'ストーリーを見ている途中でアプリ等を閉じた回数。'],
   ['replies',      '返信数',       'ストーリーへDMで返信された回数。エンゲージメントの高さを示す。'],
+  ['navigation_tap_forward', 'ナビ（次へタップ）', '公式 `navigation` breakdown の tap_forward（次へ）。'],
+  ['navigation_tap_back',    'ナビ（前へタップ）', '公式 `navigation` breakdown の tap_back（前へ）。'],
+  ['navigation_tap_exit',    'ナビ（離脱）',       '公式 `navigation` breakdown の tap_exit。'],
+  ['navigation_swipe_forward','ナビ（スワイプ）',  '公式 `navigation` breakdown の swipe_forward。'],
+  ...IG_MEDIA_PROFILE_ACTIVITY,
 ]
 
 // ── GBP ───────────────────────────────────────────────────────────
@@ -73,6 +108,14 @@ const GBP_PERF: [string, string, string][] = [
   ['business_bookings',                   '予約数',                  'ビジネスプロフィール経由で予約が入った回数。'],
   ['business_food_orders',                'フード注文数',            'ビジネスプロフィール経由でのフード注文数。'],
   ['business_food_menu_clicks',           'フードメニュークリック数','フードメニューがクリックされた回数。'],
+]
+/** Performance API searchkeywords.impressions.monthly（バッチで gbp_search_keyword_monthly に保存） */
+const GBP_SEARCH_KW: [string, string, string][] = [
+  [
+    'impressions@@search_keyword=your_keyword@@year=2025@@month=1',
+    '検索KWインプレッション（月次・指定語）',
+    'テンプレでは your_keyword / year / month を実データに合わせて差し替え。暦月の期間、または単一期間がその月と重なるときに値が入ります。閾値のみのキーワードは impressions が null です。',
+  ],
 ]
 const GBP_REVIEW: [string, string, string][] = [
   ['star_rating',       '星評価',    'クチコミに付けられた星の評価（1〜5）。'],
@@ -175,6 +218,7 @@ export function getMetricCatalog(serviceType: string): MetricCard[] {
     ]
     case 'gbp': return [
       ...GBP_PERF  .map(([f,l,d]) => card('gbp_performance_daily',     f, l, 'パフォーマンス', d)),
+      ...GBP_SEARCH_KW.map(([f,l,d]) => card('gbp_search_keyword_monthly', f, l, '検索キーワード（月次）', d)),
       ...GBP_REVIEW.map(([f,l,d]) => card('gbp_reviews',               f, l, 'クチコミ',       d)),
     ]
     case 'line': return [

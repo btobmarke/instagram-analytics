@@ -47,6 +47,14 @@ interface ReviewRow {
   reply_comment: string | null
 }
 
+interface SearchKeywordRow {
+  search_keyword: string
+  impressions: number | null
+  threshold: string | null
+  year: number
+  month: number
+}
+
 // ---------- ユーティリティ ----------
 const STAR_LABELS: Record<string, string> = {
   ONE: '★', TWO: '★★', THREE: '★★★', FOUR: '★★★★', FIVE: '★★★★★',
@@ -102,6 +110,14 @@ export default function GbpDashboardPage({
   )
   const reviews      = reviewData?.data ?? []
   const totalReviews = reviewData?.meta?.total ?? 0
+
+  const { data: kwData } = useSWR<{
+    success: boolean
+    data: SearchKeywordRow[]
+    meta: { year: number | null; month: number | null }
+  }>(site ? `/api/services/${serviceId}/gbp/search-keywords` : null, fetcher)
+  const kwRows = kwData?.data ?? []
+  const kwMeta = kwData?.meta
 
   const perfSum = perfRows.reduce(
     (acc, r) => ({
@@ -203,6 +219,52 @@ export default function GbpDashboardPage({
               <PerfCard label="電話タップ"          value={perfSum.calls} />
               <PerfCard label="Webサイトクリック"   value={perfSum.website} />
             </div>
+          </div>
+
+          {/* 検索キーワード（Performance API 月次） */}
+          <div className="mb-5">
+            <p className="text-xs font-semibold text-gray-500 mb-2">検索キーワード（月次）</p>
+            {kwMeta?.year != null && kwMeta?.month != null ? (
+              kwRows.length === 0 ? (
+                <p className="text-xs text-gray-400 bg-white rounded-xl border border-gray-200 px-4 py-3">
+                  {kwMeta.year}年{kwMeta.month}月のキーワードデータがありません（該当月に検索が無い、または未取得の可能性があります）
+                </p>
+              ) : (
+                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <p className="text-[11px] text-gray-400 px-4 pt-3 pb-1">
+                    {kwMeta.year}年{kwMeta.month}月（上位 {Math.min(kwRows.length, 20)} 件）
+                  </p>
+                  <div className="overflow-x-auto px-2 pb-2">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-gray-500 border-b border-gray-100">
+                          <th className="py-2 pl-2 pr-2">キーワード</th>
+                          <th className="py-2 pr-2 w-28">インプレッション</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {kwRows.slice(0, 20).map(row => (
+                          <tr key={row.search_keyword} className="hover:bg-gray-50">
+                            <td className="py-1.5 pl-2 pr-2 text-gray-700 break-all">{row.search_keyword}</td>
+                            <td className="py-1.5 pr-2 text-gray-600 tabular-nums">
+                              {row.impressions != null
+                                ? fmt(row.impressions)
+                                : row.threshold != null
+                                  ? '<' + String(row.threshold)
+                                  : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )
+            ) : (
+              <p className="text-xs text-gray-400 bg-white rounded-xl border border-dashed border-gray-200 px-4 py-3">
+                未取得です。GBP 日次バッチ（gbp-daily）実行後に Performance API から同期されます。
+              </p>
+            )}
           </div>
 
           {/* パフォーマンス / レビュー タブ */}

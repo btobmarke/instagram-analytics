@@ -4,7 +4,12 @@ export const maxDuration = 300  // 5分（Vercel Pro上限）
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { getAccessTokenFromCredential, type GbpCredentialRow } from '@/lib/gbp/auth'
-import { fetchPerformance, fetchReviews, listLocations } from '@/lib/gbp/api'
+import {
+  fetchPerformance,
+  fetchReviews,
+  fetchSearchKeywordImpressionsMonthly,
+  listLocations,
+} from '@/lib/gbp/api'
 import { METRIC_TO_COLUMN } from '@/lib/gbp/constants'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 
@@ -17,6 +22,30 @@ function jstToday(): Date {
 
 function dateToString(d: Date): string {
   return d.toISOString().split('T')[0]
+}
+
+/** JST の「先月」（検索キーワード月次は翌月初旬まで遅延しがちなため、当月は取らない） */
+function previousCalendarMonthJst(now = new Date()): { year: number; month: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: 'numeric',
+  }).formatToParts(now)
+  const y = Number(parts.find(p => p.type === 'year')?.value ?? '0')
+  let m = Number(parts.find(p => p.type === 'month')?.value ?? '0')
+  m -= 1
+  let year = y
+  if (m < 1) {
+    m = 12
+    year -= 1
+  }
+  return { year, month: m }
+}
+
+/** 1〜12 の月に delta を加算（delta は負可） */
+function addCalendarMonths(year: number, month: number, delta: number): { year: number; month: number } {
+  const idx0 = year * 12 + (month - 1) + delta
+  return { year: Math.floor(idx0 / 12), month: (idx0 % 12) + 1 }
 }
 
 // GET /api/batch/gbp-daily  ← Vercel Cron は GET で叩く
@@ -197,6 +226,53 @@ async function runBatch(_request: NextRequest) {
             }
           }
 
+          // ---- 検索キーワード（月次インプレッション）UPSERT ----
+          let keywordRowsTotal = 0
+          try {
+            const monthsBack = Math.min(
+              36,
+              Math.max(1, parseInt(process.env.GBP_KEYWORD_MONTHS_BACK ?? '13', 10) || 13),
+            )
+            const endYm = previousCalendarMonthJst()
+            keywordMonths: for (let i = monthsBack - 1; i >= 0; i--) {
+              const { year, month } = addCalendarMonths(endYm.year, endYm.month, -i)
+              const items = await fetchSearchKeywordImpressionsMonthly({
+                accessToken,
+                locationName,
+                year,
+                month,
+              })
+              if (items.length === 0) continue
+
+              const CHUNK = 200
+              for (let j = 0; j < items.length; j += CHUNK) {
+                const slice = items.slice(j, j + CHUNK)
+                const kwUpsert = slice.map(it => ({
+                  gbp_site_id:    siteId,
+                  year,
+                  month,
+                  search_keyword: it.searchKeyword,
+                  impressions:    it.impressions,
+                  threshold:      it.threshold,
+                  updated_at:     new Date().toISOString(),
+                }))
+                const { error: kwErr } = await admin
+                  .from('gbp_search_keyword_monthly')
+                  .upsert(kwUpsert, { onConflict: 'gbp_site_id,year,month,search_keyword' })
+                if (kwErr) {
+                  console.error(`[gbp-daily] site=${siteId} search keywords ${year}-${month} upsert error:`, kwErr)
+                  errors.push({ clientId: cred.client_id, siteId, error: `search_keywords: ${kwErr.message}` })
+                  break keywordMonths
+                }
+              }
+              keywordRowsTotal += items.length
+            }
+          } catch (kwFatal) {
+            const msg = kwFatal instanceof Error ? kwFatal.message : String(kwFatal)
+            console.warn(`[gbp-daily] site=${siteId} search keywords fetch failed (non-fatal):`, msg)
+            errors.push({ clientId: cred.client_id, siteId, error: `search_keywords: ${msg}` })
+          }
+
           // ---- Reviews UPSERT ----
           const reviews = accountName
             ? await fetchReviews({ accessToken, locationName, accountName })
@@ -238,7 +314,9 @@ async function runBatch(_request: NextRequest) {
             .eq('id', siteId)
 
           processedSites++
-          console.log(`[gbp-daily] site=${siteId} (${locationName}) done. performance=${rows.length}rows reviews=${reviews.length}`)
+          console.log(
+            `[gbp-daily] site=${siteId} (${locationName}) done. performance=${rows.length}rows keywords=${keywordRowsTotal} reviews=${reviews.length}`,
+          )
 
         } catch (siteErr) {
           const msg = siteErr instanceof Error ? siteErr.message : String(siteErr)

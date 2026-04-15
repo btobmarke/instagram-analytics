@@ -27,9 +27,28 @@ const METRIC_LABELS: Record<string, string> = {
   shares: 'シェア',
   video_views: '動画再生数',
   total_interactions: '総エンゲージメント',
+  profile_visits: 'プロフィール訪問',
+  follows: 'フォロー',
+  taps_forward: '次へタップ',
+  taps_back: '前へタップ',
+  exits: '離脱',
+  replies: '返信',
 }
 
 const CHART_COLORS = ['#8b5cf6', '#ec4899', '#3b82f6', '#10b981', '#f59e0b', '#ef4444']
+
+function metricLabel(metric: string): string {
+  if (METRIC_LABELS[metric]) return METRIC_LABELS[metric]
+  if (metric.startsWith('profile_activity_')) {
+    const tail = metric.slice('profile_activity_'.length)
+    return `プロフィール行動（${tail}）`
+  }
+  if (metric.startsWith('navigation_')) {
+    const tail = metric.slice('navigation_'.length)
+    return `ナビ（${tail}）`
+  }
+  return metric
+}
 
 export default function PostDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
@@ -74,6 +93,36 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
   if (!data) return <div className="text-center text-gray-500 py-16">投稿が見つかりません</div>
 
   const { post, latest_insights, time_series, latest_ai_analysis } = data
+
+  const baseMetricOrder = [
+    'views',
+    'reach',
+    'likes',
+    'comments',
+    'saved',
+    'shares',
+    'total_interactions',
+    'profile_visits',
+    'follows',
+    'taps_forward',
+    'taps_back',
+    'exits',
+    'replies',
+    'impressions',
+    'video_views',
+  ] as const
+
+  const extraInsightKeys = Object.keys(latest_insights ?? {}).filter(k => {
+    if (baseMetricOrder.includes(k as (typeof baseMetricOrder)[number])) return false
+    if (k.startsWith('profile_activity_')) return true
+    if (k.startsWith('navigation_')) return true
+    return false
+  })
+
+  const metricKeys = [
+    ...baseMetricOrder.filter(k => k in (latest_insights ?? {})),
+    ...extraInsightKeys.sort(),
+  ]
 
   // Build chart data
   const allSnapshots = new Set<string>()
@@ -145,7 +194,8 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
           <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
             <h3 className="text-sm font-semibold text-gray-700 mb-3">主要指標</h3>
             <div className="grid grid-cols-2 gap-3">
-              {Object.entries(METRIC_LABELS).map(([code, label]) => {
+              {metricKeys.map((code) => {
+                const label = metricLabel(code)
                 const val = latest_insights[code]
                 return (
                   <div key={code} className="bg-gray-50 rounded-xl p-3">
@@ -173,7 +223,7 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-gray-700">指標の推移</h3>
               <div className="flex flex-wrap gap-2">
-                {Object.keys(METRIC_LABELS).map((m, i) => (
+                {metricKeys.map((m, i) => (
                   <button
                     key={m}
                     onClick={() => setSelectedMetrics(prev =>
@@ -186,7 +236,7 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
                     }`}
                     style={selectedMetrics.includes(m) ? { backgroundColor: CHART_COLORS[i % CHART_COLORS.length] } : {}}
                   >
-                    {METRIC_LABELS[m]}
+                    {metricLabel(m)}
                   </button>
                 ))}
               </div>
@@ -205,7 +255,7 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
                       key={m}
                       type="monotone"
                       dataKey={m}
-                      name={METRIC_LABELS[m]}
+                      name={metricLabel(m)}
                       stroke={CHART_COLORS[i % CHART_COLORS.length]}
                       strokeWidth={2}
                       dot={false}

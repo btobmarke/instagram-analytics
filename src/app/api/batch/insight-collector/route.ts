@@ -157,6 +157,98 @@ export async function POST(request: Request) {
               value,
             }, { onConflict: 'media_id,metric_code,period_code,snapshot_at' })
           }
+
+          // ストーリー: 公式推奨の navigation（breakdown）も保存（既存 taps_* と併存）
+          if (mediaType === 'STORY') {
+            try {
+              const { data: navData, rateUsage: navRate } = await igClient.getMediaStoryNavigationInsights(
+                media.platform_media_id,
+              )
+              if (isRateLimitExceeded(navRate, 70)) {
+                console.warn('[insight-collector] rate usage high after story navigation fetch', {
+                  account_id: account.id,
+                  rate_usage: navRate,
+                })
+              } else {
+                type NavInsight = {
+                  name: string
+                  total_value?: {
+                    breakdowns?: Array<{
+                      results?: Array<{ dimension_values?: string[]; value?: number }>
+                    }>
+                  }
+                }
+                const navArr = (navData as { data: NavInsight[] })?.data ?? []
+                const nav = navArr.find(n => n.name === 'navigation')
+                const results = nav?.total_value?.breakdowns?.flatMap(b => b.results ?? []) ?? []
+                for (const r of results) {
+                  const action = (r.dimension_values?.[0] ?? '').toLowerCase()
+                  if (!action) continue
+                  await admin.from('ig_media_insight_fact').upsert({
+                    media_id: media.id,
+                    metric_code: `navigation_${action}`,
+                    period_code: 'lifetime',
+                    snapshot_at: snapshotAt,
+                    value: typeof r.value === 'number' ? r.value : null,
+                  }, { onConflict: 'media_id,metric_code,period_code,snapshot_at' })
+                }
+              }
+            } catch (navErr) {
+              console.warn('[insight-collector] story navigation insights failed (non-fatal)', {
+                account_id: account.id,
+                media_id: media.id,
+                platform_media_id: media.platform_media_id,
+                error: navErr instanceof Error ? navErr.message : String(navErr),
+              })
+            }
+          }
+
+          // 投稿→プロフィール行動（profile_activity + action_type breakdown）
+          if (mediaType === 'FEED' || mediaType === 'REELS' || mediaType === 'STORY' || mediaType === 'VIDEO') {
+            try {
+              const { data: paData, rateUsage: paRate } = await igClient.getMediaProfileActivityInsights(
+                media.platform_media_id,
+              )
+              if (isRateLimitExceeded(paRate, 70)) {
+                console.warn('[insight-collector] rate usage high after profile_activity fetch', {
+                  account_id: account.id,
+                  rate_usage: paRate,
+                })
+              } else {
+                type PaInsight = {
+                  name: string
+                  total_value?: {
+                    breakdowns?: Array<{
+                      results?: Array<{ dimension_values?: string[]; value?: number }>
+                    }>
+                  }
+                }
+                const paArr = (paData as { data: PaInsight[] })?.data ?? []
+                const pa = paArr.find(x => x.name === 'profile_activity')
+                const results = pa?.total_value?.breakdowns?.flatMap(b => b.results ?? []) ?? []
+                for (const r of results) {
+                  const action = (r.dimension_values?.[0] ?? '').toLowerCase()
+                  if (!action) continue
+                  await admin.from('ig_media_insight_fact').upsert({
+                    media_id: media.id,
+                    metric_code: `profile_activity_${action}`,
+                    period_code: 'lifetime',
+                    snapshot_at: snapshotAt,
+                    value: typeof r.value === 'number' ? r.value : null,
+                  }, { onConflict: 'media_id,metric_code,period_code,snapshot_at' })
+                }
+              }
+            } catch (paErr) {
+              console.warn('[insight-collector] profile_activity insights failed (non-fatal)', {
+                account_id: account.id,
+                media_id: media.id,
+                platform_media_id: media.platform_media_id,
+                media_product_type: media.media_product_type ?? media.media_type,
+                error: paErr instanceof Error ? paErr.message : String(paErr),
+              })
+            }
+          }
+
           totalProcessed++
         } catch (err) {
           totalFailed++
@@ -186,9 +278,52 @@ export async function POST(request: Request) {
         type AcctRow = {
           name: string
           values?: Array<{ value: number; end_time: string }>
-          total_value?: { value?: number }
+          total_value?: {
+            value?: number
+            breakdowns?: Array<{
+              dimension_keys?: string[]
+              results?: Array<{ dimension_values?: string[]; value?: number }>
+            }>
+          }
         }
         let acctUpsertCount = 0
+
+        const upsertAccountBreakdownRows = async (params: {
+          metricName: string
+          breakdownKey: string
+          valueDate: string
+          periodCode: string
+          row: AcctRow
+        }) => {
+          const results =
+            params.row.total_value?.breakdowns?.flatMap(b => b.results ?? []) ?? []
+          for (const r of results) {
+            const dims = (r.dimension_values ?? []).map(v => String(v))
+            const dimVal = dims.length ? dims.join('|') : ''
+            if (!dimVal) continue
+            const { error: upsertErr } = await admin.from('ig_account_insight_fact').upsert({
+              account_id: account.id,
+              metric_code: params.metricName,
+              dimension_code: params.breakdownKey,
+              dimension_value: dimVal,
+              period_code: params.periodCode,
+              value_date: params.valueDate,
+              value: typeof r.value === 'number' ? r.value : null,
+              fetched_at: new Date().toISOString(),
+            }, { onConflict: 'account_id,metric_code,period_code,value_date,dimension_code,dimension_value' })
+            if (upsertErr) {
+              console.error('[insight-collector] breakdown upsert failed', {
+                metric: params.metricName,
+                breakdown: params.breakdownKey,
+                dim: dimVal,
+                date: params.valueDate,
+                error: upsertErr.message,
+              })
+            } else {
+              acctUpsertCount++
+            }
+          }
+        }
 
         // --- (A) reach: period=day で日次 values 配列を取得 ---
         try {
@@ -238,7 +373,7 @@ export async function POST(request: Request) {
           nextDay.setDate(nextDay.getDate() + 1)
           const dayUntil = nextDay.toISOString().slice(0, 10)
           try {
-            const { data: tvData } = await igClient.getAccountInsightsTotalValue(daySince, dayUntil)
+            const { data: tvData } = await igClient.getAccountInsightsTotalValueExtended(daySince, dayUntil)
             const tvArr = (tvData as { data: AcctRow[] })?.data ?? []
             console.info('[insight-collector] total_value metrics', {
               account_id: account.id,
@@ -270,8 +405,141 @@ export async function POST(request: Request) {
           } catch (tvErr) {
             console.warn('[insight-collector] total_value call failed for date', { date: daySince, error: tvErr })
           }
+
+          // --- (B2) breakdown 付きアカウント指標（1日レンジ） ---
+          const breakdownPairs: Array<[
+            'reach' | 'views',
+            'media_product_type' | 'follow_type' | 'follower_type',
+          ]> = [
+            ['reach', 'media_product_type'],
+            ['reach', 'follow_type'],
+            ['views', 'follower_type'],
+            ['views', 'media_product_type'],
+          ]
+
+          for (const [metric, breakdown] of breakdownPairs) {
+            try {
+              const { data: bdData, rateUsage: bdRate } = await igClient.getAccountInsightsBreakdownTotalValue({
+                since: daySince,
+                until: dayUntil,
+                metric,
+                breakdown,
+              })
+              if (isRateLimitExceeded(bdRate, 70)) {
+                console.warn('[insight-collector] rate usage high, stopping breakdown fetches for day', {
+                  account_id: account.id,
+                  date: daySince,
+                  rate_usage: bdRate,
+                })
+                break
+              }
+              const bdArr = (bdData as { data: AcctRow[] })?.data ?? []
+              const row = bdArr.find(r => r.name === metric)
+              if (row) {
+                await upsertAccountBreakdownRows({
+                  metricName: metric,
+                  breakdownKey: breakdown,
+                  valueDate: daySince,
+                  periodCode: 'day',
+                  row,
+                })
+              }
+            } catch (bdErr) {
+              console.warn('[insight-collector] account breakdown fetch failed (non-fatal)', {
+                account_id: account.id,
+                date: daySince,
+                metric,
+                breakdown,
+                error: bdErr instanceof Error ? bdErr.message : String(bdErr),
+              })
+            }
+            await new Promise(resolve => setTimeout(resolve, 150))
+          }
+
           // レート制限対策
           await new Promise(resolve => setTimeout(resolve, 200))
+        }
+
+        // --- (B3) デモグラフィック（lifetime + timeframe）※分析用途: 90日スナップショットを日次ジョブで更新 ---
+        const demoTimeframe = 'last_90_days' as const
+        const demoBreakdowns = ['country', 'age', 'gender', 'city'] as const
+        const demoMetrics = ['engaged_audience_demographics', 'follower_demographics'] as const
+        const demoAsOf = until // 直近インサイト取得ウィンドウの終端日をスナップショット日付として使う
+
+        for (const demoMetric of demoMetrics) {
+          for (const b of demoBreakdowns) {
+            try {
+              const { data: demoData, rateUsage: demoRate } = await igClient.getAccountInsightsDemographics({
+                metric: demoMetric,
+                timeframe: demoTimeframe,
+                breakdown: b,
+              })
+              if (isRateLimitExceeded(demoRate, 70)) {
+                console.warn('[insight-collector] rate usage high, stopping demographics fetches', {
+                  account_id: account.id,
+                  rate_usage: demoRate,
+                })
+                break
+              }
+              const demoArr = (demoData as { data: AcctRow[] })?.data ?? []
+              const row = demoArr.find(r => r.name === demoMetric)
+              if (row) {
+                await upsertAccountBreakdownRows({
+                  metricName: demoMetric,
+                  breakdownKey: b,
+                  valueDate: demoAsOf,
+                  periodCode: 'lifetime',
+                  row,
+                })
+              }
+            } catch (demoErr) {
+              console.warn('[insight-collector] demographics fetch failed (non-fatal)', {
+                account_id: account.id,
+                metric: demoMetric,
+                breakdown: b,
+                error: demoErr instanceof Error ? demoErr.message : String(demoErr),
+              })
+            }
+            await new Promise(resolve => setTimeout(resolve, 150))
+          }
+        }
+
+        // --- (B4) online_followers（取得できるアカウントのみ） ---
+        try {
+          const { data: olData, rateUsage: olRate } = await igClient.getAccountInsightsOnlineFollowers(since, until)
+          if (!isRateLimitExceeded(olRate, 70)) {
+            const olArr = (olData as { data: AcctRow[] })?.data ?? []
+            const metric = olArr.find(m => m.name === 'online_followers')
+            if (metric?.values?.length) {
+              for (const v of metric.values) {
+                const endDate = new Date(v.end_time)
+                endDate.setDate(endDate.getDate() - 1)
+                const valueDate = endDate.toISOString().slice(0, 10)
+                const { error: upsertErr } = await admin.from('ig_account_insight_fact').upsert({
+                  account_id: account.id,
+                  metric_code: 'online_followers',
+                  dimension_code: '',
+                  dimension_value: '',
+                  period_code: 'day',
+                  value_date: valueDate,
+                  value: v.value,
+                  fetched_at: new Date().toISOString(),
+                }, { onConflict: 'account_id,metric_code,period_code,value_date,dimension_code,dimension_value' })
+                if (upsertErr) {
+                  console.error('[insight-collector] online_followers upsert failed', {
+                    date: valueDate, error: upsertErr.message,
+                  })
+                } else {
+                  acctUpsertCount++
+                }
+              }
+            }
+          }
+        } catch (olErr) {
+          console.warn('[insight-collector] online_followers fetch failed (non-fatal)', {
+            account_id: account.id,
+            error: olErr instanceof Error ? olErr.message : String(olErr),
+          })
         }
 
         // --- (C) follower_count: Insights API では取得不可のためプロフィールエンドポイントから取得 ---
