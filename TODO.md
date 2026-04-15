@@ -1,3 +1,4 @@
+
 # TODO 管理
 
 > このファイルで開発タスクを一元管理する。
@@ -57,6 +58,12 @@
   - `src/app/api/batch/insight-collector/route.ts`
   - `src/lib/ai/resolve-ai-model.ts`
   - `src/lib/instagram/client.ts`
+
+### バッチ管理（手動実行）
+- [ ] バッチ管理画面（`src/app/(dashboard)/batch/page.tsx`）の手動実行リストと、`src/app/api/batch/**/route.ts` の実装の突合せを定期的に行う
+  - [x] `hourly_account_insight_collector` は実装上 `insight-collector` 内で収集しているため、手動実行は `/api/batch/insight-collector` に紐づける（UI 側の `BATCH_ENDPOINTS` / `BATCH_GROUPS` へ追加済み）
+  - [x] `weekly_ai_analysis` の手動実行ボタンを追加（`/api/batch/ai-analysis` に紐づけ、UI 側の `BATCH_ENDPOINTS` / `BATCH_GROUPS` へ追加済み）
+  - [ ] `JOB_META` にあるが `src/app/api/batch/**` に見当たらないジョブ（例: `monthly_ai_analysis`, `daily_token_refresh`）は、実装するか `JOB_META` から外すか整理する
 
 ---
 
