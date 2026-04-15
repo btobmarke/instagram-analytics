@@ -12,7 +12,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const accountId = searchParams.get('account')
   const grain = searchParams.get('grain') ?? 'daily'
-  const metricCodes = searchParams.get('metrics')?.split(',') ?? ['reach', 'views', 'impressions', 'profile_views']
+  const metricCodes = searchParams.get('metrics')?.split(',') ?? ['reach', 'views', 'profile_views']
   const since = searchParams.get('since') ?? new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
   const until = searchParams.get('until') ?? new Date().toISOString().slice(0, 10)
 

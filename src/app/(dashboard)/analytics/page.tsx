@@ -55,7 +55,7 @@ function AnalyticsContent() {
   const fetchData = useCallback(async () => {
     if (!accountId) return
     setLoading(true)
-    const res = await fetch(`/api/analytics?account=${accountId}&since=${since}&metrics=reach,views,impressions,profile_views,follower_count`)
+    const res = await fetch(`/api/analytics?account=${accountId}&since=${since}&metrics=reach,views,profile_views,follower_count`)
     const json = await res.json()
     setData(json.data)
     setLoading(false)
@@ -104,7 +104,7 @@ function AnalyticsContent() {
     .map(([date, metrics]) => ({
       date: new Date(date).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' }),
       リーチ: metrics.reach ?? null,
-      表示回数: metrics.views ?? metrics.impressions ?? null,
+      表示回数: metrics.views ?? null,
       プロフィール訪問: metrics.profile_views ?? null,
     }))
 

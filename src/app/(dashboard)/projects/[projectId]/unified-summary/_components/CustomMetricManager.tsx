@@ -7,7 +7,7 @@
  * KPIツリーエディタ内でモーダルとして表示する。
  *
  * 数式構文: {{serviceId::metricRef}} で他指標を参照
- * 例: {{uuid::ig_reach}} / {{uuid::ig_impressions}} * 100
+ * 例: {{uuid::ig_reach}} / {{uuid::ig_views}} * 100
  */
 
 import { useState } from 'react'

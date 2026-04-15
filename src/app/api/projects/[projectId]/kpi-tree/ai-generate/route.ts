@@ -311,7 +311,7 @@ ${extSection}
       "children": [
         {
           "label": "子ノードのラベル",
-          "metricId": "ig_feed.impressions",
+          "metricId": "ig_feed.views",
           "serviceName": "公式アカウント",
           "children": []
         }

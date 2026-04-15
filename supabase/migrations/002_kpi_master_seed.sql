@@ -28,8 +28,8 @@ VALUES
 ('reach_per_post',          '投稿あたりリーチ数',     'reach',      'DIRECT_API',  NULL,     'reach',              NULL,              'media',           'count',   true,  20,
  '投稿1件あたりのリーチ数'),
 
-('impressions_per_post',    '投稿あたりインプレッション', 'reach',   'DIRECT_API',  NULL,     'impressions',        NULL,              'media',           'count',   true,  21,
- '投稿1件あたりのインプレッション数'),
+('impressions_per_post',    '投稿あたりインプレッション', 'reach',   'DIRECT_API',  NULL,     'views',              NULL,              'media',           'count',   true,  21,
+ '投稿1件あたりのインプレッション相当（v22+ は views を採用）'),
 
 ('avg_reach_per_post',      '週平均投稿リーチ',       'reach',      'DERIVED',     'avg',    'reach',              NULL,              'account_weekly',  'count',   true,  22,
  '期間内の投稿あたり平均リーチ数'),
@@ -37,8 +37,8 @@ VALUES
 ('account_reach_daily',     'アカウント日次リーチ',   'reach',      'DIRECT_API',  NULL,     'reach',              NULL,              'account_daily',   'count',   true,  23,
  'アカウント全体の日次リーチ数'),
 
-('impressions_to_reach',    'インプレッション/リーチ比', 'reach',   'DERIVED',     'ratio',  'impressions',        'reach',           'media',           'index',   true,  24,
- 'リーチ1人あたりの平均表示回数（反復表示度）'),
+('impressions_to_reach',    'インプレッション/リーチ比', 'reach',   'DERIVED',     'ratio',  'views',              'reach',           'media',           'index',   true,  24,
+ 'リーチ1人あたりの平均表示回数（反復表示度）（v22+ は views を採用）'),
 
 -- ===== 成長系 =====
 ('follower_count',          'フォロワー数',           'growth',     'DIRECT_API',  NULL,     'followers_count',    NULL,              'account_daily',   'count',   true,  30,
