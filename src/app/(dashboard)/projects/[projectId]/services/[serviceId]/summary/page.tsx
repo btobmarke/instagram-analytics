@@ -26,6 +26,16 @@ const SERVICE_LABEL: Record<string, string> = {
   sales: '売上分析',
 }
 
+/** ダッシュボード等と同一のサービス見出し（タブ切替時の縦方向の揺れを抑える） */
+const SERVICE_PAGE_HEADER: Record<string, { emoji: string; iconGradient: string; title: string }> = {
+  instagram: { emoji: '📸', iconGradient: 'from-pink-100 to-purple-100', title: 'Instagram' },
+  google_ads: { emoji: '📣', iconGradient: 'from-blue-100 to-sky-100', title: 'Google 広告' },
+  gbp: { emoji: '🏢', iconGradient: 'from-teal-100 to-green-100', title: 'GBP' },
+  line: { emoji: '💬', iconGradient: 'from-green-100 to-emerald-100', title: 'LINE OAM' },
+  lp: { emoji: '🎯', iconGradient: 'from-purple-100 to-indigo-100', title: 'LP' },
+  sales: { emoji: '💰', iconGradient: 'from-amber-100 to-yellow-100', title: '売上分析' },
+}
+
 /** サマリーページ上部タブの実ルート（従来の …/dashboard 一律は google_ads / instagram で 404 になる） */
 function summaryDashboardHref(projectId: string, serviceId: string, serviceType: string): string {
   const b = `/projects/${projectId}/services/${serviceId}`
@@ -78,6 +88,12 @@ export default function SummaryTemplatePage({
   const service = svcData?.data
   const serviceType = service?.service_type ?? ''
   const theme = SERVICE_THEME[serviceType] ?? { accent: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-200', badge: 'bg-purple-100 text-purple-700' }
+  const pageHeader =
+    SERVICE_PAGE_HEADER[serviceType] ?? {
+      emoji: '📊',
+      iconGradient: 'from-gray-100 to-slate-100',
+      title: SERVICE_LABEL[serviceType] || serviceType || 'サービス',
+    }
 
   const [templates, setTemplates] = useState<SummaryTemplate[]>([])
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -133,7 +149,7 @@ export default function SummaryTemplatePage({
   const svcPath = `/projects/${projectId}/services/${serviceId}`
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6 max-w-6xl mx-auto w-full">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-sm text-gray-400 mb-4 flex-wrap">
         <Link href={`/projects/${projectId}`} className="hover:text-purple-600">
@@ -143,9 +159,24 @@ export default function SummaryTemplatePage({
         <span className="text-gray-600">{service?.service_name ?? '...'}</span>
       </nav>
 
+      {/* サービス見出し（各タブ画面と同位置・同スタイル） */}
+      {serviceType && (
+        <div className="flex items-center gap-3 mb-4">
+          <div
+            className={`w-10 h-10 rounded-xl bg-gradient-to-br ${pageHeader.iconGradient} flex items-center justify-center text-xl`}
+          >
+            {pageHeader.emoji}
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">{pageHeader.title}</h1>
+            <p className="text-sm text-gray-400">{service?.service_name ?? ''}</p>
+          </div>
+        </div>
+      )}
+
       {/* タブナビ（各サービスのメイン画面と同一セットに揃える） */}
       {serviceType && (
-        <div className="flex items-center gap-1 mb-6 border-b border-gray-200 flex-wrap">
+        <div className="flex items-center gap-1 mb-6 border-b border-gray-200">
           {serviceType === 'instagram' && (
             <>
               <Link href={`${svcPath}/instagram/analytics`} className={tabInactive}>
