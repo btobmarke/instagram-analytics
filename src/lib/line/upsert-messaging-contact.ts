@@ -12,6 +12,8 @@ export async function upsertLineMessagingContact(
     displayName?: string | null
     pictureUrl?: string | null
     observedAt?: string
+    /** 友だち関係（unfollow 時は false） */
+    isFollowed?: boolean
   },
 ): Promise<{ id: string } | { error: string }> {
   const now = opts?.observedAt ?? new Date().toISOString()
@@ -38,6 +40,7 @@ export async function upsertLineMessagingContact(
     }
     if (opts?.displayName !== undefined) patch.display_name = opts.displayName
     if (opts?.pictureUrl !== undefined) patch.picture_url = opts.pictureUrl
+    if (opts?.isFollowed !== undefined) patch.is_followed = opts.isFollowed
 
     const { data, error } = await supabase
       .from('line_messaging_contacts')
@@ -58,6 +61,7 @@ export async function upsertLineMessagingContact(
       line_user_id: trimmed,
       display_name: opts?.displayName ?? null,
       picture_url: opts?.pictureUrl ?? null,
+      is_followed: opts?.isFollowed ?? true,
       first_seen_at: now,
       last_interaction_at: now,
     })
