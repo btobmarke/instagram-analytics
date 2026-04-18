@@ -4,6 +4,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { decrypt } from '@/lib/utils/crypto'
 import { verifyLineWebhookSignature } from '@/lib/line/verify-webhook-signature'
 import { upsertLineMessagingContact } from '@/lib/line/upsert-messaging-contact'
+import { processMaForWebhookEvent } from '@/lib/line/process-ma-webhook'
 
 type Params = { params: Promise<{ serviceId: string }> }
 
@@ -19,6 +20,7 @@ type LineWebhookEvent = {
   source?: { type?: string; userId?: string }
   replyToken?: string
   deliveryContext?: { isRedelivery?: boolean }
+  message?: { type?: string; id?: string; text?: string }
 }
 
 function bodyDedupeKey(rawBody: string): string {
@@ -70,7 +72,7 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   const { data: credRow, error: credErr } = await admin
     .from('line_messaging_service_credentials')
-    .select('channel_secret_enc')
+    .select('channel_secret_enc, channel_access_token_enc')
     .eq('service_id', serviceId)
     .maybeSingle()
 
@@ -79,8 +81,12 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   let channelSecret: string
+  let channelAccessToken: string | null = null
   try {
     channelSecret = decrypt(credRow.channel_secret_enc)
+    if (credRow.channel_access_token_enc) {
+      channelAccessToken = decrypt(credRow.channel_access_token_enc)
+    }
   } catch {
     return NextResponse.json({ error: 'credential_error' }, { status: 500 })
   }
@@ -118,6 +124,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     const userId = ev.source?.type === 'user' ? ev.source.userId : undefined
     if (!userId) continue
 
+    let contactId: string | null = null
+
     if (ev.type === 'follow') {
       const r = await upsertLineMessagingContact(admin, serviceId, userId, {
         observedAt,
@@ -125,6 +133,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       })
       if ('error' in r) {
         console.error('[line webhook] upsert follow', serviceId, r.error)
+      } else {
+        contactId = r.id
       }
     } else if (ev.type === 'unfollow') {
       const r = await upsertLineMessagingContact(admin, serviceId, userId, {
@@ -133,6 +143,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       })
       if ('error' in r) {
         console.error('[line webhook] upsert unfollow', serviceId, r.error)
+      } else {
+        contactId = r.id
       }
     } else if (ev.type === 'message') {
       const r = await upsertLineMessagingContact(admin, serviceId, userId, {
@@ -141,8 +153,12 @@ export async function POST(request: NextRequest, { params }: Params) {
       })
       if ('error' in r) {
         console.error('[line webhook] upsert message', serviceId, r.error)
+      } else {
+        contactId = r.id
       }
     }
+
+    await processMaForWebhookEvent(admin, serviceId, userId, contactId, ev, channelAccessToken)
   }
 
   return NextResponse.json({ ok: true })
