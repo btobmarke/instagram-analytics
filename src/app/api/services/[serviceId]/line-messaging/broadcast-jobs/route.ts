@@ -3,24 +3,11 @@ import { z } from 'zod'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { normalizeExplicitUserIds, seedBroadcastRecipients } from '@/lib/line/process-broadcast-job-chunk'
+import { assertLineService } from '@/lib/line/assert-line-service'
+import { SegmentDefinitionSchema } from '@/lib/line/segment-definition'
+import { resolveSegmentLineUserIds } from '@/lib/line/evaluate-segment'
 
 type Params = { params: Promise<{ serviceId: string }> }
-
-async function assertLineService(
-  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
-  serviceId: string,
-): Promise<{ ok: true } | { ok: false; status: number; body: unknown }> {
-  const { data: service, error } = await supabase
-    .from('services')
-    .select('id, service_type')
-    .eq('id', serviceId)
-    .maybeSingle()
-  if (error || !service) return { ok: false, status: 404, body: { error: 'not_found' } }
-  if (service.service_type !== 'line') {
-    return { ok: false, status: 400, body: { error: 'not_a_line_service' } }
-  }
-  return { ok: true }
-}
 
 /**
  * GET /api/services/[serviceId]/line-messaging/broadcast-jobs
@@ -38,7 +25,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { data, error } = await admin
     .from('line_messaging_broadcast_jobs')
     .select(
-      'id, template_id, name, snapshot_body_text, recipient_source, scheduled_at, status, last_error, started_at, completed_at, created_at, updated_at',
+      'id, template_id, name, snapshot_body_text, recipient_source, segment_id, scheduled_at, status, last_error, started_at, completed_at, created_at, updated_at',
     )
     .eq('service_id', serviceId)
     .order('created_at', { ascending: false })
@@ -48,14 +35,32 @@ export async function GET(_req: NextRequest, { params }: Params) {
   return NextResponse.json({ success: true, data: data ?? [] })
 }
 
-const PostBodySchema = z.object({
-  template_id: z.string().uuid(),
-  name: z.string().max(200).optional(),
-  recipient_source: z.enum(['all_followed', 'explicit']),
-  explicit_line_user_ids: z.array(z.string()).optional(),
-  /** ISO 8601（例: 2026-04-18T12:00:00.000Z） */
-  scheduled_at: z.string().optional(),
-})
+const PostBodySchema = z
+  .object({
+    template_id: z.string().uuid(),
+    name: z.string().max(200).optional(),
+    recipient_source: z.enum(['all_followed', 'explicit', 'segment']),
+    explicit_line_user_ids: z.array(z.string()).optional(),
+    segment_id: z.string().uuid().optional(),
+    /** ISO 8601（例: 2026-04-18T12:00:00.000Z） */
+    scheduled_at: z.string().optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.recipient_source === 'explicit' && !val.explicit_line_user_ids?.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'explicit_line_user_ids required',
+        path: ['explicit_line_user_ids'],
+      })
+    }
+    if (val.recipient_source === 'segment' && !val.segment_id) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'segment_id required',
+        path: ['segment_id'],
+      })
+    }
+  })
 
 /**
  * POST /api/services/[serviceId]/line-messaging/broadcast-jobs
@@ -101,13 +106,38 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   let lineUserIds: string[] = []
+  let segmentId: string | null = null
+
   if (parsed.data.recipient_source === 'explicit') {
     lineUserIds = normalizeExplicitUserIds(parsed.data.explicit_line_user_ids ?? [])
-    if (lineUserIds.length === 0) {
+  } else if (parsed.data.recipient_source === 'segment') {
+    segmentId = parsed.data.segment_id!
+    const { data: seg, error: sErr } = await admin
+      .from('line_messaging_segments')
+      .select('id, definition')
+      .eq('id', segmentId)
+      .eq('service_id', serviceId)
+      .maybeSingle()
+
+    if (sErr || !seg) {
+      return NextResponse.json({ error: 'segment_not_found' }, { status: 404 })
+    }
+
+    const defParsed = SegmentDefinitionSchema.safeParse(seg.definition ?? {})
+    if (!defParsed.success) {
       return NextResponse.json(
-        { error: 'explicit_line_user_ids required for explicit source' },
-        { status: 400 },
+        { error: 'invalid_segment_definition', details: defParsed.error.flatten() },
+        { status: 500 },
       )
+    }
+
+    const resolved = await resolveSegmentLineUserIds(admin, serviceId, defParsed.data)
+    if (resolved.error) {
+      return NextResponse.json({ error: resolved.error }, { status: 400 })
+    }
+    lineUserIds = resolved.line_user_ids
+    if (lineUserIds.length === 0) {
+      return NextResponse.json({ error: 'segment_empty' }, { status: 400 })
     }
   } else {
     const { data: contacts, error: cErr } = await admin
@@ -118,9 +148,10 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 })
     lineUserIds = (contacts ?? []).map((r) => r.line_user_id).filter(Boolean)
-    if (lineUserIds.length === 0) {
-      return NextResponse.json({ error: 'no_followed_contacts' }, { status: 400 })
-    }
+  }
+
+  if (lineUserIds.length === 0) {
+    return NextResponse.json({ error: 'no_recipients' }, { status: 400 })
   }
 
   const { data: job, error: jobErr } = await admin
@@ -131,6 +162,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       name: parsed.data.name?.trim() ?? null,
       snapshot_body_text: template.body_text,
       recipient_source: parsed.data.recipient_source,
+      segment_id: segmentId,
       explicit_line_user_ids:
         parsed.data.recipient_source === 'explicit'
           ? lineUserIds
@@ -139,7 +171,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       status: 'scheduled',
     })
     .select(
-      'id, template_id, name, snapshot_body_text, recipient_source, scheduled_at, status, created_at',
+      'id, template_id, name, snapshot_body_text, recipient_source, segment_id, scheduled_at, status, created_at',
     )
     .single()
 
