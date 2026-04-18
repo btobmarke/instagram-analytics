@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { IgMedia, KpiMaster, KpiProgress } from '@/types'
+import { buildInstagramServiceKpiPromptBlock } from '@/lib/ai/instagram-service-kpis-for-prompt'
 
 export type AccountReportAnalysisType = 'weekly' | 'monthly'
 
@@ -9,6 +10,8 @@ export interface AccountReportPromptPayload {
   until: string
   analysisType: AccountReportAnalysisType
   weeklySummary: Record<string, unknown>
+  /** サービス詳細「KPI設定」（instagram_service_kpis）をテキスト化したもの */
+  serviceKpiPromptBlock: string
   kpiProgress: KpiProgress[]
   kpiMasters: KpiMaster[]
   kpiResultKpiIds: Map<string, string | null>
@@ -45,8 +48,11 @@ export function buildAccountReportUserMessage(p: AccountReportPromptPayload): st
 【サマリー】
 ${JSON.stringify(p.weeklySummary, null, 2)}
 
-【KPI達成状況】
-${kpiLines.join('\n')}
+【サービスKPI設定】
+${p.serviceKpiPromptBlock}
+
+【従来システムのKPI進捗（参考・kpi_progress がある場合）】
+${kpiLines.length > 0 ? kpiLines.join('\n') : '（データなし）'}
 
 【パフォーマンス上位投稿】
 ${p.topPosts.slice(0, 5).map((row, i) => {
@@ -86,8 +92,10 @@ export async function loadAccountReportPayload(
   accountId: string,
   analysisType: AccountReportAnalysisType,
   periodStart?: string,
-  periodEnd?: string
+  periodEnd?: string,
+  options?: { prioritizeServiceKpis?: boolean },
 ): Promise<AccountReportPromptPayload> {
+  const prioritizeServiceKpis = options?.prioritizeServiceKpis !== false
   const until = periodEnd ?? new Date().toISOString().slice(0, 10)
   const since =
     periodStart ??
@@ -185,12 +193,19 @@ export async function loadAccountReportPayload(
     return { post: post as IgMedia, insights }
   })
 
+  const serviceKpiPromptBlock = await buildInstagramServiceKpiPromptBlock(
+    supabase,
+    accountId,
+    prioritizeServiceKpis,
+  )
+
   return {
     accountUsername: account?.username ?? 'unknown',
     since,
     until,
     analysisType,
     weeklySummary,
+    serviceKpiPromptBlock,
     kpiProgress: progressRows,
     kpiMasters: kpiMasters ?? [],
     kpiResultKpiIds,

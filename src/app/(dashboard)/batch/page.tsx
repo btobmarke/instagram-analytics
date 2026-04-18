@@ -46,8 +46,14 @@ const JOB_META: Record<string, JobMeta> = {
     frequency: '毎日',
   },
   daily_media_collector: {
-    label: '投稿一覧同期',
-    description: 'フィード・リール・ストーリーの新規投稿を取得しDBに保存',
+    label: '投稿一覧同期（フィード／リール中心）',
+    description: '直近90日のメディアを日次で同期。ストーリーの鮮度は hourly_story_media_collector が担う',
+    category: 'Instagram',
+    frequency: '毎日',
+  },
+  hourly_story_media_collector: {
+    label: 'ストーリー投稿同期',
+    description: '公開中ストーリーを Graph の /stories で取得し ig_media を毎時更新',
     category: 'Instagram',
     frequency: '毎時',
   },
@@ -78,6 +84,12 @@ const JOB_META: Record<string, JobMeta> = {
   weekly_ai_analysis: {
     label: '週次AI分析',
     description: 'Claude によるInstagram投稿の週次パフォーマンス分析とコメント生成',
+    category: 'Instagram',
+    frequency: '毎週月曜',
+  },
+  instagram_velocity_retro: {
+    label: 'Instagram 初速レトロ',
+    description: '直近7日投稿の6hリーチでトップを集計し、週内基準で初速が突出した投稿を通知行に載せる',
     category: 'Instagram',
     frequency: '毎週月曜',
   },
@@ -147,11 +159,13 @@ const STATUS_STYLES: Record<string, { bg: string; text: string; label: string; d
 const BATCH_ENDPOINTS: Record<string, string> = {
   project_metrics_aggregate: '/api/batch/project-metrics-aggregate',
   daily_media_collector:          '/api/batch/media-collector',
+  hourly_story_media_collector:   '/api/batch/story-media-collector',
   hourly_media_insight_collector: '/api/batch/insight-collector',
   // 注: 現状の実装では account insights は insight-collector 内で収集しているため同一エンドポイントに紐づける
   hourly_account_insight_collector: '/api/batch/insight-collector',
   kpi_calc_batch:                 '/api/batch/kpi-calc',
   weekly_ai_analysis:             '/api/batch/ai-analysis',
+  instagram_velocity_retro:       '/api/batch/instagram-velocity-retro',
   lp_aggregate:                   '/api/batch/lp-aggregate',
   ga4_collector:                  '/api/batch/ga4-collector',
   clarity_collector:              '/api/batch/clarity-collector',
@@ -163,7 +177,7 @@ const BATCH_ENDPOINTS: Record<string, string> = {
 }
 
 const BATCH_GROUPS: { category: Category; jobs: string[] }[] = [
-  { category: 'Instagram', jobs: ['daily_media_collector', 'hourly_media_insight_collector', 'hourly_account_insight_collector', 'kpi_calc_batch', 'weekly_ai_analysis'] },
+  { category: 'Instagram', jobs: ['daily_media_collector', 'hourly_story_media_collector', 'hourly_media_insight_collector', 'hourly_account_insight_collector', 'kpi_calc_batch', 'weekly_ai_analysis', 'instagram_velocity_retro'] },
   { category: 'LP / MA',   jobs: ['lp_aggregate'] },
   { category: 'GA4',       jobs: ['ga4_collector'] },
   { category: 'Clarity',   jobs: ['clarity_collector'] },

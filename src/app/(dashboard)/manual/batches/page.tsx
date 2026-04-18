@@ -40,6 +40,7 @@ export default function BatchesOverview() {
             ['13:30', 'LINE OAM', '日次収集（line-oam-daily） ※UTC 04:30'],
             ['月曜 15:00', 'Instagram', '週次AI分析（ai-analysis） ※UTC 月曜 06:00'],
             ['毎時 :00', 'Instagram', '投稿インサイト取得（insight-collector）'],
+            ['毎時 :05', 'Instagram', 'ストーリー投稿一覧同期（story-media-collector）'],
             ['毎時 :10', 'Instagram', 'ストーリーインサイト（story-insight-collector）'],
             ['毎時 :45', 'Instagram', 'KPI再計算（kpi-calc）'],
             ['30分毎', 'LP / MA', 'セッションクリーンアップ（lp-session-cleanup）'],

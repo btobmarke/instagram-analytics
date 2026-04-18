@@ -66,6 +66,7 @@ export async function POST(
     body.analysisType === 'monthly' ? 'monthly' : 'weekly'
   const periodStart = typeof body.periodStart === 'string' ? body.periodStart : undefined
   const periodEnd = typeof body.periodEnd === 'string' ? body.periodEnd : undefined
+  const prioritizeServiceKpis = body.prioritizeServiceKpis !== false
 
   const resolved = await resolveInstagramAccountIdForService(supabase, serviceId)
   if ('error' in resolved) {
@@ -80,7 +81,8 @@ export async function POST(
     accountId,
     analysisType,
     periodStart,
-    periodEnd
+    periodEnd,
+    { prioritizeServiceKpis },
   )
 
   const system = buildAccountReportSystemPrompt(payload)

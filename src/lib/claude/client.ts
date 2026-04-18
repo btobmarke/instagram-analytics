@@ -12,13 +12,18 @@ export async function analyzePost(params: {
   promptText: string
   accountStrategy: string
   accountUsername: string
+  /** マイルストーン・メタ・比較差分など（任意） */
+  extraContext?: string
   /** Anthropic model id（省略時は Sonnet 4.6） */
   modelId?: AiModelOptionId
 }): Promise<ReadableStream<Uint8Array>> {
   const systemPrompt = buildSystemPrompt(params.promptText, params.accountStrategy)
+  const extra = params.extraContext?.trim()
+    ? `\n【追加コンテキスト（システム生成・初速・比較用）】\n${params.extraContext.trim()}\n`
+    : ''
   const userMessage = `
 以下の投稿データを分析してください：
-
+${extra}
 【投稿情報】
 アカウント: @${params.accountUsername}
 投稿日時: ${params.post.posted_at}
@@ -69,6 +74,8 @@ export async function analyzeAccount(params: {
   period: { start: string; end: string }
   analysisType: 'weekly' | 'monthly'
   weeklySummary: Record<string, unknown>
+  /** サービス詳細 KPI（instagram_service_kpis）のプロンプト用ブロック */
+  serviceKpiPromptBlock: string
   kpiProgress: KpiProgress[]
   kpiMasters: KpiMaster[]
   topPosts: Array<{ post: IgMedia; insights: Record<string, number | null> }>
@@ -79,6 +86,11 @@ export async function analyzeAccount(params: {
   const systemPrompt = buildSystemPrompt(params.promptText, params.accountStrategy)
   const analysisLabel = params.analysisType === 'weekly' ? '週次' : '月次'
 
+  const legacyKpiLines = params.kpiProgress.map((p) => {
+    const kpi = params.kpiMasters.find((k) => k.id === p.kpi_result_id)
+    return `${kpi?.kpi_name ?? 'KPI'}: 実績 ${p.actual_value} / 目標 ${p.target_value} (達成率 ${p.achievement_rate?.toFixed(1)}%)`
+  })
+
   const userMessage = `
 以下は @${params.accountUsername} の${analysisLabel}データです。${analysisLabel}評価を行ってください。
 
@@ -87,11 +99,11 @@ export async function analyzeAccount(params: {
 【サマリー】
 ${JSON.stringify(params.weeklySummary, null, 2)}
 
-【KPI達成状況】
-${params.kpiProgress.map(p => {
-  const kpi = params.kpiMasters.find(k => k.id === p.kpi_result_id)
-  return `${kpi?.kpi_name ?? 'KPI'}: 実績 ${p.actual_value} / 目標 ${p.target_value} (達成率 ${p.achievement_rate?.toFixed(1)}%)`
-}).join('\n')}
+【サービスKPI設定】
+${params.serviceKpiPromptBlock}
+
+【従来システムのKPI進捗（参考・kpi_progress がある場合）】
+${legacyKpiLines.length > 0 ? legacyKpiLines.join('\n') : '（データなし）'}
 
 【パフォーマンス上位投稿】
 ${params.topPosts.slice(0, 5).map((p, i) =>
@@ -104,6 +116,58 @@ ${params.topPosts.slice(0, 5).map((p, i) =>
     model,
     max_tokens: 3000,
     system: systemPrompt,
+    messages: [{ role: 'user', content: userMessage }],
+  })
+
+  return response.content[0].type === 'text' ? response.content[0].text : ''
+}
+
+/** ダッシュボード用の短文要約（KPI・目標達成には言及しない） */
+const DASHBOARD_BRIEF_SYSTEM = `あなたはInstagram運用の専門家です。
+与えられたデータだけに基づき、日本語でダッシュボード要約を書いてください。
+- 4〜8文程度。見出しは不要。
+- 良い点・気づき・次に試せる一手を自然に含める。
+- KPI・目標達成率・数値目標には一切触れない。
+- データにないことは断定せず、「〜の可能性」などで留める。`
+
+export async function summarizeDashboardBrief(params: {
+  username: string
+  periodLabel: string
+  accountStrategy: string
+  metricsSummary: string
+  periodCompareSummary: string
+  topPostsSummary: string
+  demographicsSummary: string
+  profileActivitySummary: string
+  modelId?: AiModelOptionId
+}): Promise<string> {
+  const model = normalizeAiModelId(params.modelId)
+  const userMessage = `
+【アカウント】@${params.username}
+【期間】${params.periodLabel}
+
+【戦略メモ】
+${params.accountStrategy || '（未設定）'}
+
+【期間比較】
+${params.periodCompareSummary}
+
+【指標サマリ】
+${params.metricsSummary}
+
+【上位投稿】
+${params.topPostsSummary}
+
+【オーディエンス属性】
+${params.demographicsSummary}
+
+【投稿経由のプロフィール行動（集計）】
+${params.profileActivitySummary}
+`
+  const response = await anthropic.messages.create({
+    model,
+    max_tokens: 900,
+    system: DASHBOARD_BRIEF_SYSTEM,
     messages: [{ role: 'user', content: userMessage }],
   })
 

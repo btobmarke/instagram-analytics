@@ -7,6 +7,9 @@ import { useCompletion } from '@ai-sdk/react'
 import type { AiAnalysisResult } from '@/types'
 import { MarkdownRenderer, BlinkingCursor } from '@/components/ai/MarkdownRenderer'
 import { downloadHtmlAsPdf } from '@/lib/pdf/download-html-as-pdf'
+import { InstagramServiceSubnav } from '@/components/instagram/InstagramServiceSubnav'
+import { InstagramFollowerImportButtonModal } from '@/components/instagram/InstagramFollowerImportButtonModal'
+import { InstagramProposalPanel } from '@/components/instagram/InstagramProposalPanel'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -31,12 +34,14 @@ export default function InstagramAiReportPage({
 }) {
   const { projectId, serviceId } = use(params)
   const [analysisType, setAnalysisType] = useState<'weekly' | 'monthly'>('weekly')
+  /** オフのときはサービスKPIを主軸に据えない指示でプロンプトを組み立てる */
+  const [prioritizeServiceKpis, setPrioritizeServiceKpis] = useState(true)
   const [selected, setSelected] = useState<AiAnalysisResult | null>(null)
   const [pdfExporting, setPdfExporting] = useState(false)
   const liveReportPdfRef = useRef<HTMLDivElement>(null)
   const historyReportPdfRef = useRef<HTMLDivElement>(null)
 
-  const { data: serviceData } = useSWR<{ success: boolean; data: ServiceDetail }>(
+  const { data: serviceData, mutate: mutateService } = useSWR<{ success: boolean; data: ServiceDetail }>(
     `/api/services/${serviceId}`,
     fetcher
   )
@@ -69,8 +74,8 @@ export default function InstagramAiReportPage({
   })
 
   const handleGenerate = useCallback(() => {
-    void complete('', { body: { analysisType } })
-  }, [complete, analysisType])
+    void complete('', { body: { analysisType, prioritizeServiceKpis } })
+  }, [complete, analysisType, prioritizeServiceKpis])
 
   const pdfFilenameBase = useCallback(
     (suffix: string) => {
@@ -138,48 +143,20 @@ export default function InstagramAiReportPage({
         <span className="text-gray-700 font-medium">AI分析</span>
       </nav>
 
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center text-xl">
-          📸
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center text-xl flex-shrink-0">
+            📸
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold text-gray-900">Instagram</h1>
+            <p className="text-sm text-gray-400">{service?.service_name}</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Instagram</h1>
-          <p className="text-sm text-gray-400">{service?.service_name}</p>
-        </div>
+        <InstagramFollowerImportButtonModal accountId={accountId} onImported={() => mutateService()} />
       </div>
 
-      <div className="flex items-center gap-1 border-b border-gray-200">
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/instagram/analytics`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
-        >
-          ダッシュボード
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/instagram/posts`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
-        >
-          投稿一覧
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/instagram/ai`}
-          className="px-4 py-2.5 text-sm font-medium text-pink-600 border-b-2 border-pink-600 -mb-px"
-        >
-          AI分析
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/instagram`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
-        >
-          設定
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/summary`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
-        >
-          サマリー
-        </Link>
-      </div>
+      <InstagramServiceSubnav projectId={projectId} serviceId={serviceId} active="ai" />
 
       {!accountId ? (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center text-amber-800">
@@ -208,6 +185,15 @@ export default function InstagramAiReportPage({
                 <option value="weekly">週次分析（直近7日）</option>
                 <option value="monthly">月次分析（直近30日）</option>
               </select>
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                  checked={prioritizeServiceKpis}
+                  onChange={(e) => setPrioritizeServiceKpis(e.target.checked)}
+                />
+                サービスKPIを優先して分析
+              </label>
               <button
                 type="button"
                 onClick={handleGenerate}
@@ -256,6 +242,14 @@ export default function InstagramAiReportPage({
                 {isLoading && <BlinkingCursor />}
               </div>
             )}
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+            <InstagramProposalPanel
+              serviceId={serviceId}
+              serviceName={service?.service_name}
+              accountId={accountId}
+            />
           </div>
 
           <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">

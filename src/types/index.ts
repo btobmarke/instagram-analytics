@@ -62,6 +62,42 @@ export interface IgMediaInsightFact {
   value: number | null
 }
 
+/** Graph API で投稿単位取得が難しい内訳の手入力（複数行・recorded_at = 登録日時） */
+export interface IgMediaManualInsightExtra {
+  id: string
+  media_id: string
+  recorded_at: string
+  views_follower_pct: number | null
+  views_non_follower_pct: number | null
+  interactions_follower_pct: number | null
+  interactions_non_follower_pct: number | null
+  views_from_home: number | null
+  views_from_profile: number | null
+  views_from_other: number | null
+  /** いいねしたユーザー名（手入力・貼り付け解析） */
+  liked_usernames?: string[] | null
+  note: string | null
+  inserted_at: string
+}
+
+/** Instagram サービス詳細「KPI設定」タブ用の1行 */
+export type InstagramServiceKpiCardType = 'metric_card' | 'custom_card'
+
+export interface InstagramServiceKpi {
+  id: string
+  service_id: string
+  phase: number
+  kpi_name: string
+  target_value: number
+  card_type: InstagramServiceKpiCardType
+  /** サマリーと同じ指標 ID（catalog の id またはカスタム指標の UUID） */
+  card_ref?: string | null
+  kpi_description: string
+  display_order: number
+  created_at: string
+  updated_at: string
+}
+
 export interface IgAccountInsightFact {
   id: string
   account_id: string
@@ -265,6 +301,19 @@ export interface Service {
   service_name: string
   display_order: number
   is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+/** LINE Messaging API 由来のユーザー（同一 services.id = LINE チャネル。OAM 分析と service_id で共有） */
+export interface LineMessagingContact {
+  id: string
+  service_id: string
+  line_user_id: string
+  display_name: string | null
+  picture_url: string | null
+  first_seen_at: string
+  last_interaction_at: string
   created_at: string
   updated_at: string
 }

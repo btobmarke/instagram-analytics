@@ -5,6 +5,8 @@ export interface ServiceDetail {
   service_name: string
   service_type: string
   project: { id: string; project_name: string }
+  /** API が返す場合（Instagram の連携アカウント ID など） */
+  type_config?: { ig_account_ref_id?: string } | null
 }
 
 /** カード（指標候補） */

@@ -12,9 +12,10 @@ export default function InstagramBatchManual() {
           head={['時刻(JST)', 'バッチ名', 'エンドポイント', '取得する値']}
           rows={[
             ['毎時 :00', 'insight-collector', '/api/batch/insight-collector', 'フィード・リールの投稿インサイト（リーチ／いいね／保存／コメント／インプレッション）、アカウントインサイト'],
+            ['毎時 :05（UTC）', 'story-media-collector', '/api/batch/story-media-collector', '公開中ストーリーを GET /{ig-user-id}/stories で取得し ig_media を毎時更新（vercel.json: 5 * * * *）'],
             ['毎時 :10', 'story-insight-collector', '/api/batch/story-insight-collector', '24時間以内のストーリー投稿のインプレッション／リーチ／タップ／返信'],
             ['毎時 :45', 'kpi-calc', '/api/batch/kpi-calc', 'インサイトを元にエンゲージメント率・リーチ率等 KPI を再計算'],
-            ['11:30（毎日）', 'media-collector', '/api/batch/media-collector', 'フィード・リール・ストーリーの新規投稿一覧を同期'],
+            ['11:30（毎日）', 'media-collector', '/api/batch/media-collector', 'GET /{ig-user-id}/media（直近90日）と GET /{ig-user-id}/stories（バックアップ）でフィード／リール等を同期。ストーリーの鮮度は story-media-collector が担う'],
             ['月曜 15:00', 'ai-analysis', '/api/batch/ai-analysis', '週次AI分析（Claude）— 投稿のパフォーマンスと改善コメントを生成'],
           ]}
         />

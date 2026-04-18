@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createHash } from 'crypto'
+import { seedDefaultInstagramServiceKpisIfEmpty } from '@/lib/instagram/seed-default-service-kpis'
 
 const SERVICE_TYPES = ['instagram', 'lp', 'x', 'line', 'google_ads', 'meta_ads', 'gbp', 'owned_media', 'summary', 'sales'] as const
 
@@ -153,6 +154,13 @@ export async function POST(
       } else {
         console.log('[POST /api/projects/:id/services] ig_accounts linked: account_id=', igParsed.data.ig_account_ref_id, '-> service_id=', service.id)
       }
+    }
+  }
+
+  if (service_type === 'instagram') {
+    const { inserted } = await seedDefaultInstagramServiceKpisIfEmpty(supabase, service.id)
+    if (inserted > 0) {
+      console.log('[POST /api/projects/:id/services] instagram_service_kpis seeded:', inserted, 'rows for service', service.id)
     }
   }
 

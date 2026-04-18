@@ -45,6 +45,7 @@ function AnalyticsContent() {
   const [aiLoading, setAiLoading] = useState(false)
   const [period, setPeriod] = useState<'7d' | '30d' | '90d'>('30d')
   const [analysisType, setAnalysisType] = useState<'weekly' | 'monthly'>('weekly')
+  const [prioritizeServiceKpis, setPrioritizeServiceKpis] = useState(true)
   const [selectedAi, setSelectedAi] = useState<AiAnalysisResult | null>(null)
 
   const since = (() => {
@@ -77,7 +78,7 @@ function AnalyticsContent() {
     await fetch('/api/analytics/ai', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accountId, analysisType }),
+      body: JSON.stringify({ accountId, analysisType, prioritizeServiceKpis }),
     })
     await fetchAiHistory()
     setAiLoading(false)
@@ -220,7 +221,7 @@ function AnalyticsContent() {
       <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-gray-700">AI分析レポート</h2>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <select
               value={analysisType}
               onChange={e => setAnalysisType(e.target.value as 'weekly' | 'monthly')}
@@ -229,6 +230,15 @@ function AnalyticsContent() {
               <option value="weekly">週次分析</option>
               <option value="monthly">月次分析</option>
             </select>
+            <label className="inline-flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                checked={prioritizeServiceKpis}
+                onChange={e => setPrioritizeServiceKpis(e.target.checked)}
+              />
+              サービスKPIを優先
+            </label>
             <button
               onClick={handleRunAi}
               disabled={aiLoading}

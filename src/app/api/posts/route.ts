@@ -1,7 +1,44 @@
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
+
+/** 手入力の views_from_home（最新）とアカウントのフォロワー数を付与（ホーム率表示用） */
+async function appendHomeRateFields(
+  supabase: SupabaseClient,
+  accountId: string,
+  postsList: Array<Record<string, unknown> & { id: string }>
+): Promise<{ data: Array<Record<string, unknown> & { id: string; manual_views_from_home: number | null }>; followers_count: number | null }> {
+  const { data: acct } = await supabase.from('ig_accounts').select('followers_count').eq('id', accountId).maybeSingle()
+  const followers_count =
+    typeof acct?.followers_count === 'number' ? acct.followers_count : null
+
+  const ids = postsList.map(p => p.id).filter(Boolean)
+  const manualMap = new Map<string, number>()
+  if (ids.length) {
+    const { data: manualRows } = await supabase
+      .from('ig_media_manual_insight_extra')
+      .select('media_id, views_from_home, recorded_at')
+      .in('media_id', ids)
+      .not('views_from_home', 'is', null)
+      .order('recorded_at', { ascending: false })
+
+    for (const row of manualRows ?? []) {
+      const mid = row.media_id as string
+      const v = row.views_from_home
+      if (typeof v !== 'number' || manualMap.has(mid)) continue
+      manualMap.set(mid, v)
+    }
+  }
+
+  const data = postsList.map(p => ({
+    ...p,
+    manual_views_from_home: manualMap.get(p.id) ?? null,
+  })) as Array<Record<string, unknown> & { id: string; manual_views_from_home: number | null }>
+
+  return { data, followers_count }
+}
 
 // GET /api/posts?account=<id>&limit=20&offset=0&type=FEED|REELS|STORY
 export async function GET(request: Request) {
@@ -46,7 +83,9 @@ export async function GET(request: Request) {
       .range(offset, offset + limit - 1)
 
     if (e2) return NextResponse.json({ error: e2.message }, { status: 500 })
-    return NextResponse.json({ data: plain, count: c2, offset, limit })
+    const plainList = (plain ?? []) as Array<Record<string, unknown> & { id: string }>
+    const { data, followers_count } = await appendHomeRateFields(supabase, accountId, plainList)
+    return NextResponse.json({ data, count: c2, offset, limit, followers_count })
   }
 
   // 各投稿・各メトリクスごとに snapshot_at が最も新しい行だけ採用（常に最新値）
@@ -67,5 +106,8 @@ export async function GET(request: Request) {
     return { ...rest, insights: latest }
   })
 
-  return NextResponse.json({ data: enriched, count, offset, limit })
+  const list = (enriched ?? []) as Array<Record<string, unknown> & { id: string }>
+  const { data, followers_count } = await appendHomeRateFields(supabase, accountId, list)
+
+  return NextResponse.json({ data, count, offset, limit, followers_count })
 }

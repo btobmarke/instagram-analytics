@@ -4,6 +4,8 @@ import { useState, use, useCallback } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 import { AddAccountModal, EditAccountModal, type IgAccountWithToken } from '@/components/instagram/AccountModals'
+import { InstagramServiceSubnav } from '@/components/instagram/InstagramServiceSubnav'
+import { InstagramFollowerImportButtonModal } from '@/components/instagram/InstagramFollowerImportButtonModal'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -143,47 +145,20 @@ export default function InstagramServicePage({
       </nav>
 
       {/* サービスヘッダー */}
-      <div className="flex items-center gap-3 mb-4">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center text-xl">📸</div>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Instagram</h1>
-          <p className="text-sm text-gray-400">{service?.service_name}</p>
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center text-xl flex-shrink-0">
+            📸
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold text-gray-900">Instagram</h1>
+            <p className="text-sm text-gray-400">{service?.service_name}</p>
+          </div>
         </div>
+        <InstagramFollowerImportButtonModal accountId={igAccountRefId} onImported={refreshAll} />
       </div>
 
-      {/* タブナビ */}
-      <div className="flex items-center gap-1 mb-6 border-b border-gray-200">
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/instagram/analytics`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
-        >
-          ダッシュボード
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/instagram/posts`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
-        >
-          投稿一覧
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/instagram/ai`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
-        >
-          AI分析
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/instagram`}
-          className="px-4 py-2.5 text-sm font-medium text-pink-600 border-b-2 border-pink-600 -mb-px"
-        >
-          設定
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/summary`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
-        >
-          サマリー
-        </Link>
-      </div>
+      <InstagramServiceSubnav projectId={projectId} serviceId={serviceId} active="settings" />
 
       {/* ================================================================ */}
       {/* アカウント情報ヘッダー                                            */}
@@ -378,6 +353,7 @@ export default function InstagramServicePage({
           onSuccess={() => { setShowEditModal(false); refreshAll() }}
         />
       )}
+
     </div>
   )
 }

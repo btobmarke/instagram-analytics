@@ -5,11 +5,22 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import type { IgMedia } from '@/types'
+import {
+  PostListColumnToggles,
+  SERVICE_POST_LIST_COLUMNS,
+  postListFancyCheckboxClass,
+  usePostListColumnVisibility,
+} from '@/components/posts/post-list-column-visibility'
+import { InstagramServiceSubnav } from '@/components/instagram/InstagramServiceSubnav'
+import { InstagramFollowerImportButtonModal } from '@/components/instagram/InstagramFollowerImportButtonModal'
+
+const SERVICE_POST_LIST_COL_STORAGE_KEY = 'ig_service_posts_list_columns_v2'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
 interface PostWithInsights extends IgMedia {
   insights: Record<string, number | null>
+  manual_views_from_home?: number | null
 }
 
 const MEDIA_TYPE_LABELS: Record<string, string> = {
@@ -38,7 +49,7 @@ export default function ServicePostsPage({
   const { projectId, serviceId } = use(params)
   const router = useRouter()
 
-  const { data: serviceData } = useSWR<{ success: boolean; data: ServiceDetail }>(
+  const { data: serviceData, mutate: mutateService } = useSWR<{ success: boolean; data: ServiceDetail }>(
     `/api/services/${serviceId}`,
     fetcher
   )
@@ -46,12 +57,14 @@ export default function ServicePostsPage({
   const accountId = service?.type_config?.ig_account_ref_id
 
   const [posts, setPosts] = useState<PostWithInsights[]>([])
+  const [followersCount, setFollowersCount] = useState<number | null>(null)
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
   const [loading, setLoading] = useState(false)
   const [filterType, setFilterType] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const limit = 20
+  const { visible, isOn, toggle } = usePostListColumnVisibility(SERVICE_POST_LIST_COL_STORAGE_KEY, SERVICE_POST_LIST_COLUMNS)
 
   const fetchPosts = useCallback(async () => {
     if (!accountId) return
@@ -62,6 +75,7 @@ export default function ServicePostsPage({
     const json = await res.json()
     setPosts(json.data ?? [])
     setTotal(json.count ?? 0)
+    setFollowersCount(typeof json.followers_count === 'number' ? json.followers_count : null)
     setLoading(false)
   }, [accountId, offset, filterType])
 
@@ -89,8 +103,14 @@ export default function ServicePostsPage({
   const currentPage = Math.floor(offset / limit) + 1
   const allSelected = posts.length > 0 && selectedIds.size === posts.length
 
+  const thTop =
+    'sticky top-0 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-600 tracking-wide shadow-[0_1px_0_rgba(0,0,0,0.06)] whitespace-nowrap border-b border-gray-100'
+  const thStickyCheck = `${thTop} left-0 z-50 w-14 min-w-[3.5rem] box-border border-r border-gray-200 shadow-[2px_0_8px_-2px_rgba(0,0,0,0.06)] text-left`
+  const thStickyPost = `${thTop} left-14 z-50 min-w-[100px] max-w-[min(190px,22vw)] box-border border-r border-gray-200 shadow-[4px_0_14px_-4px_rgba(0,0,0,0.1)] text-left`
+  const thMetrics = `${thTop} z-10`
+
   return (
-    <div className="p-6 max-w-6xl mx-auto pb-24">
+    <div className="p-6 w-full max-w-none mx-auto min-w-0 pb-24">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-sm text-gray-400 mb-4 flex-wrap">
         <Link href="/clients" className="hover:text-purple-600">クライアント一覧</Link>
@@ -107,51 +127,37 @@ export default function ServicePostsPage({
       </nav>
 
       {/* サービスヘッダー */}
-      <div className="flex items-center gap-3 mb-4">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center text-xl">📸</div>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Instagram</h1>
-          <p className="text-sm text-gray-400">{service?.service_name}</p>
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center text-xl flex-shrink-0">
+            📸
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold text-gray-900">Instagram</h1>
+            <p className="text-sm text-gray-400">{service?.service_name}</p>
+          </div>
         </div>
+        <InstagramFollowerImportButtonModal accountId={accountId} onImported={() => mutateService()} />
       </div>
 
-      {/* タブナビ */}
-      <div className="flex items-center gap-1 mb-6 border-b border-gray-200">
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/instagram/analytics`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
-        >
-          ダッシュボード
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/instagram/posts`}
-          className="px-4 py-2.5 text-sm font-medium text-pink-600 border-b-2 border-pink-600 -mb-px"
-        >
-          投稿一覧
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/instagram/ai`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
-        >
-          AI分析
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/instagram`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
-        >
-          設定
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/summary`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
-        >
-          サマリー
-        </Link>
-      </div>
+      <InstagramServiceSubnav projectId={projectId} serviceId={serviceId} active="posts" />
 
       <div className="flex items-center justify-between mb-6">
         <div>
-          <p className="text-sm text-gray-500">全{total}件の投稿</p>
+          <p className="text-sm text-gray-500">
+            全{total}件の投稿
+            {accountId && (
+              <>
+                {' · '}
+                <Link
+                  href={`/projects/${projectId}/services/${serviceId}/instagram/like-users`}
+                  className="text-purple-600 hover:text-purple-700 font-medium"
+                >
+                  いいねユーザー分析
+                </Link>
+              </>
+            )}
+          </p>
         </div>
         <div className="flex gap-2 flex-wrap">
           {['', 'FEED', 'REELS', 'STORY'].map(t => (
@@ -202,41 +208,73 @@ export default function ServicePostsPage({
         </div>
       ) : (
         <>
-          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-            <table className="w-full">
+          <div className="min-w-0 bg-white rounded-2xl border border-gray-200 shadow-sm">
+            <div className="p-4 pb-0">
+              <PostListColumnToggles columns={SERVICE_POST_LIST_COLUMNS} visible={visible} onToggle={toggle} />
+            </div>
+            <div className="min-w-0 overflow-x-auto px-2 pb-2">
+            <table className="w-full min-w-[960px] border-collapse">
               <thead>
-                <tr className="border-b border-gray-100 bg-gray-50">
-                  <th className="w-10 px-4 py-3">
-                    <input type="checkbox" checked={allSelected} onChange={toggleAll}
-                      className="w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer" />
+                <tr>
+                  <th className={thStickyCheck} scope="col">
+                    <input type="checkbox" checked={allSelected} onChange={toggleAll} className={postListFancyCheckboxClass} />
                   </th>
-                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-3">投稿</th>
-                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-3">種別</th>
-                  <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-3">リーチ</th>
-                  <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-3">いいね</th>
-                  <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-3">保存</th>
-                  <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-3">EG率</th>
-                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-3">投稿日</th>
-                  <th className="px-4 py-3" />
+                  <th className={thStickyPost} scope="col">投稿</th>
+                  {isOn('type') && <th className={`${thMetrics} text-left min-w-[5.5rem]`}>種別</th>}
+                  {isOn('views') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>表示</th>}
+                  {isOn('homeRate') && (
+                    <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`} title="手入力のホーム件数 ÷ アカウントのフォロワー数">
+                      ホーム率
+                    </th>
+                  )}
+                  {isOn('reach') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>リーチ</th>}
+                  {isOn('likes') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>いいね</th>}
+                  {isOn('saved') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>保存</th>}
+                  {isOn('shares') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>シェア</th>}
+                  {isOn('shareRate') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>シェア率</th>}
+                  {isOn('egRate') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>EG率</th>}
+                  {isOn('postedAt') && <th className={`${thMetrics} text-left min-w-[5rem]`}>投稿日</th>}
+                  {isOn('detail') && (
+                    <th className={`${thMetrics} w-12 min-w-[3rem]`} scope="col">
+                      <span className="sr-only">詳細</span>
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {posts.map(post => {
                   const reach = post.insights?.reach
+                  const views = post.insights?.views
                   const likes = post.insights?.likes
                   const saved = post.insights?.saved
+                  const shares = post.insights?.shares
                   const totalInteractions = post.insights?.total_interactions
                   const egRate = reach && reach > 0 && totalInteractions != null
                     ? ((totalInteractions / reach) * 100).toFixed(1) : null
+                  const shareRate =
+                    reach != null && reach > 0 && shares != null
+                      ? ((shares / reach) * 100).toFixed(2)
+                      : null
+                  const manualHome = post.manual_views_from_home
+                  const homeRatePct =
+                    manualHome != null && followersCount != null && followersCount > 0
+                      ? (manualHome / followersCount) * 100
+                      : null
                   const isSelected = selectedIds.has(post.id)
 
+                  const rowBg = isSelected ? 'bg-purple-50 hover:bg-purple-50' : 'bg-white hover:bg-gray-50'
+
                   return (
-                    <tr key={post.id} className={`transition ${isSelected ? 'bg-purple-50' : 'hover:bg-gray-50'}`}>
-                      <td className="w-10 px-4 py-4">
-                        <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(post.id)}
-                          className="w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer" />
+                    <tr key={post.id} className={`transition ${rowBg}`}>
+                      <td className="sticky left-0 z-30 w-14 min-w-[3.5rem] box-border border-r border-gray-200 px-4 py-4 align-top bg-inherit">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelect(post.id)}
+                          className={postListFancyCheckboxClass}
+                        />
                       </td>
-                      <td className="px-4 py-4">
+                      <td className="sticky left-14 z-30 min-w-[100px] max-w-[min(190px,22vw)] box-border border-r border-gray-200 px-4 py-4 align-top bg-inherit shadow-[4px_0_14px_-6px_rgba(0,0,0,0.08)]">
                         <div className="flex items-center gap-3">
                           <div className="w-12 h-12 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
                             {(post.thumbnail_url || post.media_url) ? (
@@ -252,42 +290,99 @@ export default function ServicePostsPage({
                               </div>
                             )}
                           </div>
-                          <p className="text-sm text-gray-700 line-clamp-2 max-w-xs">
+                          <p className="text-sm text-gray-700 line-clamp-2 max-w-md">
                             {post.caption ? post.caption.slice(0, 80) + (post.caption.length > 80 ? '…' : '') : '（キャプションなし）'}
                           </p>
                         </div>
                       </td>
-                      <td className="px-4 py-4">
-                        <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${MEDIA_TYPE_COLORS[post.media_product_type ?? ''] ?? 'bg-gray-100 text-gray-600'}`}>
-                          {MEDIA_TYPE_LABELS[post.media_product_type ?? ''] ?? post.media_type}
-                        </span>
-                      </td>
-                      <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium">{reach?.toLocaleString() ?? '—'}</td>
-                      <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium">{likes?.toLocaleString() ?? '—'}</td>
-                      <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium">{saved?.toLocaleString() ?? '—'}</td>
-                      <td className="px-4 py-4 text-right">
-                        {egRate ? (
-                          <span className={`text-sm font-bold ${parseFloat(egRate) >= 5 ? 'text-green-600' : parseFloat(egRate) >= 2 ? 'text-yellow-600' : 'text-red-500'}`}>
-                            {egRate}%
+                      {isOn('type') && (
+                        <td className="px-4 py-4 align-top">
+                          <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${MEDIA_TYPE_COLORS[post.media_product_type ?? ''] ?? 'bg-gray-100 text-gray-600'}`}>
+                            {MEDIA_TYPE_LABELS[post.media_product_type ?? ''] ?? post.media_type}
                           </span>
-                        ) : <span className="text-gray-400 text-sm">—</span>}
-                      </td>
-                      <td className="px-4 py-4 text-sm text-gray-500">
-                        {new Date(post.posted_at).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })}
-                      </td>
-                      <td className="px-4 py-4">
-                        <Link href={`/posts/${post.id}?account=${accountId}&returnTo=/projects/${projectId}/services/${serviceId}/instagram/posts`}
-                          className="text-gray-300 hover:text-purple-400 transition">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                          </svg>
-                        </Link>
-                      </td>
+                        </td>
+                      )}
+                      {isOn('views') && (
+                        <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium tabular-nums align-top">{views?.toLocaleString() ?? '—'}</td>
+                      )}
+                      {isOn('homeRate') && (
+                        <td className="px-4 py-4 text-right align-top">
+                          {homeRatePct != null ? (
+                            <span
+                              className={`text-sm font-bold tabular-nums ${
+                                homeRatePct < 50
+                                  ? 'text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded-md'
+                                  : 'text-gray-800'
+                              }`}
+                            >
+                              {homeRatePct.toFixed(1)}%
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 text-sm">—</span>
+                          )}
+                        </td>
+                      )}
+                      {isOn('reach') && (
+                        <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium tabular-nums align-top">{reach?.toLocaleString() ?? '—'}</td>
+                      )}
+                      {isOn('likes') && (
+                        <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium tabular-nums align-top">{likes?.toLocaleString() ?? '—'}</td>
+                      )}
+                      {isOn('saved') && (
+                        <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium tabular-nums align-top">{saved?.toLocaleString() ?? '—'}</td>
+                      )}
+                      {isOn('shares') && (
+                        <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium tabular-nums align-top">{shares?.toLocaleString() ?? '—'}</td>
+                      )}
+                      {isOn('shareRate') && (
+                        <td className="px-4 py-4 text-right align-top">
+                          {shareRate != null ? (
+                            <span
+                              className={`text-sm font-bold tabular-nums ${
+                                parseFloat(shareRate) >= 1
+                                  ? 'text-green-600'
+                                  : parseFloat(shareRate) >= 0.3
+                                    ? 'text-yellow-600'
+                                    : 'text-gray-600'
+                              }`}
+                            >
+                              {shareRate}%
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 text-sm">—</span>
+                          )}
+                        </td>
+                      )}
+                      {isOn('egRate') && (
+                        <td className="px-4 py-4 text-right align-top">
+                          {egRate ? (
+                            <span className={`text-sm font-bold ${parseFloat(egRate) >= 5 ? 'text-green-600' : parseFloat(egRate) >= 2 ? 'text-yellow-600' : 'text-red-500'}`}>
+                              {egRate}%
+                            </span>
+                          ) : <span className="text-gray-400 text-sm">—</span>}
+                        </td>
+                      )}
+                      {isOn('postedAt') && (
+                        <td className="px-4 py-4 text-sm text-gray-500 whitespace-nowrap align-top">
+                          {new Date(post.posted_at).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })}
+                        </td>
+                      )}
+                      {isOn('detail') && (
+                        <td className="px-4 py-4 align-top">
+                          <Link href={`/posts/${post.id}?account=${accountId}&returnTo=/projects/${projectId}/services/${serviceId}/instagram/posts`}
+                            className="text-gray-300 hover:text-purple-400 transition inline-flex" title="詳細">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                          </Link>
+                        </td>
+                      )}
                     </tr>
                   )
                 })}
               </tbody>
             </table>
+            </div>
           </div>
 
           {/* ページネーション */}

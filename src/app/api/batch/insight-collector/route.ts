@@ -7,6 +7,74 @@ import { decrypt } from '@/lib/utils/crypto'
 import { validateBatchRequest } from '@/lib/utils/batch-auth'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 
+type MediaInsightRow = {
+  id: string
+  platform_media_id: string
+  media_product_type: string | null
+  media_type: string
+}
+
+/**
+ * メディアインサイト収集の対象キュー。
+ * 以前は「30日以内・新しい順50件」のみで、投稿が多いアカウントでは「昨日の投稿」が50件圏外に落ちて
+ * 一切インサイトが取れないバグがあった。
+ * 直近7日は最大120件を必ず対象にし、7〜30日前は最大80件を追加（重複除く・合計上限に近いがレート内で処理）。
+ */
+async function loadMediaQueueForInsightCollection(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  accountId: string
+): Promise<MediaInsightRow[]> {
+  const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+  const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+
+  const { data: recent, error: errRecent } = await admin
+    .from('ig_media')
+    .select('id, platform_media_id, media_product_type, media_type')
+    .eq('account_id', accountId)
+    .eq('is_deleted', false)
+    .gte('posted_at', since7d)
+    .order('posted_at', { ascending: false })
+    .limit(120)
+
+  if (errRecent) {
+    console.warn('[insight-collector] recent media query failed', {
+      account_id: accountId,
+      error: errRecent.message,
+    })
+  }
+
+  const { data: older, error: errOlder } = await admin
+    .from('ig_media')
+    .select('id, platform_media_id, media_product_type, media_type')
+    .eq('account_id', accountId)
+    .eq('is_deleted', false)
+    .gte('posted_at', since30d)
+    .lt('posted_at', since7d)
+    .order('posted_at', { ascending: false })
+    .limit(80)
+
+  if (errOlder) {
+    console.warn('[insight-collector] older media query failed', {
+      account_id: accountId,
+      error: errOlder.message,
+    })
+  }
+
+  const seen = new Set<string>()
+  const out: MediaInsightRow[] = []
+  for (const m of recent ?? []) {
+    if (seen.has(m.id)) continue
+    seen.add(m.id)
+    out.push(m as MediaInsightRow)
+  }
+  for (const m of older ?? []) {
+    if (seen.has(m.id)) continue
+    seen.add(m.id)
+    out.push(m as MediaInsightRow)
+  }
+  return out
+}
+
 function logInsightError(
   scope: 'media' | 'account_insights',
   ctx: Record<string, unknown>,
@@ -109,24 +177,14 @@ export async function POST(request: Request) {
         apiVersion: account.api_version ?? undefined,
       })
 
-      // 直近30日以内の投稿を対象
-      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-      const { data: mediaList, error: mediaListError } = await admin
-        .from('ig_media')
-        .select('id, platform_media_id, media_product_type, media_type')
-        .eq('account_id', account.id)
-        .eq('is_deleted', false)
-        .gte('posted_at', since)
-        .order('posted_at', { ascending: false })
-        .limit(50)
+      const mediaList = await loadMediaQueueForInsightCollection(admin, account.id)
 
       console.info('[insight-collector] media to process', {
         account_id: account.id,
-        media_count: mediaList?.length ?? 0,
-        error: mediaListError?.message ?? null,
+        media_count: mediaList.length,
       })
 
-      for (const media of (mediaList ?? [])) {
+      for (const media of mediaList) {
         try {
           const mediaType = (media.media_product_type ?? media.media_type) as 'FEED' | 'REELS' | 'VIDEO' | 'STORY'
           const { data: insightData, rateUsage } = await igClient.getMediaInsights(media.platform_media_id, mediaType)

@@ -33,6 +33,7 @@ export type InstagramRequestStep =
   | 'getProfileCountsDirect'
   | 'getProfileDisplayFields'
   | 'getMediaList'
+  | 'getStoriesList'
   | 'getMediaInsights'
   | 'getMediaStoryNavigationInsights'
   | 'getMediaProfileActivityInsights'
@@ -249,6 +250,25 @@ export class InstagramClient {
       },
       undefined,
       'getMediaList'
+    )
+  }
+
+  /**
+   * 公開中のストーリー一覧（通常24時間以内のみ返る）。
+   * フィード／リールの `/{id}/media` には含まれないため、ストーリー同期は本エッジが必須。
+   * @see https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/stories
+   */
+  async getStoriesList(params: { limit?: number; after?: string } = {}) {
+    const fields = 'id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,is_comment_enabled,shortcode,children{id,media_url,thumbnail_url}'
+    return this.fetch(
+      `/${this.accountId}/stories`,
+      {
+        fields,
+        limit: String(params.limit ?? 50),
+        ...(params.after ? { after: params.after } : {}),
+      },
+      undefined,
+      'getStoriesList'
     )
   }
 

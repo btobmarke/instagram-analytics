@@ -5,6 +5,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { analyzeAccount } from '@/lib/claude/client'
 import { validateBatchRequest } from '@/lib/utils/batch-auth'
 import { getAiModelIdForAccountId } from '@/lib/ai/resolve-ai-model'
+import { buildInstagramServiceKpiPromptBlock } from '@/lib/ai/instagram-service-kpis-for-prompt'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 
 // POST /api/batch/ai-analysis — 週次AI分析バッチ
@@ -69,11 +70,14 @@ export async function POST(request: Request) {
           ;(summary[row.metric_code] as unknown[]).push({ date: row.value_date, value: row.value })
         }
 
+        const serviceKpiPromptBlock = await buildInstagramServiceKpiPromptBlock(admin, account.id, true)
+
         const result = await analyzeAccount({
           accountUsername: account.username,
           period: { start: weekAgo, end: today },
           analysisType: 'weekly',
           weeklySummary: summary,
+          serviceKpiPromptBlock,
           kpiProgress: kpiProgress ?? [],
           kpiMasters: kpiMasters ?? [],
           topPosts: [],

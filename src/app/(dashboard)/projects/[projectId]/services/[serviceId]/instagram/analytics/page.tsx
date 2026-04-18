@@ -7,6 +7,11 @@ import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
+import { InstagramDashboardEnrichment } from '@/components/instagram/InstagramDashboardEnrichment'
+import { InstagramServiceSubnav } from '@/components/instagram/InstagramServiceSubnav'
+import { InstagramLikeUsersAnalysis } from '@/components/instagram/InstagramLikeUsersAnalysis'
+import { InstagramFollowerImportButtonModal } from '@/components/instagram/InstagramFollowerImportButtonModal'
+
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
 interface ServiceDetail {
@@ -55,7 +60,7 @@ export default function ServiceAnalyticsPage({
 }) {
   const { projectId, serviceId } = use(params)
 
-  const { data: serviceData } = useSWR<{ success: boolean; data: ServiceDetail }>(
+  const { data: serviceData, mutate: mutateService } = useSWR<{ success: boolean; data: ServiceDetail }>(
     `/api/services/${serviceId}`,
     fetcher
   )
@@ -116,51 +121,29 @@ export default function ServiceAnalyticsPage({
           {service?.service_name ?? 'Instagram'}
         </Link>
         <span>›</span>
-        <span className="text-gray-700 font-medium">アカウントインサイト</span>
+        <span className="text-gray-700 font-medium">ダッシュボード</span>
       </nav>
 
       {/* サービスヘッダー */}
-      <div className="flex items-center gap-3 -mt-2">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center text-xl">📸</div>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Instagram</h1>
-          <p className="text-sm text-gray-400">{service?.service_name}</p>
+      <div className="flex items-start justify-between gap-4 -mt-2">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center text-xl flex-shrink-0">
+            📸
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold text-gray-900">Instagram</h1>
+            <p className="text-sm text-gray-400">{service?.service_name}</p>
+          </div>
         </div>
+        <InstagramFollowerImportButtonModal accountId={accountId} onImported={() => mutateService()} />
       </div>
 
-      {/* タブナビ */}
-      <div className="flex items-center gap-1 border-b border-gray-200 -mt-2">
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/instagram/analytics`}
-          className="px-4 py-2.5 text-sm font-medium text-pink-600 border-b-2 border-pink-600 -mb-px"
-        >
-          ダッシュボード
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/instagram/posts`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
-        >
-          投稿一覧
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/instagram/ai`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
-        >
-          AI分析
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/instagram`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
-        >
-          設定
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/summary`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px transition"
-        >
-          サマリー
-        </Link>
-      </div>
+      <InstagramServiceSubnav
+        projectId={projectId}
+        serviceId={serviceId}
+        active="analytics"
+        className="-mt-2 border-b border-gray-200"
+      />
 
       {!accountId ? (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center text-amber-800">
@@ -174,7 +157,7 @@ export default function ServiceAnalyticsPage({
         <>
           {/* ヘッダー */}
           <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold text-gray-900">アカウントインサイト</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Instagram ダッシュボード</h1>
             <div className="flex gap-2">
               {(['7d', '30d', '90d'] as const).map(p => (
                 <button key={p} onClick={() => setPeriod(p)}
@@ -266,21 +249,37 @@ export default function ServiceAnalyticsPage({
             </div>
           )}
 
-          {/* AI分析（専用タブへ誘導） */}
-          <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-100 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-gray-800">AI 分析レポート</h2>
-              <p className="text-xs text-gray-500 mt-1">
-                週次・月次レポートをストリーミング生成し、過去の分析も閲覧できます。
-              </p>
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-700">いいねユーザー分析</h2>
+                <p className="text-xs text-gray-500 mt-1">
+                  手入力の「いいねユーザー」とフォロワー一覧を突き合わせ、期間内の反応を一覧します。
+                  フォロワー一覧は画面上部の「フォロワー一覧を取り込む」から登録できます。
+                </p>
+              </div>
+              <Link
+                href={`/projects/${projectId}/services/${serviceId}/instagram/like-users`}
+                className="text-xs font-medium text-purple-600 hover:text-purple-700 whitespace-nowrap"
+              >
+                タブで全画面表示 →
+              </Link>
             </div>
-            <Link
-              href={`/projects/${projectId}/services/${serviceId}/instagram/ai`}
-              className="inline-flex justify-center items-center gap-1.5 px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition shrink-0"
-            >
-              AI分析タブを開く
-            </Link>
+            <InstagramLikeUsersAnalysis
+              embedded
+              accountId={accountId}
+              postsListHref={`/projects/${projectId}/services/${serviceId}/instagram/posts`}
+              hideFollowerImport
+            />
           </div>
+
+          <InstagramDashboardEnrichment
+            accountId={accountId}
+            period={period}
+            projectId={projectId}
+            serviceId={serviceId}
+          />
+
         </>
       )}
     </div>

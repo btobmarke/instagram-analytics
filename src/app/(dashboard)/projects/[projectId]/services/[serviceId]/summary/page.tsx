@@ -4,6 +4,7 @@ import { useState, use, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
+import { InstagramFollowerImportButtonModal } from '@/components/instagram/InstagramFollowerImportButtonModal'
 import type { ServiceDetail, SummaryTemplate } from './_lib/types'
 import { listTemplates, createTemplate, deleteTemplate } from './_lib/store'
 
@@ -81,12 +82,14 @@ export default function SummaryTemplatePage({
   const { projectId, serviceId } = use(params)
   const router = useRouter()
 
-  const { data: svcData } = useSWR<{ success: boolean; data: ServiceDetail }>(
+  const { data: svcData, mutate: mutateService } = useSWR<{ success: boolean; data: ServiceDetail }>(
     `/api/services/${serviceId}`,
     fetcher,
   )
   const service = svcData?.data
   const serviceType = service?.service_type ?? ''
+  const igAccountRefId =
+    serviceType === 'instagram' ? service?.type_config?.ig_account_ref_id : undefined
   const theme = SERVICE_THEME[serviceType] ?? { accent: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-200', badge: 'bg-purple-100 text-purple-700' }
   const pageHeader =
     SERVICE_PAGE_HEADER[serviceType] ?? {
@@ -161,16 +164,26 @@ export default function SummaryTemplatePage({
 
       {/* サービス見出し（各タブ画面と同位置・同スタイル） */}
       {serviceType && (
-        <div className="flex items-center gap-3 mb-4">
-          <div
-            className={`w-10 h-10 rounded-xl bg-gradient-to-br ${pageHeader.iconGradient} flex items-center justify-center text-xl`}
-          >
-            {pageHeader.emoji}
+        <div
+          className={`flex mb-4 gap-4 ${serviceType === 'instagram' ? 'items-start justify-between' : 'items-center gap-3'}`}
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div
+              className={`w-10 h-10 rounded-xl bg-gradient-to-br ${pageHeader.iconGradient} flex items-center justify-center text-xl flex-shrink-0`}
+            >
+              {pageHeader.emoji}
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-2xl font-bold text-gray-900">{pageHeader.title}</h1>
+              <p className="text-sm text-gray-400">{service?.service_name ?? ''}</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">{pageHeader.title}</h1>
-            <p className="text-sm text-gray-400">{service?.service_name ?? ''}</p>
-          </div>
+          {serviceType === 'instagram' && (
+            <InstagramFollowerImportButtonModal
+              accountId={igAccountRefId}
+              onImported={() => mutateService()}
+            />
+          )}
         </div>
       )}
 
@@ -184,6 +197,9 @@ export default function SummaryTemplatePage({
               </Link>
               <Link href={`${svcPath}/instagram/posts`} className={tabInactive}>
                 投稿一覧
+              </Link>
+              <Link href={`${svcPath}/instagram/like-users`} className={tabInactive}>
+                いいねユーザー
               </Link>
               <Link href={`${svcPath}/instagram/ai`} className={tabInactive}>
                 AI分析

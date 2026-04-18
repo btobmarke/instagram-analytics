@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { analyzeAccount } from '@/lib/claude/client'
 import { getAiModelIdForAccountId } from '@/lib/ai/resolve-ai-model'
+import { buildInstagramServiceKpiPromptBlock } from '@/lib/ai/instagram-service-kpis-for-prompt'
 
 // POST /api/analytics/ai — アカウント週次/月次AI分析
 export async function POST(request: Request) {
@@ -14,6 +15,7 @@ export async function POST(request: Request) {
 
   const body = await request.json()
   const { accountId, analysisType = 'weekly', periodStart, periodEnd } = body
+  const prioritizeServiceKpis = body.prioritizeServiceKpis !== false
 
   if (!accountId) return NextResponse.json({ error: 'accountId が必要です' }, { status: 400 })
 
@@ -78,11 +80,18 @@ export async function POST(request: Request) {
 
   const topPosts = (topMediaRows ?? []).map(post => ({ post, insights: {} as Record<string, number | null> }))
 
+  const serviceKpiPromptBlock = await buildInstagramServiceKpiPromptBlock(
+    supabase,
+    accountId,
+    prioritizeServiceKpis,
+  )
+
   const result = await analyzeAccount({
     accountUsername: account?.username ?? 'unknown',
     period: { start: since, end: until },
     analysisType: analysisType as 'weekly' | 'monthly',
     weeklySummary: summary,
+    serviceKpiPromptBlock,
     kpiProgress: kpiProgress ?? [],
     kpiMasters: kpiMasters ?? [],
     topPosts,

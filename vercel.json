@@ -37,6 +37,10 @@
       "schedule": "10 * * * *"
     },
     {
+      "path": "/api/batch/story-media-collector",
+      "schedule": "5 * * * *"
+    },
+    {
       "path": "/api/batch/kpi-calc",
       "schedule": "45 * * * *"
     },
@@ -47,6 +51,10 @@
     {
       "path": "/api/batch/ai-analysis",
       "schedule": "0 6 * * 1"
+    },
+    {
+      "path": "/api/batch/instagram-velocity-retro",
+      "schedule": "30 7 * * 1"
     },
     {
       "path": "/api/batch/external-data",

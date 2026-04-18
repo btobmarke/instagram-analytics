@@ -6,6 +6,7 @@ import { InstagramApiError, InstagramClient, isRateLimitExceeded } from '@/lib/i
 import { decrypt } from '@/lib/utils/crypto'
 import { validateBatchRequest } from '@/lib/utils/batch-auth'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
+import { upsertActiveStoriesPages } from '@/lib/batch/sync-instagram-stories-media'
 
 // POST /api/batch/media-collector
 // Vercel Cron or manual trigger: 投稿一覧の同期
@@ -83,7 +84,25 @@ export async function POST(request: Request) {
           apiVersion: account.api_version ?? undefined,
         })
 
-        // 直近90日分の投稿を取得
+        const upsertIgMediaRow = async (m: Record<string, unknown>) => {
+          await admin.from('ig_media').upsert({
+            account_id: account.id,
+            platform_media_id: m.id as string,
+            media_type: m.media_type as string,
+            media_product_type: m.media_product_type as string | null,
+            caption: m.caption as string | null,
+            permalink: m.permalink as string | null,
+            thumbnail_url: m.thumbnail_url as string | null,
+            media_url: m.media_url as string | null,
+            children_json: m.children ?? null,
+            posted_at: m.timestamp as string,
+            shortcode: m.shortcode as string | null,
+            is_comment_enabled: m.is_comment_enabled as boolean | null,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'account_id,platform_media_id' })
+        }
+
+        // 直近90日分の投稿を取得（フィード／リール等）
         const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
         let after: string | undefined
         let pageCount = 0
@@ -97,21 +116,7 @@ export async function POST(request: Request) {
           for (const media of mediaList) {
             const m = media as Record<string, unknown>
             try {
-              await admin.from('ig_media').upsert({
-                account_id: account.id,
-                platform_media_id: m.id as string,
-                media_type: m.media_type as string,
-                media_product_type: m.media_product_type as string | null,
-                caption: m.caption as string | null,
-                permalink: m.permalink as string | null,
-                thumbnail_url: m.thumbnail_url as string | null,
-                media_url: m.media_url as string | null,
-                children_json: m.children ?? null,
-                posted_at: m.timestamp as string,
-                shortcode: m.shortcode as string | null,
-                is_comment_enabled: m.is_comment_enabled as boolean | null,
-                updated_at: new Date().toISOString(),
-              }, { onConflict: 'account_id,platform_media_id' })
+              await upsertIgMediaRow(m)
               totalProcessed++
             } catch (rowErr) {
               totalFailed++
@@ -123,6 +128,14 @@ export async function POST(request: Request) {
           if (!paging?.next || !after) break
           pageCount++
         }
+
+        // アクティブなストーリー（別エッジ。24時間経過で API から消える）
+        const st = await upsertActiveStoriesPages(igClient, upsertIgMediaRow, {
+          accountId: account.id,
+          logPrefix: 'media-collector',
+        })
+        totalProcessed += st.processed
+        totalFailed += st.failed
       } catch (loopErr) {
         totalFailed++
         const msg = loopErr instanceof Error ? loopErr.message : String(loopErr)
