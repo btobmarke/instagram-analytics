@@ -10,6 +10,11 @@ const NAV = [
   { href: '/broadcast', label: 'テンプレ・配信' },
   { href: '/ma', label: 'MA' },
   { href: '/forms', label: 'フォーム' },
+  { href: '/rich-menu', label: 'リッチ・postback' },
+  { href: '/flex', label: 'Flex' },
+  { href: '/analytics', label: '分析' },
+  { href: '/booking', label: '予約' },
+  { href: '/integrations', label: '外部連携' },
 ] as const
 
 export function LineMaNav({
