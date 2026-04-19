@@ -3,6 +3,9 @@
 import { use, useState } from 'react'
 import useSWR from 'swr'
 
+import { buildMaActionsFromDraft, MaActionsEditor, MaRuleActionsPanel } from './ma-actions-editor'
+import type { ActionDraftRow } from './ma-actions-editor'
+
 import { LineMaBreadcrumb, LineMaNav } from '../line-ma-nav'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
@@ -73,6 +76,32 @@ export default function LineMaAutomationPage({
   )
   const scenarios: Scenario[] = scenResp?.data ?? []
 
+  const { data: tagsResp } = useSWR(
+    service?.service_type === 'line' ? `/api/services/${serviceId}/line-messaging/tags` : null,
+    fetcher,
+  )
+  const tagOptions: { id: string; name: string }[] = tagsResp?.data ?? []
+
+  const { data: defsResp } = useSWR(
+    service?.service_type === 'line'
+      ? `/api/services/${serviceId}/line-messaging/attribute-definitions`
+      : null,
+    fetcher,
+  )
+  const definitionOptions: {
+    id: string
+    label: string
+    code: string
+    value_type: string
+    select_options: string[] | null
+  }[] = defsResp?.data ?? []
+
+  const { data: tplResp } = useSWR(
+    service?.service_type === 'line' ? `/api/services/${serviceId}/line-messaging/templates` : null,
+    fetcher,
+  )
+  const templateOptions: { id: string; name: string }[] = tplResp?.data ?? []
+
   const { data: remResp, mutate: mutRem } = useSWR(
     service?.service_type === 'line'
       ? `/api/services/${serviceId}/line-messaging/reminders?status=scheduled`
@@ -88,6 +117,8 @@ export default function LineMaAutomationPage({
   const [rPattern, setRPattern] = useState('')
   const [rReply, setRReply] = useState('')
   const [ruleBusy, setRuleBusy] = useState(false)
+  const [createActionRows, setCreateActionRows] = useState<ActionDraftRow[]>([])
+  const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null)
 
   const [scName, setScName] = useState('')
   const [scDesc, setScDesc] = useState('')
@@ -118,6 +149,12 @@ export default function LineMaAutomationPage({
   const createRule = async (e: React.FormEvent) => {
     e.preventDefault()
     setRuleBusy(true)
+    const built = buildMaActionsFromDraft(createActionRows)
+    if (!built.ok) {
+      alert(built.message)
+      setRuleBusy(false)
+      return
+    }
     const priority = Number(rPriority) || 100
     let body: Record<string, unknown>
     if (ruleKind === 'keyword') {
@@ -128,7 +165,7 @@ export default function LineMaAutomationPage({
         match_type: rMatch,
         pattern: rPattern.trim(),
         reply_text: rReply.trim() || null,
-        actions: [],
+        actions: built.actions,
       }
     } else if (ruleKind === 'follow') {
       body = {
@@ -136,14 +173,14 @@ export default function LineMaAutomationPage({
         name: rName.trim(),
         priority,
         reply_text: rReply.trim() || null,
-        actions: [],
+        actions: built.actions,
       }
     } else {
       body = {
         rule_kind: 'unfollow',
         name: rName.trim(),
         priority,
-        actions: [],
+        actions: built.actions,
       }
     }
     const res = await fetch(`/api/services/${serviceId}/line-messaging/ma-rules`, {
@@ -156,6 +193,7 @@ export default function LineMaAutomationPage({
       setRName('')
       setRPattern('')
       setRReply('')
+      setCreateActionRows([])
       mutRules()
     } else {
       const j = await res.json().catch(() => ({}))
@@ -299,8 +337,8 @@ export default function LineMaAutomationPage({
 
       <LineMaNav projectId={projectId} serviceId={serviceId} />
 
-      <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-6">
-        アクション（タグ付与・属性・シナリオ開始など）は API の JSON 形式です。必要に応じて Postman 等で設定するか、次フェーズでフォームを拡張します。
+      <p className="text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 mb-6">
+        ルールに「アクション」を追加できます（タグ付与・カスタム属性・シナリオ開始・一斉配信の予約）。一覧のルールから「アクション」で編集・保存してください。
       </p>
 
       <section className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
@@ -367,6 +405,14 @@ export default function LineMaAutomationPage({
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg"
             />
           )}
+          <MaActionsEditor
+            rows={createActionRows}
+            onChange={setCreateActionRows}
+            tags={tagOptions}
+            definitions={definitionOptions}
+            scenarios={scenarios}
+            templates={templateOptions}
+          />
           <button
             type="submit"
             disabled={ruleBusy}
@@ -378,31 +424,54 @@ export default function LineMaAutomationPage({
 
         <ul className="space-y-2">
           {rules.map((r) => (
-            <li
-              key={r.id}
-              className="flex flex-wrap items-center justify-between gap-2 border border-gray-100 rounded-lg px-3 py-2 text-sm"
-            >
-              <div>
-                <span className="font-medium">{r.name}</span>{' '}
-                <span className="text-xs text-gray-400">
-                  [{r.rule_kind}] pri {r.priority}
-                </span>
-                {r.pattern && (
-                  <span className="block text-xs text-gray-500 font-mono mt-0.5">{r.pattern}</span>
-                )}
+            <li key={r.id} className="border border-gray-100 rounded-lg px-3 py-2 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span className="font-medium">{r.name}</span>{' '}
+                  <span className="text-xs text-gray-400">
+                    [{r.rule_kind}] pri {r.priority}
+                  </span>
+                  {r.pattern && (
+                    <span className="block text-xs text-gray-500 font-mono mt-0.5">{r.pattern}</span>
+                  )}
+                  {Array.isArray(r.actions) && r.actions.length > 0 && (
+                    <span className="text-xs text-green-700 mt-1 inline-block">
+                      アクション {r.actions.length} 件
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedRuleId((cur) => (cur === r.id ? null : r.id))}
+                    className="text-xs text-green-700 font-medium hover:underline"
+                  >
+                    {expandedRuleId === r.id ? '閉じる' : 'アクション'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleRule(r)}
+                    className={`text-xs px-2 py-1 rounded ${r.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}`}
+                  >
+                    {r.enabled ? 'ON' : 'OFF'}
+                  </button>
+                  <button type="button" onClick={() => deleteRule(r.id)} className="text-xs text-red-500">
+                    削除
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => toggleRule(r)}
-                  className={`text-xs px-2 py-1 rounded ${r.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}`}
-                >
-                  {r.enabled ? 'ON' : 'OFF'}
-                </button>
-                <button type="button" onClick={() => deleteRule(r.id)} className="text-xs text-red-500">
-                  削除
-                </button>
-              </div>
+              {expandedRuleId === r.id && (
+                <MaRuleActionsPanel
+                  serviceId={serviceId}
+                  ruleId={r.id}
+                  initialActions={r.actions}
+                  tags={tagOptions}
+                  definitions={definitionOptions}
+                  scenarios={scenarios}
+                  templates={templateOptions}
+                  onSaved={() => mutRules()}
+                />
+              )}
             </li>
           ))}
         </ul>
