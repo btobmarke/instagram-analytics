@@ -4,6 +4,8 @@ import { logMessagingEvent } from '@/lib/line/log-messaging-event'
 import { parseMaActions } from '@/lib/line/ma-action-types'
 import { executeMaActions } from '@/lib/line/execute-ma-actions'
 import { keywordMatchesRule } from '@/lib/line/match-keyword-rule'
+import { processPostbackEvent } from '@/lib/line/process-postback-event'
+import { applyRichMenuForContact } from '@/lib/line/apply-rich-menu-for-contact'
 
 export type WebhookEventForMa = {
   type: string
@@ -11,6 +13,7 @@ export type WebhookEventForMa = {
   source?: { type?: string; userId?: string }
   replyToken?: string
   message?: { type?: string; id?: string; text?: string }
+  postback?: { data?: string }
 }
 
 async function loadContactId(
@@ -101,6 +104,29 @@ export async function processMaForWebhookEvent(
         })
       }
     }
+
+    if (channelAccessToken && cid) {
+      const rm = await applyRichMenuForContact(admin, serviceId, lineUserId, channelAccessToken)
+      if (rm.error) {
+        await logMessagingEvent(admin, {
+          service_id: serviceId,
+          contact_id: cid,
+          line_user_id: lineUserId,
+          trigger_type: 'rich_menu.link_error',
+          payload: { error: rm.error },
+          occurred_at: new Date().toISOString(),
+        })
+      } else if (rm.linked) {
+        await logMessagingEvent(admin, {
+          service_id: serviceId,
+          contact_id: cid,
+          line_user_id: lineUserId,
+          trigger_type: 'rich_menu.linked',
+          payload: { line_rich_menu_id: rm.linked },
+          occurred_at: new Date().toISOString(),
+        })
+      }
+    }
     return
   }
 
@@ -127,6 +153,11 @@ export async function processMaForWebhookEvent(
       const actions = parseMaActions(rule.actions)
       await executeMaActions(admin, serviceId, cid, actions)
     }
+    return
+  }
+
+  if (ev.type === 'postback' && ev.postback?.data !== undefined) {
+    await processPostbackEvent(admin, serviceId, cid, lineUserId, ev.postback.data)
     return
   }
 

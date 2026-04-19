@@ -21,6 +21,7 @@ type LineWebhookEvent = {
   replyToken?: string
   deliveryContext?: { isRedelivery?: boolean }
   message?: { type?: string; id?: string; text?: string }
+  postback?: { data?: string }
 }
 
 function bodyDedupeKey(rawBody: string): string {
@@ -153,6 +154,16 @@ export async function POST(request: NextRequest, { params }: Params) {
       })
       if ('error' in r) {
         console.error('[line webhook] upsert message', serviceId, r.error)
+      } else {
+        contactId = r.id
+      }
+    } else if (ev.type === 'postback') {
+      const r = await upsertLineMessagingContact(admin, serviceId, userId, {
+        observedAt,
+        isFollowed: true,
+      })
+      if ('error' in r) {
+        console.error('[line webhook] upsert postback', serviceId, r.error)
       } else {
         contactId = r.id
       }

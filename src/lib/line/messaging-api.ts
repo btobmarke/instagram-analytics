@@ -7,6 +7,9 @@ const LINE_BOT_API = 'https://api.line.me/v2/bot'
 
 export type LineTextMessage = { type: 'text'; text: string }
 
+/** Flex / カルーセル等（LINE Messaging API の message オブジェクト） */
+export type LinePushMessage = LineTextMessage | Record<string, unknown>
+
 export type LineMessagingResult =
   | { ok: true; requestId?: string | null }
   | { ok: false; status: number; message: string; requestId?: string | null }
@@ -50,7 +53,7 @@ async function lineMessagingFetch(
 export function lineMessagingPush(
   channelAccessToken: string,
   to: string,
-  messages: LineTextMessage[],
+  messages: LinePushMessage[],
 ): Promise<LineMessagingResult> {
   return lineMessagingFetch('/message/push', channelAccessToken, { to, messages })
 }
@@ -59,7 +62,7 @@ export function lineMessagingPush(
 export function lineMessagingMulticast(
   channelAccessToken: string,
   to: string[],
-  messages: LineTextMessage[],
+  messages: LinePushMessage[],
 ): Promise<LineMessagingResult> {
   return lineMessagingFetch('/message/multicast', channelAccessToken, { to, messages })
 }
@@ -68,7 +71,7 @@ export function lineMessagingMulticast(
 export function lineMessagingReply(
   channelAccessToken: string,
   replyToken: string,
-  messages: LineTextMessage[],
+  messages: LinePushMessage[],
 ): Promise<LineMessagingResult> {
   return lineMessagingFetch('/message/reply', channelAccessToken, { replyToken, messages })
 }
