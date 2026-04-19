@@ -151,7 +151,13 @@ export default function LineOamDashboard({
       </div>
 
       {/* タブナビ */}
-      <div className="flex items-center gap-1 mb-6 border-b border-gray-200">
+      <div className="flex items-center gap-1 mb-6 border-b border-gray-200 flex-wrap">
+        <Link
+          href={`/projects/${projectId}/services/${serviceId}/line-ma`}
+          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px"
+        >
+          Messaging MA
+        </Link>
         <Link
           href={`/projects/${projectId}/services/${serviceId}/line/dashboard`}
           className="px-4 py-2.5 text-sm font-medium text-green-600 border-b-2 border-green-600 -mb-px"
