@@ -2,10 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
-import { normalizeExplicitUserIds, seedBroadcastRecipients } from '@/lib/line/process-broadcast-job-chunk'
 import { assertLineService } from '@/lib/line/assert-line-service'
-import { SegmentDefinitionSchema } from '@/lib/line/segment-definition'
-import { resolveSegmentLineUserIds } from '@/lib/line/evaluate-segment'
+import { createLineBroadcastJob } from '@/lib/line/create-broadcast-job'
 
 type Params = { params: Promise<{ serviceId: string }> }
 
@@ -85,105 +83,21 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   const admin = createSupabaseAdminClient()
-  const { data: template, error: tplErr } = await admin
-    .from('line_messaging_templates')
-    .select('id, body_text')
-    .eq('id', parsed.data.template_id)
-    .eq('service_id', serviceId)
-    .maybeSingle()
+  const result = await createLineBroadcastJob(admin, serviceId, {
+    template_id: parsed.data.template_id,
+    name: parsed.data.name,
+    recipient_source: parsed.data.recipient_source,
+    explicit_line_user_ids: parsed.data.explicit_line_user_ids,
+    segment_id: parsed.data.segment_id ?? null,
+    scheduled_at: parsed.data.scheduled_at,
+  })
 
-  if (tplErr || !template) {
-    return NextResponse.json({ error: 'template_not_found' }, { status: 404 })
-  }
-
-  let scheduledAt = new Date().toISOString()
-  if (parsed.data.scheduled_at !== undefined && parsed.data.scheduled_at !== '') {
-    const ms = Date.parse(parsed.data.scheduled_at)
-    if (Number.isNaN(ms)) {
-      return NextResponse.json({ error: 'invalid_scheduled_at' }, { status: 422 })
-    }
-    scheduledAt = new Date(ms).toISOString()
-  }
-
-  let lineUserIds: string[] = []
-  let segmentId: string | null = null
-
-  if (parsed.data.recipient_source === 'explicit') {
-    lineUserIds = normalizeExplicitUserIds(parsed.data.explicit_line_user_ids ?? [])
-  } else if (parsed.data.recipient_source === 'segment') {
-    segmentId = parsed.data.segment_id!
-    const { data: seg, error: sErr } = await admin
-      .from('line_messaging_segments')
-      .select('id, definition')
-      .eq('id', segmentId)
-      .eq('service_id', serviceId)
-      .maybeSingle()
-
-    if (sErr || !seg) {
-      return NextResponse.json({ error: 'segment_not_found' }, { status: 404 })
-    }
-
-    const defParsed = SegmentDefinitionSchema.safeParse(seg.definition ?? {})
-    if (!defParsed.success) {
-      return NextResponse.json(
-        { error: 'invalid_segment_definition', details: defParsed.error.flatten() },
-        { status: 500 },
-      )
-    }
-
-    const resolved = await resolveSegmentLineUserIds(admin, serviceId, defParsed.data)
-    if (resolved.error) {
-      return NextResponse.json({ error: resolved.error }, { status: 400 })
-    }
-    lineUserIds = resolved.line_user_ids
-    if (lineUserIds.length === 0) {
-      return NextResponse.json({ error: 'segment_empty' }, { status: 400 })
-    }
-  } else {
-    const { data: contacts, error: cErr } = await admin
-      .from('line_messaging_contacts')
-      .select('line_user_id')
-      .eq('service_id', serviceId)
-      .eq('is_followed', true)
-
-    if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 })
-    lineUserIds = (contacts ?? []).map((r) => r.line_user_id).filter(Boolean)
-  }
-
-  if (lineUserIds.length === 0) {
-    return NextResponse.json({ error: 'no_recipients' }, { status: 400 })
-  }
-
-  const { data: job, error: jobErr } = await admin
-    .from('line_messaging_broadcast_jobs')
-    .insert({
-      service_id: serviceId,
-      template_id: template.id,
-      name: parsed.data.name?.trim() ?? null,
-      snapshot_body_text: template.body_text,
-      recipient_source: parsed.data.recipient_source,
-      segment_id: segmentId,
-      explicit_line_user_ids:
-        parsed.data.recipient_source === 'explicit'
-          ? lineUserIds
-          : null,
-      scheduled_at: scheduledAt,
-      status: 'scheduled',
-    })
-    .select(
-      'id, template_id, name, snapshot_body_text, recipient_source, segment_id, scheduled_at, status, created_at',
+  if (!result.ok) {
+    return NextResponse.json(
+      { error: result.error },
+      { status: result.status ?? 400 },
     )
-    .single()
-
-  if (jobErr || !job) {
-    return NextResponse.json({ error: jobErr?.message ?? 'insert failed' }, { status: 500 })
   }
 
-  const seed = await seedBroadcastRecipients(admin, job.id, lineUserIds)
-  if (seed.error) {
-    await admin.from('line_messaging_broadcast_jobs').delete().eq('id', job.id)
-    return NextResponse.json({ error: seed.error }, { status: 500 })
-  }
-
-  return NextResponse.json({ success: true, data: job })
+  return NextResponse.json({ success: true, data: result.data })
 }
