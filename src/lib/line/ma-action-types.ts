@@ -9,6 +9,12 @@ export const MaActionSchema = z.discriminatedUnion('type', [
     value_text: z.string().min(1).max(4000),
   }),
   z.object({ type: z.literal('start_scenario'), scenario_id: z.string().uuid() }),
+  z.object({
+    type: z.literal('enqueue_broadcast'),
+    template_id: z.string().uuid(),
+    /** ISO 8601 省略時は即時 */
+    scheduled_at: z.string().optional(),
+  }),
 ])
 
 export type MaAction = z.infer<typeof MaActionSchema>

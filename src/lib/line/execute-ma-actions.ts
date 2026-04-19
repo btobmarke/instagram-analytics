@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { MaAction } from '@/lib/line/ma-action-types'
+import { seedBroadcastRecipients } from '@/lib/line/process-broadcast-job-chunk'
 
 export type ExecuteActionsResult = { ok: true } | { ok: false; error: string }
 
@@ -13,6 +14,13 @@ export async function executeMaActions(
   actions: MaAction[],
 ): Promise<ExecuteActionsResult> {
   const now = new Date().toISOString()
+
+  const { data: contactRow } = await admin
+    .from('line_messaging_contacts')
+    .select('line_user_id')
+    .eq('id', contactId)
+    .maybeSingle()
+  const lineUserIdForBroadcast = contactRow?.line_user_id?.trim() ?? ''
 
   for (const action of actions) {
     if (action.type === 'add_tag') {
@@ -96,6 +104,46 @@ export async function executeMaActions(
         { onConflict: 'contact_id,scenario_id' },
       )
       if (error) return { ok: false, error: error.message }
+    } else if (action.type === 'enqueue_broadcast') {
+      if (!lineUserIdForBroadcast) {
+        return { ok: false, error: 'contact_has_no_line_user_id' }
+      }
+      const { data: template } = await admin
+        .from('line_messaging_templates')
+        .select('id, body_text')
+        .eq('id', action.template_id)
+        .eq('service_id', serviceId)
+        .maybeSingle()
+      if (!template) return { ok: false, error: `template_not_found:${action.template_id}` }
+
+      let scheduledAt = now
+      if (action.scheduled_at) {
+        const ms = Date.parse(action.scheduled_at)
+        if (!Number.isNaN(ms)) scheduledAt = new Date(ms).toISOString()
+      }
+
+      const { data: job, error: jobErr } = await admin
+        .from('line_messaging_broadcast_jobs')
+        .insert({
+          service_id: serviceId,
+          template_id: template.id,
+          name: 'form_auto_broadcast',
+          snapshot_body_text: template.body_text,
+          recipient_source: 'explicit',
+          explicit_line_user_ids: [lineUserIdForBroadcast],
+          scheduled_at: scheduledAt,
+          status: 'scheduled',
+        })
+        .select('id')
+        .single()
+
+      if (jobErr || !job) return { ok: false, error: jobErr?.message ?? 'broadcast_insert_failed' }
+
+      const seed = await seedBroadcastRecipients(admin, job.id, [lineUserIdForBroadcast])
+      if (seed.error) {
+        await admin.from('line_messaging_broadcast_jobs').delete().eq('id', job.id)
+        return { ok: false, error: seed.error }
+      }
     }
   }
 
