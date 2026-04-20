@@ -14,13 +14,17 @@ import {
 import { InstagramServiceSubnav } from '@/components/instagram/InstagramServiceSubnav'
 import { InstagramFollowerImportButtonModal } from '@/components/instagram/InstagramFollowerImportButtonModal'
 
-const SERVICE_POST_LIST_COL_STORAGE_KEY = 'ig_service_posts_list_columns_v2'
+const SERVICE_POST_LIST_COL_STORAGE_KEY = 'ig_service_posts_list_columns_v3'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
 interface PostWithInsights extends IgMedia {
   insights: Record<string, number | null>
   manual_views_from_home?: number | null
+  manual_views_follower_pct?: number | null
+  manual_views_non_follower_pct?: number | null
+  views_follower_count?: number | null
+  views_non_follower_count?: number | null
 }
 
 const MEDIA_TYPE_LABELS: Record<string, string> = {
@@ -222,6 +226,38 @@ export default function ServicePostsPage({
                   <th className={thStickyPost} scope="col">投稿</th>
                   {isOn('type') && <th className={`${thMetrics} text-left min-w-[5.5rem]`}>種別</th>}
                   {isOn('views') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>表示</th>}
+                  {isOn('viewsFollowerPct') && (
+                    <th
+                      className={`${thMetrics} text-right tabular-nums min-w-[5.5rem]`}
+                      title="手入力インサイトの「ビュー · フォロワー %」（投稿詳細で登録）"
+                    >
+                      ビュー·フォロワー率
+                    </th>
+                  )}
+                  {isOn('viewsNonFollowerPct') && (
+                    <th
+                      className={`${thMetrics} text-right tabular-nums min-w-[5.5rem]`}
+                      title="手入力インサイトの「ビュー · フォロワー以外 %」"
+                    >
+                      ビュー·フォロワー外率
+                    </th>
+                  )}
+                  {isOn('viewsFollowerCount') && (
+                    <th
+                      className={`${thMetrics} text-right tabular-nums min-w-[5.5rem]`}
+                      title="表示回数 × フォロワー率（手入力%がある場合）"
+                    >
+                      フォロワービュー
+                    </th>
+                  )}
+                  {isOn('viewsNonFollowerCount') && (
+                    <th
+                      className={`${thMetrics} text-right tabular-nums min-w-[5.5rem]`}
+                      title="表示回数 × フォロワー外率、または表示 − フォロワービュー"
+                    >
+                      フォロワー外ビュー
+                    </th>
+                  )}
                   {isOn('homeRate') && (
                     <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`} title="手入力のホーム件数 ÷ アカウントのフォロワー数">
                       ホーム率
@@ -245,6 +281,10 @@ export default function ServicePostsPage({
                 {posts.map(post => {
                   const reach = post.insights?.reach
                   const views = post.insights?.views
+                  const vfPct = post.manual_views_follower_pct
+                  const vnfPct = post.manual_views_non_follower_pct
+                  const vfCount = post.views_follower_count
+                  const vnfCount = post.views_non_follower_count
                   const likes = post.insights?.likes
                   const saved = post.insights?.saved
                   const shares = post.insights?.shares
@@ -304,6 +344,26 @@ export default function ServicePostsPage({
                       )}
                       {isOn('views') && (
                         <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium tabular-nums align-top">{views?.toLocaleString() ?? '—'}</td>
+                      )}
+                      {isOn('viewsFollowerPct') && (
+                        <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium tabular-nums align-top">
+                          {vfPct != null && Number.isFinite(Number(vfPct)) ? `${Number(vfPct).toFixed(1)}%` : '—'}
+                        </td>
+                      )}
+                      {isOn('viewsNonFollowerPct') && (
+                        <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium tabular-nums align-top">
+                          {vnfPct != null && Number.isFinite(Number(vnfPct)) ? `${Number(vnfPct).toFixed(1)}%` : '—'}
+                        </td>
+                      )}
+                      {isOn('viewsFollowerCount') && (
+                        <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium tabular-nums align-top">
+                          {vfCount != null ? vfCount.toLocaleString() : '—'}
+                        </td>
+                      )}
+                      {isOn('viewsNonFollowerCount') && (
+                        <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium tabular-nums align-top">
+                          {vnfCount != null ? vnfCount.toLocaleString() : '—'}
+                        </td>
                       )}
                       {isOn('homeRate') && (
                         <td className="px-4 py-4 text-right align-top">
