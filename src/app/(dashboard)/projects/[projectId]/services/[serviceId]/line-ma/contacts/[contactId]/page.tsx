@@ -50,6 +50,47 @@ interface AttrVal {
   definition: AttrDef | null
 }
 
+interface MessagingEventRow {
+  id: string
+  trigger_type: string
+  payload: Record<string, unknown> | null
+  occurred_at: string
+  contact_id: string | null
+  line_user_id: string | null
+}
+
+const TRIGGER_LABELS: Record<string, string> = {
+  'webhook.follow': 'フォロー',
+  'webhook.unfollow': 'アンフォロー',
+  'webhook.message': 'テキストメッセージ',
+  'webhook.postback': 'Postback',
+  'ma.action_error': 'MA アクション失敗',
+  'ma.reply_error': '返信送信失敗',
+  'ma.postback_action_skipped': 'Postback（アクション未実行）',
+  'rich_menu.link_error': 'リッチメニュー紐付け失敗',
+  'rich_menu.linked': 'リッチメニュー紐付け',
+}
+
+function eventSummaryLabel(triggerType: string): string {
+  return TRIGGER_LABELS[triggerType] ?? triggerType
+}
+
+function payloadPreview(payload: Record<string, unknown> | null): string | null {
+  if (!payload || typeof payload !== 'object') return null
+  if (typeof payload.text === 'string' && payload.text.trim()) {
+    const t = payload.text.trim()
+    return t.length > 120 ? `${t.slice(0, 120)}…` : t
+  }
+  if (typeof payload.data === 'string' && payload.data.trim()) {
+    const d = payload.data.trim()
+    return d.length > 100 ? `${d.slice(0, 100)}…` : d
+  }
+  if (typeof payload.error === 'string' && payload.error.trim()) return payload.error.trim()
+  if (typeof payload.message === 'string' && payload.message.trim()) return payload.message.trim()
+  if (typeof payload.reason === 'string' && payload.reason.trim()) return payload.reason.trim()
+  return null
+}
+
 export default function LineMaContactDetailPage({
   params,
 }: {
@@ -64,10 +105,16 @@ export default function LineMaContactDetailPage({
   const service = svcData?.data
 
   const detailUrl = `/api/services/${serviceId}/line-messaging/contacts/${contactId}`
+  const eventsUrl = `${detailUrl}/events?limit=50`
   const { data: detailResp, mutate, isLoading: detailLoading } = useSWR(
     service?.service_type === 'line' ? detailUrl : null,
     fetcher,
   )
+  const { data: eventsResp, mutate: mutateEvents, isLoading: eventsLoading } = useSWR<{
+    success?: boolean
+    data?: MessagingEventRow[]
+    error?: string
+  }>(service?.service_type === 'line' ? eventsUrl : null, fetcher)
 
   const contact: Contact | undefined = detailResp?.data?.contact
   const initialTags: Tag[] = detailResp?.data?.tags ?? []
@@ -346,6 +393,55 @@ export default function LineMaContactDetailPage({
                 </div>
               </dl>
             </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-200 p-6">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <h2 className="font-bold text-gray-900">行動履歴（MA イベント）</h2>
+              <button
+                type="button"
+                onClick={() => void mutateEvents()}
+                className="text-xs text-green-700 border border-green-200 rounded-lg px-2 py-1 hover:bg-green-50"
+              >
+                再読み込み
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">
+              Webhook・MA・リッチメニュー連携などで記録されたイベントです。古いデータは contact_id が無い場合も line_user_id で表示します。
+            </p>
+            {eventsLoading ? (
+              <p className="text-sm text-gray-500">読み込み中...</p>
+            ) : eventsResp?.error ? (
+              <p className="text-sm text-red-600">{eventsResp.error}</p>
+            ) : !(eventsResp?.data?.length) ? (
+              <p className="text-sm text-gray-500">まだイベントがありません。</p>
+            ) : (
+              <ul className="divide-y divide-gray-100 border border-gray-100 rounded-lg overflow-hidden">
+                {eventsResp.data.map((ev) => {
+                  const preview = payloadPreview(ev.payload)
+                  const linked = ev.contact_id ? 'contact' : 'user_id'
+                  return (
+                    <li key={ev.id} className="px-3 py-2.5 text-sm bg-white hover:bg-gray-50/80">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <span className="font-medium text-gray-900">{eventSummaryLabel(ev.trigger_type)}</span>
+                        <time className="text-xs text-gray-400 tabular-nums shrink-0">
+                          {new Date(ev.occurred_at).toLocaleString('ja-JP')}
+                        </time>
+                      </div>
+                      {preview && (
+                        <p className="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words font-mono">
+                          {preview}
+                        </p>
+                      )}
+                      <p className="text-[10px] text-gray-400 mt-1">
+                        <span className="font-mono">{ev.trigger_type}</span>
+                        {linked === 'user_id' ? ' · contact_id なし（ユーザーID照合）' : ''}
+                      </p>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
           </div>
 
           <form onSubmit={saveProfile} className="bg-white rounded-2xl border border-gray-200 p-6 space-y-4">
