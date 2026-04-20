@@ -1015,5 +1015,132 @@ export async function fetchMetricsByRefs(
     }
   }
 
+  await applyIgAccountFormulaKpis(supabase, serviceId, fieldRefs, periods, merged)
+
   return merged
+}
+
+const IG_FORMULA_KPI_PREFIX = 'ig_account_insight_fact@formula:'
+
+/** KPI設定用: アカウント日次から算出する派生指標（カタログの仮想 id と対応） */
+async function applyIgAccountFormulaKpis(
+  supabase: SupabaseServerClient,
+  serviceId: string,
+  fieldRefs: string[],
+  periods: Period[],
+  merged: Record<string, Record<string, number | null>>,
+) {
+  const wanted = fieldRefs.filter((r) => r.startsWith(IG_FORMULA_KPI_PREFIX))
+  if (wanted.length === 0) return
+
+  const g = (suffix: string): Record<string, number | null> =>
+    merged[`ig_account_insight_fact.${suffix}`] ??
+    Object.fromEntries(periods.map((p) => [p.label, null]))
+
+  const divPct = (num: number | null, den: number | null): number | null => {
+    if (num == null || den == null || den === 0) return null
+    return Math.round((num / den) * 10_000) / 100
+  }
+
+  const rangeStart =
+    periods.length === 1 && periods[0].rangeStart
+      ? periods[0].rangeStart
+      : periods[0].start.toISOString().slice(0, 10)
+  const rangeEnd =
+    periods.length === 1 && periods[0].rangeEnd
+      ? periods[0].rangeEnd
+      : periods[periods.length - 1].end.toISOString().slice(0, 10)
+
+  let followerDelta: number | null = null
+  if (
+    wanted.some(
+      (w) =>
+        w === `${IG_FORMULA_KPI_PREFIX}kpi_follow_rate_30d` ||
+        w === `${IG_FORMULA_KPI_PREFIX}kpi_link_click_rate_30d`,
+    )
+  ) {
+    followerDelta = await fetchFollowerCountDeltaInRange(supabase, serviceId, rangeStart, rangeEnd)
+  }
+
+  const savesByLabel = g('saves')
+  const reachByLabel = g('reach')
+  const profileViewsByLabel = g('profile_views')
+  const linkTapsByLabel = g('profile_links_taps')
+  const followerViewsByLabel = g('views@@follower_type=FOLLOWER')
+
+  const singleBucket = periods.length === 1
+
+  for (const ref of wanted) {
+    const id = ref.slice(IG_FORMULA_KPI_PREFIX.length)
+    const out: Record<string, number | null> = Object.fromEntries(periods.map((p) => [p.label, null]))
+
+    for (const p of periods) {
+      const lab = p.label
+      if (id === 'kpi_home_rate_proxy') {
+        // 投稿別ホーム÷フォロワービューは DB に無いため、日次の「プロフィール閲覧 ÷ 閲覧（フォロワー内訳）」を目安%として返す
+        out[lab] = divPct(profileViewsByLabel[lab] ?? null, followerViewsByLabel[lab] ?? null)
+      } else if (id === 'kpi_save_rate') {
+        out[lab] = divPct(savesByLabel[lab] ?? null, reachByLabel[lab] ?? null)
+      } else if (id === 'kpi_profile_access_rate') {
+        out[lab] = divPct(profileViewsByLabel[lab] ?? null, reachByLabel[lab] ?? null)
+      } else if (id === 'kpi_follow_rate_30d') {
+        if (singleBucket) {
+          const pv = profileViewsByLabel[lab] ?? null
+          out[lab] = divPct(followerDelta, pv)
+        }
+      } else if (id === 'kpi_link_click_rate_30d') {
+        if (singleBucket) {
+          const taps = linkTapsByLabel[lab] ?? null
+          const pv = profileViewsByLabel[lab] ?? null
+          out[lab] = divPct(taps, pv)
+        }
+      }
+    }
+    merged[ref] = out
+  }
+}
+
+/** 期間内のフォロワー数（日次スナップ）の増減: 期末近傍 − 期首 */
+async function fetchFollowerCountDeltaInRange(
+  supabase: SupabaseServerClient,
+  serviceId: string,
+  rangeStart: string,
+  rangeEnd: string,
+): Promise<number | null> {
+  const { data: igRow } = await supabase.from('ig_accounts').select('id').eq('service_id', serviceId).maybeSingle()
+  if (!igRow) return null
+
+  const { data: minRow } = await supabase
+    .from('ig_account_insight_fact')
+    .select('value')
+    .eq('account_id', igRow.id)
+    .eq('metric_code', 'follower_count')
+    .eq('period_code', 'day')
+    .eq('dimension_code', '')
+    .eq('dimension_value', '')
+    .gte('value_date', rangeStart)
+    .lte('value_date', rangeEnd)
+    .order('value_date', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  const { data: maxRow } = await supabase
+    .from('ig_account_insight_fact')
+    .select('value')
+    .eq('account_id', igRow.id)
+    .eq('metric_code', 'follower_count')
+    .eq('period_code', 'day')
+    .eq('dimension_code', '')
+    .eq('dimension_value', '')
+    .gte('value_date', rangeStart)
+    .lte('value_date', rangeEnd)
+    .order('value_date', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const a = typeof minRow?.value === 'number' ? minRow.value : null
+  const b = typeof maxRow?.value === 'number' ? maxRow.value : null
+  if (a == null || b == null) return null
+  const d = b - a
+  return d > 0 ? d : 0
 }

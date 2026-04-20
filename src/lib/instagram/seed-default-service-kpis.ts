@@ -4,7 +4,7 @@ import { getMetricCatalog } from '@/app/(dashboard)/projects/[projectId]/service
 const IG = 'ig_account_insight_fact'
 
 /**
- * サイドバー「設定」の KPI 目標値（簡易）6項目に相当する、サービス詳細 KPI の初期行。
+ * サービス詳細 KPI の初期行（従来6件 + 算出KPI5件）。
  * 指標カードはアカウント日次インサイト（サマリーと同一カタログ）に紐づける。
  */
 const DEFAULT_ROWS: Array<{
@@ -62,6 +62,44 @@ const DEFAULT_ROWS: Array<{
     kpi_description:
       '月初〜月末のフォロワー純増の目標（人）。カード値はスナップショットのため、期間比較で評価してください。',
   },
+  {
+    phase: 1,
+    kpi_name: 'ホーム率（目安）',
+    target_value: 50,
+    card_ref: `${IG}@formula:kpi_home_rate_proxy`,
+    kpi_description:
+      'プロフィール閲覧 ÷ 閲覧（フォロワー内訳）の日次%（投稿別ホーム÷フォロワービューに近い目安）。月平均 50% 以上を目安にする場合は目標 50。',
+  },
+  {
+    phase: 1,
+    kpi_name: '保存率',
+    target_value: 2,
+    card_ref: `${IG}@formula:kpi_save_rate`,
+    kpi_description: '保存数 ÷ リーチ（日次%）。各投稿の保存率の月平均 2% 以上を目安にする場合は目標 2。',
+  },
+  {
+    phase: 1,
+    kpi_name: 'プロフィールアクセス率',
+    target_value: 2,
+    card_ref: `${IG}@formula:kpi_profile_access_rate`,
+    kpi_description: 'プロフィール閲覧 ÷ リーチ（日次%）。月平均 2% 以上を目安にする場合は目標 2。',
+  },
+  {
+    phase: 1,
+    kpi_name: 'フォロー率（期間合算）',
+    target_value: 5,
+    card_ref: `${IG}@formula:kpi_follow_rate_30d`,
+    kpi_description:
+      '期間内フォロワー純増 ÷ 期間内プロフィール閲覧合計（%）。サマリーで単一期間（例: 直近30日）を選ぶと値が入ります。月平均 5% 以上を目安にする場合は目標 5。',
+  },
+  {
+    phase: 1,
+    kpi_name: 'リンククリック率（期間合算）',
+    target_value: 5,
+    card_ref: `${IG}@formula:kpi_link_click_rate_30d`,
+    kpi_description:
+      '期間内プロフィールリンクタップ合計 ÷ プロフィール閲覧合計（%）。単一期間のときのみ値が入ります。月平均 5% 以上を目安にする場合は目標 5。',
+  },
 ]
 
 function assertCatalogRefs() {
@@ -74,7 +112,7 @@ function assertCatalogRefs() {
 }
 
 /**
- * 当該サービスに KPI 行が1件もなければ、基本6項目を挿入する。
+ * 当該サービスに KPI 行が1件もなければ、基本項目を挿入する。
  * @returns 挿入した件数（0＝既に行があった／スキップ）
  */
 export async function seedDefaultInstagramServiceKpisIfEmpty(
