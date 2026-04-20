@@ -12,7 +12,7 @@ export default function LineServiceManual() {
           head={['タブ', 'パス', '機能']}
           rows={[
             ['設定（統合）', '/line', 'Messaging API 認証・Webhook、Bot ID、リワードカード等。'],
-            ['ダッシュボード', '/line-ma/dashboard', 'OAM 分析と MA 指標を 1 画面に統合（旧 /line/dashboard はここへリダイレクト）。'],
+            ['ダッシュボード', '/line/dashboard', 'OAM 分析と MA 指標を 1 画面に統合。'],
           ]}
         />
       </Section>

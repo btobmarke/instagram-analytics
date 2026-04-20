@@ -1,11 +1,9 @@
-import { redirect } from 'next/navigation'
+import { LineUnifiedDashboard } from '../_components/line-unified-dashboard'
 
-/** 旧 OAM 専用ダッシュボード → 統合ダッシュボードへ */
-export default async function LineOamDashboardRedirect({
+export default function LineMaDashboardPage({
   params,
 }: {
   params: Promise<{ projectId: string; serviceId: string }>
 }) {
-  const { projectId, serviceId } = await params
-  redirect(`/projects/${projectId}/services/${serviceId}/line-ma/dashboard`)
+  return <LineUnifiedDashboard params={params} />
 }

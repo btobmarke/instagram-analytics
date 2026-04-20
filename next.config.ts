@@ -1,6 +1,20 @@
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
+  async redirects() {
+    return [
+      {
+        source: '/projects/:projectId/services/:serviceId/line-ma',
+        destination: '/projects/:projectId/services/:serviceId/line/dashboard',
+        permanent: false,
+      },
+      {
+        source: '/projects/:projectId/services/:serviceId/line-ma/:path*',
+        destination: '/projects/:projectId/services/:serviceId/line/:path*',
+        permanent: false,
+      },
+    ]
+  },
   eslint: {
     // ESLintはVercelのCI環境ではビルド時にスキップ（別途lintコマンドで実行）
     ignoreDuringBuilds: true,

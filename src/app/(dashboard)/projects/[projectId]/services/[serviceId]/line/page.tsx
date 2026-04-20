@@ -4,7 +4,7 @@ import { useState, use } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 
-import { MessagingApiSetup } from '../line-ma/_components/messaging-api-setup'
+import { MessagingApiSetup } from './_components/messaging-api-setup'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -49,56 +49,13 @@ export default function LineServicePage({
   const service = svcData?.data
 
   return (
-    <div className="p-6 w-full max-w-none">
-      {/* Breadcrumb */}
-      <nav className="flex items-center gap-2 text-sm text-gray-400 mb-4 flex-wrap">
-        <Link href="/projects" className="hover:text-purple-600">プロジェクト</Link>
-        <span>›</span>
-        <Link href={`/projects/${projectId}`} className="hover:text-purple-600">
-          {service?.project.project_name ?? '...'}
-        </Link>
-        <span>›</span>
-        <Link href={`/projects/${projectId}/services/${serviceId}/integrations`} className="hover:text-purple-600">
-          {service?.service_name ?? '...'}
-        </Link>
-        <span>›</span>
-        <span className="text-gray-700 font-medium">LINE 設定</span>
-      </nav>
-
-      <div className="flex items-center gap-3 mb-4">
+    <div className="w-full max-w-none min-w-0 space-y-6">
+      <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-100 to-emerald-100 flex items-center justify-center text-xl">💬</div>
         <div>
           <h1 className="text-2xl font-bold text-gray-900">LINE 設定（統合）</h1>
           <p className="text-sm text-gray-400">{service?.service_name ?? ''}</p>
         </div>
-      </div>
-
-      {/* タブナビ */}
-      <div className="flex items-center gap-1 mb-6 border-b border-gray-200 flex-wrap">
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/line-ma/dashboard`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px"
-        >
-          ダッシュボード
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/line-ma/contacts`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px"
-        >
-          機能（MA）
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/line`}
-          className="px-4 py-2.5 text-sm font-medium text-green-600 border-b-2 border-green-600 -mb-px"
-        >
-          設定
-        </Link>
-        <Link
-          href={`/projects/${projectId}/services/${serviceId}/summary`}
-          className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent -mb-px"
-        >
-          サマリー
-        </Link>
       </div>
 
       <MessagingApiSetup serviceId={serviceId} />
@@ -110,7 +67,7 @@ export default function LineServicePage({
       <RewardcardSection serviceId={serviceId} />
 
       <Link
-        href={`/projects/${projectId}/services/${serviceId}/line-ma/integrations`}
+        href={`/projects/${projectId}/services/${serviceId}/line/integrations`}
         className="flex items-center justify-between bg-white rounded-2xl border border-gray-200 p-5 mt-6 hover:border-green-200 transition group"
       >
         <div className="flex items-center gap-3">
