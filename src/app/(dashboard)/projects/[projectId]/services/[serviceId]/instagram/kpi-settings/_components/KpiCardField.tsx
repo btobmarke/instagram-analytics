@@ -10,19 +10,26 @@ function MetricTooltip({ description, isCustom }: { description?: string; isCust
   if (!description) return null
   return (
     <div className="relative flex-shrink-0" style={{ zIndex: open ? 50 : 'auto' }}>
-      <button
-        type="button"
+      {/* SelectableCard が <button> のため、内側は <button> にできない（hydration エラー回避） */}
+      <span
+        tabIndex={0}
+        aria-label="指標の説明（ホバーで表示）"
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
         onClick={(e) => {
           e.stopPropagation()
           e.preventDefault()
         }}
-        className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[8px] font-bold leading-none transition
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') (e.target as HTMLElement).blur()
+        }}
+        className={`inline-flex w-3.5 h-3.5 rounded-full items-center justify-center text-[8px] font-bold leading-none transition cursor-default outline-none focus-visible:ring-2 focus-visible:ring-purple-400
           ${isCustom ? 'bg-amber-200 text-amber-600 hover:bg-amber-300' : 'bg-gray-200 text-gray-500 hover:bg-gray-300'}`}
       >
         ?
-      </button>
+      </span>
       {open && (
         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-52 pointer-events-none">
           <div className="bg-gray-900 text-white text-[10px] leading-relaxed rounded-lg px-2.5 py-2 shadow-xl">
