@@ -69,6 +69,8 @@ const TRIGGER_LABELS: Record<string, string> = {
   'ma.postback_action_skipped': 'Postback（アクション未実行）',
   'rich_menu.link_error': 'リッチメニュー紐付け失敗',
   'rich_menu.linked': 'リッチメニュー紐付け',
+  'dashboard.contact_push': 'ダッシュボードから個人送信',
+  'dashboard.contact_push_error': '個人送信失敗',
 }
 
 function eventSummaryLabel(triggerType: string): string {
@@ -77,6 +79,9 @@ function eventSummaryLabel(triggerType: string): string {
 
 function payloadPreview(payload: Record<string, unknown> | null): string | null {
   if (!payload || typeof payload !== 'object') return null
+  if (typeof payload.text_length === 'number' && payload.text_length > 0) {
+    return `${payload.text_length} 文字で送信（本文はログに保存していません）`
+  }
   if (typeof payload.text === 'string' && payload.text.trim()) {
     const t = payload.text.trim()
     return t.length > 120 ? `${t.slice(0, 120)}…` : t
@@ -161,6 +166,8 @@ export default function LineMaContactDetailPage({
   const [savingTags, setSavingTags] = useState(false)
   const [savingAttr, setSavingAttr] = useState(false)
   const [syncProfileBusy, setSyncProfileBusy] = useState(false)
+  const [pushText, setPushText] = useState('')
+  const [pushBusy, setPushBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
 
   const toggleTag = (id: string) => {
@@ -253,6 +260,33 @@ export default function LineMaContactDetailPage({
     }
     setMsg('LINE プロフィールを反映しました')
     mutate()
+  }
+
+  const sendPushToContact = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const text = pushText.trim()
+    if (!text) {
+      setMsg('送信する本文を入力してください')
+      return
+    }
+    if (!window.confirm('このコンタクト宛に Push 送信します。よろしいですか？')) return
+    setPushBusy(true)
+    setMsg(null)
+    const res = await fetch(`${detailUrl}/push`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    })
+    const json = await res.json()
+    setPushBusy(false)
+    if (!res.ok) {
+      setMsg(json.message ?? json.error ?? '送信に失敗しました')
+      return
+    }
+    setPushText('')
+    setMsg('メッセージを送信しました')
+    void mutate()
+    void mutateEvents()
   }
 
   if (service && service.service_type !== 'line') {
@@ -394,6 +428,31 @@ export default function LineMaContactDetailPage({
               </dl>
             </div>
           </div>
+
+          <form onSubmit={sendPushToContact} className="bg-white rounded-2xl border border-gray-200 p-6 space-y-3">
+            <h2 className="font-bold text-gray-900">個人宛に送信（Push）</h2>
+            <p className="text-xs text-gray-500">
+              LINE Messaging API の Push でテキストを 1 通送ります（最大 5000 文字）。ブロック中のユーザーには届きません。
+            </p>
+            <textarea
+              value={pushText}
+              onChange={(e) => setPushText(e.target.value)}
+              rows={5}
+              maxLength={5000}
+              placeholder="送信する本文"
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg"
+            />
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-gray-400">{pushText.length} / 5000</span>
+              <button
+                type="submit"
+                disabled={pushBusy || !pushText.trim()}
+                className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50"
+              >
+                {pushBusy ? '送信中...' : '送信する'}
+              </button>
+            </div>
+          </form>
 
           <div className="bg-white rounded-2xl border border-gray-200 p-6">
             <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
