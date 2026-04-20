@@ -4,7 +4,7 @@ import { use, useState } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 
-import { LineMaBreadcrumb, LineMaNav } from '../line-ma-nav'
+import { LineMaBreadcrumb } from '../line-ma-nav'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -106,8 +106,6 @@ export default function LineMaFlexListPage({
           <p className="text-sm text-gray-400">{service?.service_name ?? ''}</p>
         </div>
       </div>
-
-      <LineMaNav projectId={projectId} serviceId={serviceId} />
 
       <p className="text-xs text-gray-600 bg-gray-50 border rounded-lg px-3 py-2 mb-6">
         carousel の場合は、バブル配列、または <code className="font-mono">{'{'} "contents": [...] {'}'}</code>{' '}

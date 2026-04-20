@@ -3,7 +3,7 @@
 import { use, useMemo, useState } from 'react'
 import useSWR from 'swr'
 
-import { LineMaBreadcrumb, LineMaNav } from '../line-ma-nav'
+import { LineMaBreadcrumb } from '../line-ma-nav'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -258,8 +258,6 @@ export default function LineMaAnalyticsPage({
           <p className="text-sm text-gray-400">{service?.service_name ?? ''}</p>
         </div>
       </div>
-
-      <LineMaNav projectId={projectId} serviceId={serviceId} />
 
       <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6 flex flex-wrap gap-3 items-end">
         <label className="text-xs text-gray-500">

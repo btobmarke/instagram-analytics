@@ -4,7 +4,7 @@ import { use, useState } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 
-import { LineMaBreadcrumb, LineMaNav } from '../line-ma-nav'
+import { LineMaBreadcrumb } from '../line-ma-nav'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -175,8 +175,6 @@ export default function LineMaBroadcastPage({
           <p className="text-sm text-gray-400">{service?.service_name ?? ''}</p>
         </div>
       </div>
-
-      <LineMaNav projectId={projectId} serviceId={serviceId} />
 
       <section className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
         <h2 className="font-bold text-gray-900 mb-4">メッセージテンプレート</h2>

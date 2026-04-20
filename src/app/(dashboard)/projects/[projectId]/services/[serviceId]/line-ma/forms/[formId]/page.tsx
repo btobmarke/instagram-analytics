@@ -4,7 +4,7 @@ import { use, useEffect, useState } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 
-import { LineMaBreadcrumb, LineMaNav } from '../../line-ma-nav'
+import { LineMaBreadcrumb } from '../../line-ma-nav'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -233,8 +233,6 @@ export default function LineMaFormDetailPage({
           <p className="text-sm text-gray-400 font-mono">{formId}</p>
         </div>
       </div>
-
-      <LineMaNav projectId={projectId} serviceId={serviceId} />
 
       {isLoading ? (
         <div className="flex justify-center py-16">

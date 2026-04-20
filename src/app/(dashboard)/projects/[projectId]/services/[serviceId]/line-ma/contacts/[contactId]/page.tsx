@@ -4,7 +4,7 @@ import { use, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 
-import { LineMaBreadcrumb, LineMaNav } from '../../line-ma-nav'
+import { LineMaBreadcrumb } from '../../line-ma-nav'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -237,8 +237,6 @@ export default function LineMaContactDetailPage({
           <p className="text-sm text-gray-400 font-mono">{contact?.line_user_id}</p>
         </div>
       </div>
-
-      <LineMaNav projectId={projectId} serviceId={serviceId} />
 
       {msg && <p className="text-sm text-gray-700 mb-4 bg-green-50 border border-green-100 rounded-lg px-3 py-2">{msg}</p>}
 

@@ -4,7 +4,7 @@ import { use, useEffect, useState } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 
-import { LineMaBreadcrumb, LineMaNav } from './line-ma-nav'
+import { LineMaBreadcrumb } from './line-ma-nav'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -157,8 +157,6 @@ export default function LineMaConnectionPage({
           LINE OAM ダッシュボード
         </Link>
       </p>
-
-      <LineMaNav projectId={projectId} serviceId={serviceId} />
 
       {/* 接続状態 */}
       <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">

@@ -3,19 +3,63 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
-const NAV = [
-  { href: '', label: '接続' },
-  { href: '/contacts', label: 'コンタクト' },
-  { href: '/crm', label: 'タグ・属性・セグメント' },
-  { href: '/broadcast', label: 'テンプレ・配信' },
-  { href: '/ma', label: 'MA' },
-  { href: '/forms', label: 'フォーム' },
-  { href: '/rich-menu', label: 'リッチ・postback' },
-  { href: '/flex', label: 'Flex' },
-  { href: '/analytics', label: '分析' },
-  { href: '/booking', label: '予約' },
-  { href: '/integrations', label: '外部連携' },
-] as const
+export type LineMaCategoryId = 'connect' | 'audience' | 'delivery' | 'experience' | 'booking'
+
+const CATEGORIES: { id: LineMaCategoryId; label: string; description?: string }[] = [
+  { id: 'connect', label: '接続・連携' },
+  { id: 'audience', label: 'オーディエンス' },
+  { id: 'delivery', label: '配信・MA' },
+  { id: 'experience', label: '体験・計測' },
+  { id: 'booking', label: '予約' },
+]
+
+/** カテゴリ内の第2階層リンク（href は line-ma からの相対パス） */
+const SUB_NAV: Record<
+  LineMaCategoryId,
+  { href: string; label: string }[]
+> = {
+  connect: [
+    { href: '', label: '接続' },
+    { href: '/integrations', label: '外部連携' },
+  ],
+  audience: [
+    { href: '/contacts', label: 'コンタクト' },
+    { href: '/crm', label: 'タグ・属性・セグメント' },
+  ],
+  delivery: [
+    { href: '/broadcast', label: 'テンプレ・配信' },
+    { href: '/ma', label: 'MA' },
+    { href: '/forms', label: 'フォーム' },
+  ],
+  experience: [
+    { href: '/rich-menu', label: 'リッチ・postback' },
+    { href: '/flex', label: 'Flex' },
+    { href: '/analytics', label: '分析' },
+  ],
+  booking: [{ href: '/booking', label: '予約' }],
+}
+
+const CATEGORY_DEFAULT_HREF: Record<LineMaCategoryId, string> = {
+  connect: '',
+  audience: '/contacts',
+  delivery: '/broadcast',
+  experience: '/rich-menu',
+  booking: '/booking',
+}
+
+export function getCategoryFromLineMaPath(subPath: string): LineMaCategoryId {
+  const p = subPath === '' ? '/' : subPath.startsWith('/') ? subPath : `/${subPath}`
+  if (p === '/' || p === '') return 'connect'
+  if (p.startsWith('/integrations')) return 'connect'
+  if (p.startsWith('/contacts')) return 'audience'
+  if (p.startsWith('/crm')) return 'audience'
+  if (p.startsWith('/broadcast') || p.startsWith('/ma') || p.startsWith('/forms')) return 'delivery'
+  if (p.startsWith('/rich-menu') || p.startsWith('/flex') || p.startsWith('/analytics')) {
+    return 'experience'
+  }
+  if (p.startsWith('/booking')) return 'booking'
+  return 'connect'
+}
 
 export function LineMaNav({
   projectId,
@@ -26,29 +70,64 @@ export function LineMaNav({
 }) {
   const pathname = usePathname()
   const base = `/projects/${projectId}/services/${serviceId}/line-ma`
+  const rest = pathname.startsWith(base) ? pathname.slice(base.length) || '/' : '/'
+  const subPath = rest === '' ? '/' : rest
+
+  const activeCategory = getCategoryFromLineMaPath(subPath === '/' ? '' : subPath)
+
+  const subItems = SUB_NAV[activeCategory]
 
   return (
-    <div className="flex flex-wrap items-center gap-1 mb-6 border-b border-gray-200">
-      {NAV.map((item) => {
-        const full = item.href === '' ? base : `${base}${item.href}`
-        const active =
-          item.href === ''
-            ? pathname === base || pathname === `${base}/`
-            : pathname.startsWith(`${base}${item.href}`)
-        return (
-          <Link
-            key={item.href || 'root'}
-            href={full}
-            className={`px-3 py-2.5 text-sm font-medium -mb-px border-b-2 transition ${
-              active
-                ? 'text-green-600 border-green-600'
-                : 'text-gray-500 hover:text-gray-700 border-transparent'
-            }`}
-          >
-            {item.label}
-          </Link>
-        )
-      })}
+    <div className="mb-6 space-y-3">
+      {/* 第1階層：カテゴリ */}
+      <div className="flex flex-wrap gap-1 border-b border-gray-200 pb-0.5">
+        {CATEGORIES.map((cat) => {
+          const defaultHref = CATEGORY_DEFAULT_HREF[cat.id]
+          const full =
+            defaultHref === '' ? base : `${base}${defaultHref}`
+          const isActive = activeCategory === cat.id
+          return (
+            <Link
+              key={cat.id}
+              href={full}
+              className={`px-3 py-2.5 text-sm font-semibold rounded-t-lg transition ${
+                isActive
+                  ? 'bg-green-50 text-green-800 border border-b-0 border-green-200 -mb-px'
+                  : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50 border border-transparent'
+              }`}
+            >
+              {cat.label}
+            </Link>
+          )
+        })}
+      </div>
+
+      {/* 第2階層：現在カテゴリ内の画面 */}
+      <nav
+        className="flex flex-wrap gap-1 pl-1 border-l-2 border-green-200"
+        aria-label={`${CATEGORIES.find((c) => c.id === activeCategory)?.label ?? ''}のサブメニュー`}
+      >
+        {subItems.map((item) => {
+          const full = item.href === '' ? base : `${base}${item.href}`
+          const active =
+            item.href === ''
+              ? subPath === '/' || subPath === ''
+              : subPath === item.href || subPath.startsWith(`${item.href}/`)
+          return (
+            <Link
+              key={item.href || 'root'}
+              href={full}
+              className={`px-3 py-2 text-sm font-medium rounded-md transition ${
+                active
+                  ? 'bg-green-600 text-white shadow-sm'
+                  : 'text-gray-600 hover:bg-green-50 hover:text-green-900'
+              }`}
+            >
+              {item.label}
+            </Link>
+          )
+        })}
+      </nav>
     </div>
   )
 }

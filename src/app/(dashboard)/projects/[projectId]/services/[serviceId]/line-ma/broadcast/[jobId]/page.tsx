@@ -4,7 +4,7 @@ import { use, useState } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 
-import { LineMaBreadcrumb, LineMaNav } from '../../line-ma-nav'
+import { LineMaBreadcrumb } from '../../line-ma-nav'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -112,8 +112,6 @@ export default function LineMaBroadcastJobPage({
           <p className="text-sm text-gray-400 font-mono">{jobId}</p>
         </div>
       </div>
-
-      <LineMaNav projectId={projectId} serviceId={serviceId} />
 
       {!job ? (
         <div className="flex justify-center py-16">

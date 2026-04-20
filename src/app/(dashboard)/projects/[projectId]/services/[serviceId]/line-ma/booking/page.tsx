@@ -3,7 +3,7 @@
 import { use, useState } from 'react'
 import useSWR from 'swr'
 
-import { LineMaBreadcrumb, LineMaNav } from '../line-ma-nav'
+import { LineMaBreadcrumb } from '../line-ma-nav'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -140,8 +140,6 @@ export default function LineMaBookingPage({
           <p className="text-sm text-gray-400">{service?.service_name ?? ''}</p>
         </div>
       </div>
-
-      <LineMaNav projectId={projectId} serviceId={serviceId} />
 
       <p className="text-xs text-gray-600 bg-gray-50 border rounded-lg px-3 py-2 mb-6">
         エンドユーザー向けの予約は公開 API（`/api/public/line-booking/...`）です。ここではサービス・スロット・予約一覧の管理のみ行います。

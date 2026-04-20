@@ -10,7 +10,7 @@ import {
 } from '../ma/ma-actions-editor'
 import type { ActionDraftRow } from '../ma/ma-actions-editor'
 
-import { LineMaBreadcrumb, LineMaNav } from '../line-ma-nav'
+import { LineMaBreadcrumb } from '../line-ma-nav'
 import { RichMenuAreaEditor } from './rich-menu-area-editor'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
@@ -331,8 +331,6 @@ export default function LineMaRichMenuPage({
           <p className="text-sm text-gray-400">{service?.service_name ?? ''}</p>
         </div>
       </div>
-
-      <LineMaNav projectId={projectId} serviceId={serviceId} />
 
       <p className="text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 mb-6">
         事前に「接続」で Channel access token を保存してください。下のキャンバスでエリアを配置するか、詳細設定の JSON を直接編集できます。仕様は{' '}

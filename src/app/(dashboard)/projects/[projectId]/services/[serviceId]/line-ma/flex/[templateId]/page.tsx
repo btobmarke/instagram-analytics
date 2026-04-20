@@ -4,7 +4,7 @@ import { use, useEffect, useState } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 
-import { LineMaBreadcrumb, LineMaNav } from '../../line-ma-nav'
+import { LineMaBreadcrumb } from '../../line-ma-nav'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -132,8 +132,6 @@ export default function LineMaFlexDetailPage({
           ← 一覧
         </Link>
       </div>
-
-      <LineMaNav projectId={projectId} serviceId={serviceId} />
 
       {isLoading || !tpl ? (
         <div className="flex justify-center py-16">

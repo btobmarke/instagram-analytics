@@ -6,7 +6,7 @@ import useSWR from 'swr'
 import { buildMaActionsFromDraft, MaActionsEditor, MaRuleActionsPanel } from './ma-actions-editor'
 import type { ActionDraftRow } from './ma-actions-editor'
 
-import { LineMaBreadcrumb, LineMaNav } from '../line-ma-nav'
+import { LineMaBreadcrumb } from '../line-ma-nav'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -334,8 +334,6 @@ export default function LineMaAutomationPage({
           <p className="text-sm text-gray-400">{service?.service_name ?? ''}</p>
         </div>
       </div>
-
-      <LineMaNav projectId={projectId} serviceId={serviceId} />
 
       <p className="text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 mb-6">
         ルールに「アクション」を追加できます（タグ付与・カスタム属性・シナリオ開始・一斉配信の予約）。一覧のルールから「アクション」で編集・保存してください。
