@@ -1,8 +1,9 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
+import { SummaryCardRegressionModal } from './SummaryCardRegressionModal'
 
 type TimeUnit = 'day' | 'week' | 'month'
 
@@ -51,9 +52,29 @@ type SessionRow = {
 type AnalysisResultRow = {
   id: string
   parent_node_id: string
+  model_name?: string | null
+  penalty_type?: string | null
+  elastic_alpha?: number | null
   metrics_json: { r2: number; mae: number; rmse: number; mape: number | null; n: number }
-  model_json: { interceptStd: number; coefficientsStd: Array<{ colKey: string; coef: number }>; ridgeLambda: number }
+  model_json: {
+    type?: string
+    interceptStd: number
+    coefficientsStd: Array<{ colKey: string; coef: number }>
+    ridgeLambda: number
+  }
   series_json: Array<{ period: string; actual: number | null; predicted: number | null; residual: number | null }>
+}
+
+type StandardizeRow = {
+  colKey: string
+  label: string
+  role: 'Y' | 'X'
+  values: Record<string, number | null>
+}
+
+type StandardizePayload = {
+  periods: string[]
+  rows: StandardizeRow[]
 }
 
 type CardRow =
@@ -64,6 +85,10 @@ type Card = {
   parentNodeId: string
   title: string
   rows: CardRow[]
+}
+
+function colKeyOf(serviceId: string, metricRef: string) {
+  return `${serviceId}::${metricRef}`
 }
 
 function isoDate(d: Date): string {
@@ -96,7 +121,6 @@ function flattenLeafRows(
     }]
   }
 
-  // folder
   const leafCount = (() => {
     let count = 0
     const stack = [...kids]
@@ -151,7 +175,6 @@ function buildCards(nodes: KpiNodeRow[]): Card[] {
     if (hasChildren) {
       const rows: CardRow[] = []
 
-      // Y行（親が metricRef を持つ場合のみ）
       if (n.metric_ref && n.service_id) {
         rows.push({
           kind: 'metric',
@@ -164,7 +187,6 @@ function buildCards(nodes: KpiNodeRow[]): Card[] {
         })
       }
 
-      // 直下の子（X行）
       for (const child of kids) {
         rows.push(...flattenLeafRows(child, childrenByParent, 0))
       }
@@ -182,7 +204,6 @@ function buildCards(nodes: KpiNodeRow[]): Card[] {
   const cards: Card[] = []
   for (const r of sortKids(roots)) visit(r, cards)
 
-  // 参照のみで未使用だが、将来の安全のため
   void byId
   return cards
 }
@@ -190,8 +211,7 @@ function buildCards(nodes: KpiNodeRow[]): Card[] {
 function formatValue(value: number | null | undefined): string {
   if (value == null) return '—'
   if (Number.isNaN(value)) return '—'
-  // ざっくり表示（必要なら metricRef ベースで %/秒/円などを出し分ける）
-  return Number.isFinite(value) ? value.toLocaleString('ja-JP') : String(value)
+  return Number.isFinite(value) ? value.toLocaleString('ja-JP', { maximumFractionDigits: 4 }) : String(value)
 }
 
 export function SummaryCardsAnalysisClient({ projectId }: { projectId: string }) {
@@ -229,7 +249,16 @@ export function SummaryCardsAnalysisClient({ projectId }: { projectId: string })
     fetcher,
   )
   const results = resultsResp?.success ? (resultsResp.data ?? []) : []
-  const resultByParent = useMemo(() => new Map(results.map(r => [r.parent_node_id, r])), [results])
+
+  const resultsByParent = useMemo(() => {
+    const m = new Map<string, AnalysisResultRow[]>()
+    for (const r of results) {
+      const list = m.get(r.parent_node_id) ?? []
+      list.push(r)
+      m.set(r.parent_node_id, list)
+    }
+    return m
+  }, [results])
 
   const unifiedUrl = useMemo(() => {
     const p = new URLSearchParams()
@@ -252,10 +281,29 @@ export function SummaryCardsAnalysisClient({ projectId }: { projectId: string })
 
   const cards = useMemo(() => buildCards(nodes), [nodes])
 
+  const [standardizedByParent, setStandardizedByParent] = useState<Record<string, StandardizePayload>>({})
+  const [viewModeByParent, setViewModeByParent] = useState<Record<string, 'raw' | 'std'>>({})
+  const [stdLoadingParent, setStdLoadingParent] = useState<string | null>(null)
+  const [regressionModal, setRegressionModal] = useState<{
+    parentNodeId: string
+    cardTitle: string
+  } | null>(null)
+
+  const stdRowMap = useCallback((parentId: string) => {
+    const pack = standardizedByParent[parentId]
+    if (!pack) return new Map<string, StandardizeRow>()
+    return new Map(pack.rows.map(r => [r.colKey, r]))
+  }, [standardizedByParent])
+
   const metricValue = (serviceId: string, metricRef: string, periodLabel: string): number | null | undefined => {
     const svc = services.find(s => s.id === serviceId)
     const m = svc?.metrics?.[metricRef]
     return m?.values?.[periodLabel]
+  }
+
+  const stdValue = (parentId: string, serviceId: string, metricRef: string, periodLabel: string) => {
+    const ck = colKeyOf(serviceId, metricRef)
+    return stdRowMap(parentId).get(ck)?.values[periodLabel]
   }
 
   return (
@@ -269,6 +317,24 @@ export function SummaryCardsAnalysisClient({ projectId }: { projectId: string })
           ← 横断サマリへ戻る
         </Link>
       </div>
+
+      {regressionModal && effectiveTreeId && (
+        <SummaryCardRegressionModal
+          open
+          cardTitle={regressionModal.cardTitle}
+          projectId={projectId}
+          treeId={effectiveTreeId}
+          parentNodeId={regressionModal.parentNodeId}
+          timeUnit={session?.time_unit ?? timeUnit}
+          rangeStart={session ? String(session.range_start).slice(0, 10) : rangeStart}
+          rangeEnd={session ? String(session.range_end).slice(0, 10) : rangeEnd}
+          onClose={() => setRegressionModal(null)}
+          onCommitted={async () => {
+            await mutateSession()
+            await mutateResults()
+          }}
+        />
+      )}
 
       <div className="rounded-xl border bg-white p-4 mb-4">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
@@ -355,32 +421,59 @@ export function SummaryCardsAnalysisClient({ projectId }: { projectId: string })
             <div className="w-7 h-7 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin" />
           </div>
         )}
-        {cards.map(card => (
-          <div key={card.parentNodeId} className="rounded-xl border bg-white">
-            <div className="flex items-center justify-between px-4 py-3 border-b">
-              <div className="font-medium">{card.title}</div>
-              {(() => {
-                const hasY = card.rows.some(r => r.kind === 'metric' && r.isY)
-                const already = resultByParent.get(card.parentNodeId)
-                return (
-                  <div className="flex items-center gap-2">
-                    {!hasY && (
-                      <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
-                        親指標（Y）が未設定です
-                      </span>
-                    )}
-                    <button
-                      className="text-sm px-3 py-1.5 rounded-md border bg-gray-50 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                      disabled={!hasY}
-                      onClick={async () => {
-                        if (!effectiveTreeId) return
-                        const tu = session?.time_unit ?? timeUnit
-                        const rs = session ? String(session.range_start).slice(0, 10) : rangeStart
-                        const re = session ? String(session.range_end).slice(0, 10) : rangeEnd
-                        const res = await fetch(`/api/projects/${projectId}/summary-cards/analysis/run`, {
-                          method: 'POST',
+        {cards.map(card => {
+          const hasY = card.rows.some(r => r.kind === 'metric' && r.isY)
+          const stdPack = standardizedByParent[card.parentNodeId]
+          const viewMode = viewModeByParent[card.parentNodeId] ?? 'raw'
+          const displayPeriods =
+            viewMode === 'std' && stdPack?.periods?.length
+              ? stdPack.periods
+              : periods
+          const modelResults = resultsByParent.get(card.parentNodeId) ?? []
+
+          return (
+            <div key={card.parentNodeId} className="rounded-xl border bg-white">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b">
+                <div className="font-medium">{card.title}</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {!hasY && (
+                    <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                      親指標（Y）が未設定です
+                    </span>
+                  )}
+                  {stdPack && (
+                    <div className="flex items-center gap-1 text-xs border rounded-md p-0.5 bg-gray-50">
+                      <button
+                        type="button"
+                        className={`px-2 py-1 rounded ${viewMode === 'raw' ? 'bg-white shadow-sm font-medium' : 'text-gray-500'}`}
+                        onClick={() => setViewModeByParent(m => ({ ...m, [card.parentNodeId]: 'raw' }))}
+                      >
+                        生データ
+                      </button>
+                      <button
+                        type="button"
+                        className={`px-2 py-1 rounded ${viewMode === 'std' ? 'bg-white shadow-sm font-medium' : 'text-gray-500'}`}
+                        onClick={() => setViewModeByParent(m => ({ ...m, [card.parentNodeId]: 'std' }))}
+                      >
+                        標準化
+                      </button>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="text-sm px-3 py-1.5 rounded-md border bg-gray-50 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={!hasY || !effectiveTreeId || stdLoadingParent === card.parentNodeId}
+                    onClick={async () => {
+                      if (!effectiveTreeId) return
+                      const tu = session?.time_unit ?? timeUnit
+                      const rs = session ? String(session.range_start).slice(0, 10) : rangeStart
+                      const re = session ? String(session.range_end).slice(0, 10) : rangeEnd
+                      setStdLoadingParent(card.parentNodeId)
+                      try {
+                        const res = await fetch(`/api/projects/${projectId}/summary-cards/analysis/standardize`, {
+                          method:  'POST',
                           headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
+                          body:    JSON.stringify({
                             treeId: effectiveTreeId,
                             parentNodeId: card.parentNodeId,
                             timeUnit: tu,
@@ -389,174 +482,196 @@ export function SummaryCardsAnalysisClient({ projectId }: { projectId: string })
                           }),
                         }).then(r => r.json())
                         if (!res.success) {
-                          alert(res.message ?? res.error ?? '分析に失敗しました')
-                          await mutateSession()
+                          alert(res.message ?? res.error ?? '標準化に失敗しました')
                           return
                         }
-                        await mutateSession()
-                        await mutateResults()
-                      }}
-                    >
-                      {already ? '再分析' : '分析'}
-                    </button>
-                  </div>
-                )
-              })()}
-            </div>
-            <div className="p-3 overflow-x-auto">
-              {periods.length === 0 ? (
-                <div className="text-sm text-gray-500 py-6 text-center">
-                  期間ヘッダーが生成できませんでした（データ取得中、または権限/設定を確認してください）。
+                        setStandardizedByParent(prev => ({
+                          ...prev,
+                          [card.parentNodeId]: res.data as StandardizePayload,
+                        }))
+                        setViewModeByParent(m => ({ ...m, [card.parentNodeId]: 'std' }))
+                      } finally {
+                        setStdLoadingParent(null)
+                      }
+                    }}
+                  >
+                    {stdPack ? '標準化の再計算' : '標準化'}
+                  </button>
+                  <button
+                    type="button"
+                    className="text-sm px-3 py-1.5 rounded-md border bg-purple-50 text-purple-800 hover:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={!hasY || !stdPack}
+                    onClick={() =>
+                      setRegressionModal({ parentNodeId: card.parentNodeId, cardTitle: card.title })
+                    }
+                  >
+                    分析
+                  </button>
                 </div>
-              ) : (
-              <table className="min-w-[820px] w-full text-xs border-collapse">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    {/* ロール列 */}
-                    <th className="sticky left-0 z-20 bg-gray-50 px-2 py-2.5 text-center text-gray-400 font-medium w-8 border-r border-gray-100">
-                      役
-                    </th>
-                    {/* 指標名列 */}
-                    <th className="sticky left-8 z-20 bg-gray-50 px-4 py-2.5 text-left text-xs font-bold text-gray-600 min-w-[220px] border-r border-gray-200">
-                      指標
-                    </th>
-                    {/* 期間列 */}
-                    {periods.map((p, i) => (
-                      <th
-                        key={p}
-                        className={`px-3 py-2.5 text-center text-[11px] font-medium min-w-[72px] whitespace-nowrap
-                          ${i === periods.length - 1 ? 'text-gray-900 bg-blue-50 font-semibold' : 'text-gray-500'}`}
-                      >
-                        {p}
+              </div>
+              <div className="p-3 overflow-x-auto">
+                {displayPeriods.length === 0 ? (
+                  <div className="text-sm text-gray-500 py-6 text-center">
+                    期間ヘッダーが生成できませんでした（データ取得中、または権限/設定を確認してください）。
+                  </div>
+                ) : (
+                <table className="min-w-[820px] w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <th className="sticky left-0 z-20 bg-gray-50 px-2 py-2.5 text-center text-gray-400 font-medium w-8 border-r border-gray-100">
+                        役
                       </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {card.rows.slice(0, 50).map((row) => {
-                    if (row.kind === 'group') {
+                      <th className="sticky left-8 z-20 bg-gray-50 px-4 py-2.5 text-left text-xs font-bold text-gray-600 min-w-[220px] border-r border-gray-200">
+                        指標
+                      </th>
+                      {displayPeriods.map((p, i) => (
+                        <th
+                          key={p}
+                          className={`px-3 py-2.5 text-center text-[11px] font-medium min-w-[72px] whitespace-nowrap
+                            ${i === displayPeriods.length - 1 ? 'text-gray-900 bg-blue-50 font-semibold' : 'text-gray-500'}`}
+                        >
+                          {p}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {card.rows.slice(0, 50).map((row) => {
+                      if (row.kind === 'group') {
+                        return (
+                          <tr key={`g-${row.nodeId}`} className="bg-gray-50 border-b border-gray-100">
+                            <td className="sticky left-0 z-10 px-2 py-2.5 text-center border-r border-gray-100 bg-gray-50">
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-200 text-gray-600">
+                                —
+                              </span>
+                            </td>
+                            <td className="sticky left-8 z-10 px-4 py-2.5 text-left border-r border-gray-200 bg-gray-50 font-medium text-gray-700">
+                              <span style={{ paddingLeft: row.depth * 12 }}>{row.label}</span>
+                            </td>
+                            {displayPeriods.map(p => <td key={p} className="px-3 py-2.5 text-center text-gray-300" />)}
+                          </tr>
+                        )
+                      }
+                      const useStd = viewMode === 'std' && stdPack
+                      const rowValues = useStd
+                        ? displayPeriods.map(p => stdValue(card.parentNodeId, row.serviceId, row.metricRef, p))
+                        : displayPeriods.map(p => metricValue(row.serviceId, row.metricRef, p))
+                      const lastVal = rowValues[rowValues.length - 1]
+                      const prevVal = rowValues[rowValues.length - 2]
+                      const changePct =
+                        !useStd &&
+                        lastVal != null && prevVal != null && prevVal !== 0
+                          ? ((lastVal - prevVal) / Math.abs(prevVal)) * 100
+                          : null
+
                       return (
-                        <tr key={`g-${row.nodeId}`} className="bg-gray-50 border-b border-gray-100">
-                          <td className="sticky left-0 z-10 px-2 py-2.5 text-center border-r border-gray-100 bg-gray-50">
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-200 text-gray-600">
-                              —
+                        <tr
+                          key={`m-${row.nodeId}`}
+                          className={`border-b border-gray-100 transition
+                            ${row.isY ? 'bg-purple-50/60 hover:bg-purple-50' : 'bg-white hover:bg-blue-50/20'}`}
+                        >
+                          <td className={`sticky left-0 z-10 px-2 py-2.5 text-center border-r border-gray-100 ${row.isY ? 'bg-purple-50/60' : 'bg-white'}`}>
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${row.isY ? 'bg-purple-600 text-white' : 'bg-gray-200 text-gray-600'}`}>
+                              {row.isY ? 'Y' : 'X'}
                             </span>
                           </td>
-                          <td className="sticky left-8 z-10 px-4 py-2.5 text-left border-r border-gray-200 bg-gray-50 font-medium text-gray-700">
-                            <span style={{ paddingLeft: row.depth * 12 }}>{row.label}</span>
+                          <td className={`sticky left-8 z-10 px-4 py-2.5 text-left border-r border-gray-200 font-medium ${row.isY ? 'bg-purple-50/60 text-purple-800' : 'bg-white text-gray-700'}`}>
+                            <span style={{ paddingLeft: row.depth * 12 }} className="truncate block max-w-[240px]" title={row.label}>
+                              {row.label}
+                              {useStd && <span className="ml-1 text-[10px] text-gray-400">(Z)</span>}
+                            </span>
                           </td>
-                          {periods.map(p => <td key={p} className="px-3 py-2.5 text-center text-gray-300" />)}
+                          {rowValues.map((v, i) => {
+                            const isLast = i === rowValues.length - 1
+                            return (
+                              <td
+                                key={i}
+                                className={`px-3 py-2.5 text-center font-mono whitespace-nowrap tabular-nums
+                                  ${isLast ? 'bg-blue-50/60 font-semibold text-gray-900' : ''}
+                                  ${v == null ? 'text-gray-300' : row.isY ? 'text-purple-700' : 'text-gray-700'}`}
+                              >
+                                {isLast && changePct != null ? (
+                                  <div className="flex flex-col items-center gap-0.5">
+                                    <span>{formatValue(v)}</span>
+                                    <span className={`text-[9px] font-normal ${changePct >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                      {changePct >= 0 ? '▲' : '▼'}{Math.abs(changePct).toFixed(1)}%
+                                    </span>
+                                  </div>
+                                ) : (
+                                  formatValue(v)
+                                )}
+                              </td>
+                            )
+                          })}
                         </tr>
                       )
-                    }
-                    const rowValues = periods.map(p => metricValue(row.serviceId, row.metricRef, p))
-                    const lastVal = rowValues[rowValues.length - 1]
-                    const prevVal = rowValues[rowValues.length - 2]
-                    const changePct =
-                      lastVal != null && prevVal != null && prevVal !== 0
-                        ? ((lastVal - prevVal) / Math.abs(prevVal)) * 100
-                        : null
+                    })}
+                  </tbody>
+                </table>
+                )}
+                {card.rows.length > 50 && (
+                  <div className="mt-2 text-xs text-gray-500">
+                    行数が多いため、現時点では先頭50行のみ表示しています（段階表示は次の調整で追加）。
+                  </div>
+                )}
 
-                    return (
-                      <tr
-                        key={`m-${row.nodeId}`}
-                        className={`border-b border-gray-100 transition
-                          ${row.isY ? 'bg-purple-50/60 hover:bg-purple-50' : 'bg-white hover:bg-blue-50/20'}`}
-                      >
-                        {/* ロール */}
-                        <td className={`sticky left-0 z-10 px-2 py-2.5 text-center border-r border-gray-100 ${row.isY ? 'bg-purple-50/60' : 'bg-white'}`}>
-                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${row.isY ? 'bg-purple-600 text-white' : 'bg-gray-200 text-gray-600'}`}>
-                            {row.isY ? 'Y' : 'X'}
-                          </span>
-                        </td>
-                        {/* 指標名 */}
-                        <td className={`sticky left-8 z-10 px-4 py-2.5 text-left border-r border-gray-200 font-medium ${row.isY ? 'bg-purple-50/60 text-purple-800' : 'bg-white text-gray-700'}`}>
-                          <span style={{ paddingLeft: row.depth * 12 }} className="truncate block max-w-[240px]" title={row.label}>
-                            {row.label}
-                          </span>
-                        </td>
-                        {/* 値 */}
-                        {rowValues.map((v, i) => {
-                          const isLast = i === rowValues.length - 1
-                          return (
-                            <td
-                              key={i}
-                              className={`px-3 py-2.5 text-center font-mono whitespace-nowrap tabular-nums
-                                ${isLast ? 'bg-blue-50/60 font-semibold text-gray-900' : ''}
-                                ${v == null ? 'text-gray-300' : row.isY ? 'text-purple-700' : 'text-gray-700'}`}
-                            >
-                              {isLast && changePct != null ? (
-                                <div className="flex flex-col items-center gap-0.5">
-                                  <span>{formatValue(v)}</span>
-                                  <span className={`text-[9px] font-normal ${changePct >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                                    {changePct >= 0 ? '▲' : '▼'}{Math.abs(changePct).toFixed(1)}%
-                                  </span>
-                                </div>
-                              ) : (
-                                formatValue(v)
-                              )}
-                            </td>
-                          )
-                        })}
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-              )}
-              {card.rows.length > 50 && (
-                <div className="mt-2 text-xs text-gray-500">
-                  行数が多いため、現時点では先頭50行のみ表示しています（段階表示は次の調整で追加）。
-                </div>
-              )}
-
-              {/* 分析結果 */}
-              {(() => {
-                const r = resultByParent.get(card.parentNodeId)
-                if (!r) return null
-                const coeffs = r.model_json?.coefficientsStd ?? []
-                const sorted = [...coeffs].sort((a, b) => Math.abs(b.coef) - Math.abs(a.coef))
-                const maxAbs = Math.max(1e-9, ...sorted.map(c => Math.abs(c.coef)))
-                return (
-                  <div className="mt-4 rounded-xl border border-gray-200 overflow-hidden">
-                    <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center gap-3 flex-wrap">
-                      <div className="text-sm font-semibold text-gray-700">📐 回帰分析結果（標準化）</div>
-                      <span className="text-xs font-bold px-2.5 py-1 rounded-lg border bg-white text-gray-700">
-                        R²={r.metrics_json.r2} / n={r.metrics_json.n}
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        MAE={r.metrics_json.mae} RMSE={r.metrics_json.rmse}{r.metrics_json.mape != null ? ` MAPE=${r.metrics_json.mape}%` : ''}
-                      </span>
-                    </div>
-                    <div className="p-4 space-y-4">
-                      <div>
-                        <div className="text-xs font-medium text-gray-500 mb-1.5">影響度ランキング（|係数|）</div>
-                        <div className="space-y-2">
-                          {sorted.slice(0, 10).map((c) => (
-                            <div key={c.colKey} className="flex items-center gap-2">
-                              <div className="text-[11px] text-gray-600 w-64 truncate" title={c.colKey}>
-                                {c.colKey}
-                              </div>
-                              <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                                <div
-                                  className={`${c.coef >= 0 ? 'bg-blue-400' : 'bg-red-400'} h-full`}
-                                  style={{ width: `${(Math.abs(c.coef) / maxAbs) * 100}%` }}
-                                />
-                              </div>
-                              <div className={`text-[11px] font-mono w-20 text-right ${c.coef >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
-                                {c.coef >= 0 ? '+' : ''}{c.coef}
+                {modelResults.length > 0 && (
+                  <div className="mt-4 space-y-3">
+                    <div className="text-sm font-semibold text-gray-700">回帰モデル（{modelResults.length} 件・同一期間で比較可能）</div>
+                    {modelResults.map((r) => {
+                      const coeffs = r.model_json?.coefficientsStd ?? []
+                      const sorted = [...coeffs].sort((a, b) => Math.abs(b.coef) - Math.abs(a.coef))
+                      const maxAbs = Math.max(1e-9, ...sorted.map(c => Math.abs(c.coef)))
+                      const title =
+                        r.model_name ??
+                        `${r.penalty_type ?? r.model_json?.type ?? 'model'} λ=${r.model_json?.ridgeLambda ?? ''}`
+                      return (
+                        <div key={r.id} className="rounded-xl border border-gray-200 overflow-hidden">
+                          <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex flex-wrap items-center gap-2">
+                            <div className="text-sm font-semibold text-gray-800">{title}</div>
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-white border text-gray-600">
+                              {r.penalty_type ?? r.model_json?.type ?? '—'}
+                              {r.elastic_alpha != null ? ` α=${r.elastic_alpha}` : ''}
+                            </span>
+                            <span className="text-xs font-bold px-2.5 py-1 rounded-lg border bg-white text-gray-700">
+                              R²={r.metrics_json.r2} / n={r.metrics_json.n}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              MAE={r.metrics_json.mae} RMSE={r.metrics_json.rmse}{r.metrics_json.mape != null ? ` MAPE=${r.metrics_json.mape}%` : ''}
+                            </span>
+                          </div>
+                          <div className="p-4 space-y-3">
+                            <div>
+                              <div className="text-xs font-medium text-gray-500 mb-1.5">影響度（|標準化係数|）</div>
+                              <div className="space-y-2 max-h-40 overflow-y-auto">
+                                {sorted.slice(0, 12).map((c) => (
+                                  <div key={c.colKey} className="flex items-center gap-2">
+                                    <div className="text-[11px] text-gray-600 w-64 truncate" title={c.colKey}>
+                                      {c.colKey}
+                                    </div>
+                                    <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                                      <div
+                                        className={`${c.coef >= 0 ? 'bg-blue-400' : 'bg-red-400'} h-full`}
+                                        style={{ width: `${(Math.abs(c.coef) / maxAbs) * 100}%` }}
+                                      />
+                                    </div>
+                                    <div className={`text-[11px] font-mono w-20 text-right ${c.coef >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
+                                      {c.coef >= 0 ? '+' : ''}{c.coef}
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
                             </div>
-                          ))}
+                          </div>
                         </div>
-                      </div>
-                    </div>
+                      )
+                    })}
                   </div>
-                )
-              })()}
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
         {effectiveTreeId && cards.length === 0 && (
           <div className="text-sm text-gray-500">カード化できる親ノード（子を持つノード）がありません。</div>
         )}
@@ -564,4 +679,3 @@ export function SummaryCardsAnalysisClient({ projectId }: { projectId: string })
     </div>
   )
 }
-
