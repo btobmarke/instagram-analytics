@@ -355,6 +355,8 @@ export interface LpUser {
   id: string
   lp_site_id: string
   anonymous_user_key: string
+  /** フォーム送信などで紐づけたプロフィール（LP 公開 API からマージ更新） */
+  form_profile_json?: Record<string, unknown>
   first_visited_at: string
   last_visited_at: string
   visit_count: number
