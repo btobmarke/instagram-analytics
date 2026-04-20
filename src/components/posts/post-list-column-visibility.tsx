@@ -21,6 +21,10 @@ export const DASHBOARD_POST_LIST_COLUMNS = [
 export const SERVICE_POST_LIST_COLUMNS = [
   { id: 'type', label: '種別' },
   { id: 'views', label: '表示' },
+  { id: 'viewsFollowerPct', label: 'ビュー·フォロワー率' },
+  { id: 'viewsNonFollowerPct', label: 'ビュー·フォロワー外率' },
+  { id: 'viewsFollowerCount', label: 'フォロワービュー' },
+  { id: 'viewsNonFollowerCount', label: 'フォロワー外ビュー' },
   { id: 'homeRate', label: 'ホーム率' },
   { id: 'reach', label: 'リーチ' },
   { id: 'likes', label: 'いいね' },
@@ -43,11 +47,18 @@ export const postListFancyCheckboxSmClass =
 export type DashboardPostListColumnId = (typeof DASHBOARD_POST_LIST_COLUMNS)[number]['id']
 export type ServicePostListColumnId = (typeof SERVICE_POST_LIST_COLUMNS)[number]['id']
 
-/** 初期表示: シェア率はオフ、その他はオン */
+/** 初期表示: シェア率・ビュー内訳列はオフ、その他はオン */
 export function defaultPostListColumnVisibility(cols: readonly { id: string }[]): Record<string, boolean> {
+  const offByDefault = new Set([
+    'shareRate',
+    'viewsFollowerPct',
+    'viewsNonFollowerPct',
+    'viewsFollowerCount',
+    'viewsNonFollowerCount',
+  ])
   const m: Record<string, boolean> = {}
   for (const c of cols) {
-    m[c.id] = c.id === 'shareRate' ? false : true
+    m[c.id] = !offByDefault.has(c.id)
   }
   return m
 }
