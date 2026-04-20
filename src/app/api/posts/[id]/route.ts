@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { buildTimeSeriesMapFromFactRows } from '@/lib/instagram/post-insight-chart'
+import { IG_MEDIA_INSIGHT_FACT_MAX_ROWS } from '@/lib/instagram/post-insight-fact-query'
 import type { IgMediaManualInsightExtra } from '@/types'
 
 // GET /api/posts/[id] — 投稿詳細 + 時系列インサイト + 最新AI分析
@@ -26,7 +27,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     .select('metric_code, value, snapshot_at')
     .eq('media_id', id)
     .order('snapshot_at', { ascending: true })
-    .limit(3000)
+    .limit(IG_MEDIA_INSIGHT_FACT_MAX_ROWS)
 
   // 最新インサイト（metric_code ごとに時刻が最も新しい値）
   const latestInsights: Record<string, number | null> = {}
