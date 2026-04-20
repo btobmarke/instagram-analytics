@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useMemo, useState } from 'react'
+import { use, useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
 
 import {
@@ -11,6 +11,7 @@ import {
 import type { ActionDraftRow } from '../ma/ma-actions-editor'
 
 import { LineMaBreadcrumb, LineMaNav } from '../line-ma-nav'
+import { RichMenuAreaEditor } from './rich-menu-area-editor'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -115,6 +116,30 @@ export default function LineMaRichMenuPage({
   const [linkUserRm, setLinkUserRm] = useState('')
   const [linkUserId, setLinkUserId] = useState('')
   const [applyUserId, setApplyUserId] = useState('')
+
+  const [previewFile, setPreviewFile] = useState<File | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!previewFile) {
+      setPreviewUrl(null)
+      return
+    }
+    const u = URL.createObjectURL(previewFile)
+    setPreviewUrl(u)
+    return () => URL.revokeObjectURL(u)
+  }, [previewFile])
+
+  const menuPixelSize = useMemo(() => {
+    try {
+      const s = JSON.parse(rmSizeJson) as { width?: number; height?: number }
+      return {
+        w: Math.max(1, Math.floor(Number(s.width) || 2500)),
+        h: Math.max(1, Math.floor(Number(s.height) || 1686)),
+      }
+    } catch {
+      return { w: 2500, h: 1686 }
+    }
+  }, [rmSizeJson])
 
   const menuOptions = useMemo(
     () =>
@@ -289,7 +314,7 @@ export default function LineMaRichMenuPage({
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6 max-w-5xl mx-auto">
       <LineMaBreadcrumb
         projectId={projectId}
         serviceId={serviceId}
@@ -310,21 +335,21 @@ export default function LineMaRichMenuPage({
       <LineMaNav projectId={projectId} serviceId={serviceId} />
 
       <p className="text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 mb-6">
-        事前に「接続」で Channel access token を保存してください。エリア定義は{' '}
+        事前に「接続」で Channel access token を保存してください。下のキャンバスでエリアを配置するか、詳細設定の JSON を直接編集できます。仕様は{' '}
         <a
           href="https://developers.line.biz/ja/reference/messaging-api/#create-rich-menu"
           className="text-green-700 underline"
           target="_blank"
           rel="noreferrer"
         >
-          LINE のリッチメニュー形式
+          LINE リッチメニュー
         </a>
-        に従った JSON 配列を入力します。
+        を参照してください。
       </p>
 
       <section className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
         <h2 className="font-bold text-gray-900 mb-4">リッチメニューを作成（LINE API 連携）</h2>
-        <form onSubmit={createRichMenu} className="space-y-3">
+        <form onSubmit={createRichMenu} className="space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-gray-500">名前</label>
@@ -348,23 +373,101 @@ export default function LineMaRichMenuPage({
             <input type="checkbox" checked={rmSelected} onChange={(e) => setRmSelected(e.target.checked)} />
             デフォルト表示（selected）
           </label>
+
           <div>
-            <label className="text-xs text-gray-500">サイズ（省略時 2500×1686）</label>
+            <p className="text-xs font-medium text-gray-700 mb-2">メニューサイズ（px・画像と同じ解像度に合わせる）</p>
+            <div className="flex flex-wrap gap-3 items-end">
+              <label className="text-xs text-gray-500">
+                幅
+                <input
+                  type="number"
+                  min={1}
+                  value={menuPixelSize.w}
+                  onChange={(e) =>
+                    setRmSizeJson(
+                      JSON.stringify({
+                        width: Math.max(1, Number(e.target.value) || menuPixelSize.w),
+                        height: menuPixelSize.h,
+                      }),
+                    )
+                  }
+                  className="block w-28 mt-1 px-2 py-1.5 text-sm border rounded-lg"
+                />
+              </label>
+              <label className="text-xs text-gray-500">
+                高さ
+                <input
+                  type="number"
+                  min={1}
+                  value={menuPixelSize.h}
+                  onChange={(e) =>
+                    setRmSizeJson(
+                      JSON.stringify({
+                        width: menuPixelSize.w,
+                        height: Math.max(1, Number(e.target.value) || menuPixelSize.h),
+                      }),
+                    )
+                  }
+                  className="block w-28 mt-1 px-2 py-1.5 text-sm border rounded-lg"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">
+              配置確認用画像（JPEG/PNG・作成前のプレビューのみ。本番は作成後に一覧からアップロード）
+            </label>
             <input
-              value={rmSizeJson}
-              onChange={(e) => setRmSizeJson(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-mono border rounded-lg"
+              type="file"
+              accept="image/jpeg,image/png"
+              onChange={(e) => setPreviewFile(e.target.files?.[0] ?? null)}
+              className="text-xs"
             />
+            {previewFile && (
+              <button
+                type="button"
+                className="ml-2 text-xs text-gray-500 underline"
+                onClick={() => setPreviewFile(null)}
+              >
+                プレビュー画像をクリア
+              </button>
+            )}
           </div>
+
           <div>
-            <label className="text-xs text-gray-500">areas（JSON 配列）</label>
-            <textarea
-              value={rmAreasJson}
-              onChange={(e) => setRmAreasJson(e.target.value)}
-              rows={10}
-              className="w-full px-3 py-2 text-xs font-mono border rounded-lg"
+            <p className="text-sm font-semibold text-gray-800 mb-2">エリア（ビジュアル編集）</p>
+            <RichMenuAreaEditor
+              menuWidth={menuPixelSize.w}
+              menuHeight={menuPixelSize.h}
+              areasJson={rmAreasJson}
+              onAreasJsonChange={setRmAreasJson}
+              previewObjectUrl={previewUrl}
             />
           </div>
+
+          <details className="border border-gray-100 rounded-lg p-3 bg-gray-50">
+            <summary className="text-sm font-medium text-gray-700 cursor-pointer">
+              詳細: areas / size を JSON で編集
+            </summary>
+            <div className="mt-3 space-y-2">
+              <label className="text-xs text-gray-500">size（JSON）</label>
+              <textarea
+                value={rmSizeJson}
+                onChange={(e) => setRmSizeJson(e.target.value)}
+                rows={2}
+                className="w-full px-3 py-2 text-xs font-mono border rounded-lg bg-white"
+              />
+              <label className="text-xs text-gray-500">areas（JSON 配列）</label>
+              <textarea
+                value={rmAreasJson}
+                onChange={(e) => setRmAreasJson(e.target.value)}
+                rows={8}
+                className="w-full px-3 py-2 text-xs font-mono border rounded-lg bg-white"
+              />
+            </div>
+          </details>
+
           <button
             type="submit"
             disabled={rmBusy}
