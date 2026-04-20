@@ -194,6 +194,48 @@ const IG_LABEL_PREFIXES: Record<string, string> = {
 }
 const IG_SEP = '：'
 
+/** Instagram サービス KPI 用の派生指標（日次アカウント値から算出。id は fetch-metrics と一致） */
+const IG_ACCOUNT_FORMULA_KPIS: MetricCard[] = [
+  {
+    id: 'ig_account_insight_fact@formula:kpi_home_rate_proxy',
+    label: 'ホーム率（目安）',
+    category: 'KPI（算出）',
+    fieldRef: 'ig_account_insight_fact@formula:kpi_home_rate_proxy',
+    description:
+      '日次の「プロフィール閲覧数 ÷ 閲覧数（フォロワー内訳）」を % で表示（投稿ごとのホーム÷フォロワービューに近い目安）。月平均 50% 以上を目安にする場合は目標値に 50 を設定。',
+  },
+  {
+    id: 'ig_account_insight_fact@formula:kpi_save_rate',
+    label: '保存率',
+    category: 'KPI（算出）',
+    fieldRef: 'ig_account_insight_fact@formula:kpi_save_rate',
+    description: '保存数 ÷ リーチ（日次、%）。各投稿の保存率の月平均 2% 以上を目安にする場合は目標値に 2 を設定。',
+  },
+  {
+    id: 'ig_account_insight_fact@formula:kpi_profile_access_rate',
+    label: 'プロフィールアクセス率',
+    category: 'KPI（算出）',
+    fieldRef: 'ig_account_insight_fact@formula:kpi_profile_access_rate',
+    description: 'プロフィール閲覧数 ÷ リーチ（日次、%）。月平均 2% 以上を目安にする場合は目標値に 2 を設定。',
+  },
+  {
+    id: 'ig_account_insight_fact@formula:kpi_follow_rate_30d',
+    label: 'フォロー率（期間合算）',
+    category: 'KPI（算出）',
+    fieldRef: 'ig_account_insight_fact@formula:kpi_follow_rate_30d',
+    description:
+      '指定期間のフォロワー純増（日次 follower_count の期末−期首）÷ 同一期間のプロフィール閲覧合計（%）。単一期間（例: 直近30日1本）のときのみ値が入ります。月平均 5% 以上を目安にする場合は目標値に 5 を設定。',
+  },
+  {
+    id: 'ig_account_insight_fact@formula:kpi_link_click_rate_30d',
+    label: 'リンククリック率（期間合算）',
+    category: 'KPI（算出）',
+    fieldRef: 'ig_account_insight_fact@formula:kpi_link_click_rate_30d',
+    description:
+      '指定期間のプロフィールリンクタップ合計 ÷ プロフィール閲覧合計（%）。単一期間のときのみ値が入ります。月平均 5% 以上を目安にする場合は目標値に 5 を設定。',
+  },
+]
+
 /**
  * テンプレートに保存済みのラベルへ IG 接頭辞を付与する。
  * metricRef（"テーブル名.フィールド名" 形式）でカテゴリを判定し、
@@ -212,6 +254,7 @@ export function getMetricCatalog(serviceType: string): MetricCard[] {
   switch (serviceType) {
     case 'instagram': return [
       ...IG_ACCOUNT.map(([f,l,d]) => card('ig_account_insight_fact',  f, `アカウント${IG_SEP}${l}`, 'アカウントインサイト', d)),
+      ...IG_ACCOUNT_FORMULA_KPIS,
       ...IG_FEED   .map(([f,l,d]) => card('ig_media_insight_feed',     f, `フィード${IG_SEP}${l}`,   'フィード投稿',         d)),
       ...IG_REELS  .map(([f,l,d]) => card('ig_media_insight_reels',    f, `リール${IG_SEP}${l}`,     'リール投稿',           d)),
       ...IG_STORY  .map(([f,l,d]) => card('ig_media_insight_story',    f, `ストーリー${IG_SEP}${l}`, 'ストーリーズ',         d)),
