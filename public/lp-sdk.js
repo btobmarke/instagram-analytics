@@ -96,6 +96,19 @@
     });
   }
 
+  /**
+   * フォーム送信などで取得した属性を匿名ユーザーに紐づけ（サーバーで JSON マージ）
+   * @param {Record<string, string|number|boolean>} profile 例: { companyName: '株式会社A', name: '山田' }
+   */
+  function setFormProfile(profile) {
+    if (!anonymousUserKey || !config) return Promise.resolve(null);
+    return post('/user/profile', {
+      lpCode: config.lpCode,
+      anonymousUserKey: anonymousUserKey,
+      profile: profile || {},
+    });
+  }
+
   function sendEvent(eventId, meta) {
     if (!sessionId) return Promise.resolve(null);
     return post('/event', {
@@ -232,6 +245,7 @@
     track: sendEvent,
     pageView: sendPageView,
     endSession: endSession,
+    setFormProfile: setFormProfile,
     getSessionId: function () { return sessionId; },
     getAnonKey: function () { return anonymousUserKey; },
   };
