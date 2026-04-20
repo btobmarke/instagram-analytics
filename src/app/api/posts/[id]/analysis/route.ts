@@ -11,7 +11,7 @@ import {
   buildMilestoneDiffTable,
   type OverlaySeriesPost,
 } from '@/lib/instagram/post-insight-chart'
-import { IG_MEDIA_INSIGHT_FACT_MAX_ROWS } from '@/lib/instagram/post-insight-fact-query'
+import { fetchAllIgMediaInsightFactRows } from '@/lib/instagram/post-insight-fact-query'
 import { formatPostMetaContextBlock } from '@/lib/instagram/post-meta'
 
 // POST /api/posts/[id]/analysis — AI分析実行（ストリーミング）
@@ -56,15 +56,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!(row.metric_code in insights)) insights[row.metric_code] = row.value
   }
 
-  // 時系列（マイルストーン・比較用）
-  const { data: insightAsc } = await supabase
-    .from('ig_media_insight_fact')
-    .select('metric_code, value, snapshot_at')
-    .eq('media_id', id)
-    .order('snapshot_at', { ascending: true })
-    .limit(IG_MEDIA_INSIGHT_FACT_MAX_ROWS)
+  // 時系列（マイルストーン・比較用）— PostgREST max_rows 回避のためページング取得
+  let insightAsc: Awaited<ReturnType<typeof fetchAllIgMediaInsightFactRows>>
+  try {
+    insightAsc = await fetchAllIgMediaInsightFactRows(supabase, id)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'ig_media_insight_fact の取得に失敗しました'
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
 
-  const timeSeries = buildTimeSeriesMapFromFactRows(insightAsc ?? [])
+  const timeSeries = buildTimeSeriesMapFromFactRows(insightAsc)
   const milestones = milestoneCumulativeSummary(post.posted_at, timeSeries, ['reach', 'likes', 'saved'])
   const metaBlock = formatPostMetaContextBlock(post)
 
@@ -77,14 +78,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       .single()
     if (pErr || !peerPost || peerPost.account_id !== post.account_id) continue
 
-    const { data: peerFacts } = await supabase
-      .from('ig_media_insight_fact')
-      .select('metric_code, value, snapshot_at')
-      .eq('media_id', pid)
-      .order('snapshot_at', { ascending: true })
-      .limit(IG_MEDIA_INSIGHT_FACT_MAX_ROWS)
+    let peerFacts: Awaited<ReturnType<typeof fetchAllIgMediaInsightFactRows>> = []
+    try {
+      peerFacts = await fetchAllIgMediaInsightFactRows(supabase, pid)
+    } catch {
+      peerFacts = []
+    }
 
-    const peerTs = buildTimeSeriesMapFromFactRows(peerFacts ?? [])
+    const peerTs = buildTimeSeriesMapFromFactRows(peerFacts)
     const mainO: OverlaySeriesPost = {
       id: post.id,
       label: 'この投稿',
