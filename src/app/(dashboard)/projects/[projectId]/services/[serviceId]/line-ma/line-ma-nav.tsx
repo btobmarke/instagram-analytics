@@ -19,7 +19,8 @@ const SUB_NAV: Record<
   { href: string; label: string }[]
 > = {
   connect: [
-    { href: '', label: '接続' },
+    { href: '/dashboard', label: 'ダッシュボード' },
+    { href: '/connection', label: '接続（認証）' },
     { href: '/integrations', label: '外部連携' },
   ],
   audience: [
@@ -40,7 +41,7 @@ const SUB_NAV: Record<
 }
 
 const CATEGORY_DEFAULT_HREF: Record<LineMaCategoryId, string> = {
-  connect: '',
+  connect: '/dashboard',
   audience: '/contacts',
   delivery: '/broadcast',
   experience: '/rich-menu',
@@ -50,6 +51,7 @@ const CATEGORY_DEFAULT_HREF: Record<LineMaCategoryId, string> = {
 export function getCategoryFromLineMaPath(subPath: string): LineMaCategoryId {
   const p = subPath === '' ? '/' : subPath.startsWith('/') ? subPath : `/${subPath}`
   if (p === '/' || p === '') return 'connect'
+  if (p.startsWith('/dashboard') || p.startsWith('/connection')) return 'connect'
   if (p.startsWith('/integrations')) return 'connect'
   if (p.startsWith('/contacts')) return 'audience'
   if (p.startsWith('/crm')) return 'audience'

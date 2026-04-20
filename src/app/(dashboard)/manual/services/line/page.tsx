@@ -11,8 +11,8 @@ export default function LineServiceManual() {
         <Table
           head={['タブ', 'パス', '機能']}
           rows={[
-            ['トップ', '/line', 'Bot ID の登録、リワードカードの管理、最終同期状況の確認。'],
-            ['ダッシュボード', '/line/dashboard', 'フレンド数推移、属性（性別／年代／地域）分布、ショップカード／リワードカードの KPI。'],
+            ['設定（統合）', '/line', 'Messaging API 認証・Webhook、Bot ID、リワードカード等。'],
+            ['ダッシュボード', '/line-ma/dashboard', 'OAM 分析と MA 指標を 1 画面に統合（旧 /line/dashboard はここへリダイレクト）。'],
           ]}
         />
       </Section>

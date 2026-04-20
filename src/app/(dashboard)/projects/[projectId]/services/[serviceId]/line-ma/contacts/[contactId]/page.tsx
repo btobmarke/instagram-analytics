@@ -297,7 +297,7 @@ export default function LineMaContactDetailPage({
 
   if (detailResp && (detailResp as { error?: string }).error === 'not_found') {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
+      <div className="p-6 w-full max-w-none">
         <p className="text-sm text-gray-600">コンタクトが見つかりません。</p>
         <Link
           href={`/projects/${projectId}/services/${serviceId}/line-ma/contacts`}
@@ -310,7 +310,7 @@ export default function LineMaContactDetailPage({
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6 w-full max-w-none">
       <LineMaBreadcrumb
         projectId={projectId}
         serviceId={serviceId}
