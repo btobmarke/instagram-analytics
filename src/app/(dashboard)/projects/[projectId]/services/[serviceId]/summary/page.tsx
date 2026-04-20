@@ -50,7 +50,7 @@ function summaryDashboardHref(projectId: string, serviceId: string, serviceType:
     case 'gbp':
       return `${b}/gbp/dashboard`
     case 'line':
-      return `${b}/line-ma/dashboard`
+      return `${b}/line/dashboard`
     case 'sales':
       return `${b}/sales/dashboard`
     default:

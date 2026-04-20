@@ -213,7 +213,7 @@ function getServiceHref(projectId: string, serviceId: string, serviceType: strin
     case 'gbp':
       return `/projects/${projectId}/services/${serviceId}/gbp/dashboard`
     case 'line':
-      return `/projects/${projectId}/services/${serviceId}/line-ma/dashboard`
+      return `/projects/${projectId}/services/${serviceId}/line/dashboard`
     case 'google_ads':
       return `/projects/${projectId}/services/${serviceId}/google-ads/analytics`
     case 'sales':
@@ -491,7 +491,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ projec
                     {service.service_type === 'line' ? (
                       <>
                         <Link
-                          href={`/projects/${projectId}/services/${service.id}/line-ma/dashboard`}
+                          href={`/projects/${projectId}/services/${service.id}/line/dashboard`}
                           className="flex items-center gap-1 text-xs font-medium text-green-700 hover:text-green-900 transition-colors"
                         >
                           ダッシュ
