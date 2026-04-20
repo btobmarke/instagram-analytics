@@ -22,16 +22,42 @@ const NOTIFY_URL = process.env.BATCH_SMOKE_NOTIFY_URL ?? ''
 
 function classify(bodyText, status) {
   const lower = (bodyText ?? '').toLowerCase()
-  if (status === 401) return { code: 2, category: 'auth', message: '認証に失敗しました（401）。CRON_SECRET / BATCH_SECRET とサーバー設定を確認してください。コード修正は不要です。' }
-  if (status === 429) return { code: 3, category: 'rate_limit', message: 'レート制限の可能性があります（429）。しばらく待って再実行してください。コード修正は不要です。' }
+  if (status === 401) {
+    return {
+      code: 2,
+      category: 'auth',
+      message:
+        '認証に失敗しました（401）。CRON_SECRET / BATCH_SECRET とサーバー設定を確認してください。コード修正は不要です。',
+    }
+  }
+  if (status === 429) {
+    return {
+      code: 3,
+      category: 'rate_limit',
+      message: 'レート制限の可能性があります（429）。しばらく待って再実行してください。コード修正は不要です。',
+    }
+  }
   if (/\b(rate limit|usage limit|too many requests|#4)\b/i.test(bodyText) || /app.?usage/i.test(lower)) {
-    return { code: 3, category: 'rate_limit', message: 'レスポンスにレート制限の記述があります。時間をおいて再実行してください。コード修正は不要です。' }
+    return {
+      code: 3,
+      category: 'rate_limit',
+      message: 'レスポンスにレート制限の記述があります。時間をおいて再実行してください。コード修正は不要です。',
+    }
   }
   if (status === 502 || status === 503 || status === 504) {
-    return { code: 4, category: 'transient', message: `一時的なサーバーエラー（${status}）です。再実行してください。コード修正は不要です。` }
+    return {
+      code: 4,
+      category: 'transient',
+      message: `一時的なサーバーエラー（${status}）です。再実行してください。コード修正は不要です。`,
+    }
   }
-  if (status === 401 || /invalid.?oauth|access.?token|expired|session has been invalidated/i.test(bodyText)) {
-    return { code: 2, category: 'token', message: 'トークン無効・期限切れの可能性があります。Instagram 連携トークンを更新してください。コード修正は不要です。' }
+  if (/invalid.?oauth|access.?token|expired|session has been invalidated/i.test(bodyText)) {
+    return {
+      code: 2,
+      category: 'token',
+      message:
+        'トークン無効・期限切れの可能性があります。Instagram 連携トークンを更新してください。コード修正は不要です。',
+    }
   }
   return null
 }
@@ -51,7 +77,8 @@ async function notify(payload) {
 
 async function main() {
   if (!SECRET) {
-    const msg = 'CRON_SECRET または BATCH_SECRET が未設定です。コード修正は不要です。環境変数を設定してください。'
+    const msg =
+      'CRON_SECRET または BATCH_SECRET が未設定です。コード修正は不要です。環境変数を設定してください。'
     console.error('[batch-smoke]', msg)
     await notify({ text: msg, category: 'config', exitCode: 2 })
     process.exit(2)
