@@ -1,22 +1,31 @@
 /**
  * POST /api/projects/[projectId]/summary-cards/analysis/run
  *
- * サマリカード（親ノード）単位で回帰分析を実行し、結果を保存する。
- *
- * 仕様: docs/unified-summary-summary-cards-analysis-spec.md
+ * サマリカード（親ノード）単位で 1 つ以上の重回帰モデルを実行し、結果を保存する。
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-import { runSummaryCardRidgeAnalysis } from '@/lib/analysis/summary-card-analysis'
+import { runSummaryCardAnalysis, type SummaryCardPenaltyType } from '@/lib/analysis/summary-card-analysis'
+
+const PenaltySchema = z.enum(['ridge', 'lasso', 'elastic_net', 'ols'])
+
+const ModelSpecSchema = z.object({
+  penaltyType: PenaltySchema,
+  lambda:      z.number().finite().nonnegative(),
+  elasticAlpha: z.number().finite().min(0).max(1).optional().nullable(),
+  modelName:   z.string().max(120).optional().nullable(),
+})
 
 const BodySchema = z.object({
-  treeId: z.string().uuid(),
-  parentNodeId: z.string().uuid(),
-  timeUnit: z.enum(['day', 'week', 'month']).default('day'),
-  rangeStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  rangeEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  treeId:        z.string().uuid(),
+  parentNodeId:  z.string().uuid(),
+  timeUnit:      z.enum(['day', 'week', 'month']).default('day'),
+  rangeStart:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  rangeEnd:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  models:        z.array(ModelSpecSchema).min(1).max(32).optional(),
+  cvSummary:     z.unknown().optional().nullable(),
 })
 
 type NodeRow = {
@@ -63,12 +72,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   const parsed = BodySchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ success: false, error: parsed.error.flatten() }, { status: 400 })
 
-  const { treeId, parentNodeId, timeUnit, rangeStart, rangeEnd } = parsed.data
+  const { treeId, parentNodeId, timeUnit, rangeStart, rangeEnd, models, cvSummary } = parsed.data
   if (rangeStart > rangeEnd) {
     return NextResponse.json({ success: false, error: 'rangeStart は rangeEnd 以下である必要があります' }, { status: 400 })
   }
 
-  // 既存セッション（ロック）確認：プロジェクト+ツリーで最新1件を採用
   const { data: existingSession, error: sessErr } = await supabase
     .from('summary_card_analysis_sessions')
     .select('*')
@@ -96,12 +104,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
             message: '既に分析が開始されているため、集計粒度・期間は変更できません。',
           },
         },
-        { status: 409 }
+        { status: 409 },
       )
     }
   }
 
-  // セッション作成（なければ）
   const session = existingSession ?? (await (async () => {
     const { data: created, error } = await supabase
       .from('summary_card_analysis_sessions')
@@ -119,7 +126,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     return created
   })())
 
-  // KPIノード取得（ツリー全体）
   const { data: nodes, error: nodeErr } = await supabase
     .from('project_kpi_tree_nodes')
     .select('id,parent_id,sort_order,label,node_type,metric_ref,service_id')
@@ -134,16 +140,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   const parent = nodeList.find(n => n.id === parentNodeId)
   if (!parent) return NextResponse.json({ success: false, error: 'PARENT_NODE_NOT_FOUND' }, { status: 404 })
 
-  // Y決定（未設定なら 422）
   if (!parent.service_id || !parent.metric_ref) {
     return NextResponse.json(
       { success: false, error: 'Y_NOT_SET', message: '親指標（Y）が未設定です' },
-      { status: 422 }
+      { status: 422 },
     )
   }
   const yColKey = colKey(parent.service_id, parent.metric_ref)
 
-  // X決定（直下の子を leaf展開して leaf colKey をツリー順に）
   const childrenByParent = new Map<string, NodeRow[]>()
   for (const n of nodeList) {
     if (!n.parent_id) continue
@@ -163,92 +167,125 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   if (xColKeys.length === 0) {
     return NextResponse.json(
       { success: false, error: 'X_EMPTY', message: '子指標（X）がありません' },
-      { status: 422 }
+      { status: 422 },
     )
   }
 
-  // 回帰実行（標準化 + Ridge）
-  const ridgeLambda = 1
   const minObs = 12
-  let analysis
-  try {
-    analysis = await runSummaryCardRidgeAnalysis({
-      supabase: supabase as unknown as any,
-      projectId,
-      yColKey,
-      xColKeys,
-      startDate: rangeStart,
-      endDate: rangeEnd,
-      timeUnit,
-      ridgeLambda,
-      minObs,
-    })
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    if (msg.startsWith('INSUFFICIENT_DATA')) {
-      const parts = msg.split(':')
-      const nPart = parts.find(p => p.startsWith('n=')) ?? ''
-      const n = parseInt(nPart.replace('n=', ''), 10)
+  const modelSpecs =
+    models && models.length > 0
+      ? models.map(m => ({
+        penaltyType: m.penaltyType as SummaryCardPenaltyType,
+        lambda:      m.penaltyType === 'ols' ? 0 : m.lambda,
+        elasticAlpha:
+          m.penaltyType === 'elastic_net'
+            ? (m.elasticAlpha ?? 0.5)
+            : null,
+        modelName: m.modelName ?? null,
+      }))
+      : [{
+        penaltyType: 'ridge' as const,
+        lambda:      1,
+        elasticAlpha: null,
+        modelName:   null,
+      }]
+
+  const allWarnings: string[] = []
+  const savedRows: unknown[] = []
+
+  await supabase
+    .from('summary_card_analysis_results')
+    .delete()
+    .eq('session_id', session.id)
+    .eq('parent_node_id', parentNodeId)
+
+  for (const spec of modelSpecs) {
+    let analysis
+    try {
+      analysis = await runSummaryCardAnalysis({
+        supabase: supabase as unknown as import('@/lib/summary/fetch-metrics').SupabaseServerClient,
+        projectId,
+        yColKey,
+        xColKeys,
+        startDate: rangeStart,
+        endDate: rangeEnd,
+        timeUnit,
+        penaltyType: spec.penaltyType,
+        lambda: spec.lambda,
+        elasticAlpha: spec.elasticAlpha,
+        minObs,
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      if (msg.startsWith('INSUFFICIENT_DATA')) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'INSUFFICIENT_DATA',
+            message: `モデル ${spec.modelName ?? spec.penaltyType} でデータ不足: ${msg}`,
+          },
+          { status: 422 },
+        )
+      }
+      if (msg === 'SINGULAR_MATRIX') {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'SINGULAR_MATRIX',
+            message: `モデル ${spec.modelName ?? spec.penaltyType} で特異行列のため推定できませんでした`,
+          },
+          { status: 422 },
+        )
+      }
+      return NextResponse.json({ success: false, error: 'ANALYSIS_FAILED', message: msg }, { status: 500 })
+    }
+
+    const { model, metrics, series, warnings } = analysis
+    allWarnings.push(...warnings)
+
+    const defaultName =
+      spec.penaltyType === 'elastic_net'
+        ? `EN λ=${spec.lambda} α=${spec.elasticAlpha ?? 0.5}`
+        : spec.penaltyType === 'ols'
+          ? 'OLS'
+          : `${spec.penaltyType} λ=${spec.lambda}`
+
+    const payload = {
+      session_id: session.id,
+      project_id: projectId,
+      kpi_tree_id: treeId,
+      parent_node_id: parentNodeId,
+      time_unit: timeUnit,
+      range_start: rangeStart,
+      range_end: rangeEnd,
+      y_col_key: yColKey,
+      x_col_keys: xColKeys,
+      ridge_lambda: spec.lambda,
+      penalty_type: spec.penaltyType,
+      elastic_alpha: spec.elasticAlpha,
+      model_name: spec.modelName ?? defaultName,
+      cv_summary_json: cvSummary ?? null,
+      model_json: model,
+      metrics_json: metrics,
+      series_json: series,
+    }
+
+    const saved = await supabase.from('summary_card_analysis_results').insert(payload).select('*').single()
+    if (saved.error || !saved.data) {
       return NextResponse.json(
-        {
-          success: false,
-          error: 'INSUFFICIENT_DATA',
-          message: `分析に必要なデータが不足しています（必要: ${minObs}点以上 / 現在: ${Number.isFinite(n) ? n : 0}点）`,
-        },
-        { status: 422 }
+        { success: false, error: saved.error?.message ?? 'SAVE_FAILED' },
+        { status: 500 },
       )
     }
-    return NextResponse.json({ success: false, error: 'ANALYSIS_FAILED', message: msg }, { status: 500 })
-  }
-
-  const { model, metrics, series, warnings } = analysis
-
-  // 既存結果があれば update、なければ insert
-  const { data: existing, error: existErr } = await supabase
-    .from('summary_card_analysis_results')
-    .select('id')
-    .eq('project_id', projectId)
-    .eq('kpi_tree_id', treeId)
-    .eq('parent_node_id', parentNodeId)
-    .eq('time_unit', timeUnit)
-    .eq('range_start', rangeStart)
-    .eq('range_end', rangeEnd)
-    .limit(1)
-    .maybeSingle()
-
-  if (existErr) return NextResponse.json({ success: false, error: existErr.message }, { status: 500 })
-
-  const payload = {
-    session_id: session.id,
-    project_id: projectId,
-    kpi_tree_id: treeId,
-    parent_node_id: parentNodeId,
-    time_unit: timeUnit,
-    range_start: rangeStart,
-    range_end: rangeEnd,
-    y_col_key: yColKey,
-    x_col_keys: xColKeys,
-    ridge_lambda: ridgeLambda,
-    model_json: model,
-    metrics_json: metrics,
-    series_json: series,
-  }
-
-  const saved = existing?.id
-    ? await supabase.from('summary_card_analysis_results').update(payload).eq('id', existing.id).select('*').single()
-    : await supabase.from('summary_card_analysis_results').insert(payload).select('*').single()
-
-  if (saved.error || !saved.data) {
-    return NextResponse.json({ success: false, error: saved.error?.message ?? 'SAVE_FAILED' }, { status: 500 })
+    savedRows.push(saved.data)
   }
 
   return NextResponse.json({
     success: true,
     data: {
       session,
-      result: saved.data,
-      warnings,
+      results: savedRows,
+      warnings: allWarnings,
     },
   })
 }
-

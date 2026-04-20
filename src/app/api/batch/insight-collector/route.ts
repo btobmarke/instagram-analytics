@@ -335,9 +335,9 @@ export async function POST(request: Request) {
 
         type AcctRow = {
           name: string
-          values?: Array<{ value: number; end_time: string }>
+          values?: Array<{ value: number | Record<string, number> | unknown; end_time: string }>
           total_value?: {
-            value?: number
+            value?: number | Record<string, number>
             breakdowns?: Array<{
               dimension_keys?: string[]
               results?: Array<{ dimension_values?: string[]; value?: number }>
@@ -521,51 +521,88 @@ export async function POST(request: Request) {
           await new Promise(resolve => setTimeout(resolve, 200))
         }
 
-        // --- (B3) デモグラフィック（lifetime + timeframe）※ v20+ では last_90_days 廃止 → last_30_days
-        const demoTimeframe = 'last_30_days' as const
+        // --- (B3) デモグラフィック（v20+ では last_N_days timeframe 廃止 → 省略 → this_month → this_week）
         const demoBreakdowns = ['country', 'age', 'gender', 'city'] as const
         const demoMetrics = ['engaged_audience_demographics', 'follower_demographics'] as const
-        const demoAsOf = until // 直近インサイト取得ウィンドウの終端日をスナップショット日付として使う
+        const demoAsOf = until
+
+        const tryDemographicsFetch = async (params: {
+          demoMetric: (typeof demoMetrics)[number]
+          b: (typeof demoBreakdowns)[number]
+          timeframe?: 'this_month' | 'this_week'
+        }) => {
+          const { data: demoData, rateUsage: demoRate } = await igClient.getAccountInsightsDemographics({
+            metric: params.demoMetric,
+            breakdown: params.b,
+            ...(params.timeframe ? { timeframe: params.timeframe } : {}),
+          })
+          return { demoData, demoRate }
+        }
 
         for (const demoMetric of demoMetrics) {
           for (const b of demoBreakdowns) {
-            try {
-              const { data: demoData, rateUsage: demoRate } = await igClient.getAccountInsightsDemographics({
-                metric: demoMetric,
-                timeframe: demoTimeframe,
-                breakdown: b,
-              })
-              if (isRateLimitExceeded(demoRate, 70)) {
-                console.warn('[insight-collector] rate usage high, stopping demographics fetches', {
-                  account_id: account.id,
-                  rate_usage: demoRate,
+            let lastErr: unknown = null
+            let fetched = false
+            for (const tf of [undefined, 'this_month' as const, 'this_week' as const]) {
+              try {
+                const { demoData, demoRate } = await tryDemographicsFetch({
+                  demoMetric,
+                  b,
+                  timeframe: tf,
                 })
-                break
+                if (isRateLimitExceeded(demoRate, 70)) {
+                  console.warn('[insight-collector] rate usage high, stopping demographics fetches', {
+                    account_id: account.id,
+                    rate_usage: demoRate,
+                  })
+                  fetched = true
+                  break
+                }
+                const demoArr = (demoData as { data: AcctRow[] })?.data ?? []
+                const row = demoArr.find(r => r.name === demoMetric)
+                if (row) {
+                  await upsertAccountBreakdownRows({
+                    metricName: demoMetric,
+                    breakdownKey: b,
+                    valueDate: demoAsOf,
+                    periodCode: 'lifetime',
+                    row,
+                  })
+                  fetched = true
+                  break
+                }
+              } catch (e) {
+                lastErr = e
               }
-              const demoArr = (demoData as { data: AcctRow[] })?.data ?? []
-              const row = demoArr.find(r => r.name === demoMetric)
-              if (row) {
-                await upsertAccountBreakdownRows({
-                  metricName: demoMetric,
-                  breakdownKey: b,
-                  valueDate: demoAsOf,
-                  periodCode: 'lifetime',
-                  row,
-                })
-              }
-            } catch (demoErr) {
+              await new Promise(resolve => setTimeout(resolve, 80))
+            }
+            if (!fetched) {
               console.warn('[insight-collector] demographics fetch failed (non-fatal)', {
                 account_id: account.id,
                 metric: demoMetric,
                 breakdown: b,
-                error: demoErr instanceof Error ? demoErr.message : String(demoErr),
+                tried_timeframes: ['(omit)', 'this_month', 'this_week'],
+                error: lastErr instanceof Error ? lastErr.message : String(lastErr),
               })
             }
             await new Promise(resolve => setTimeout(resolve, 150))
           }
         }
 
-        // --- (B4) online_followers（取得できるアカウントのみ） ---
+        /** online_followers: API が number または 0–23 のオブジェクトで返す場合がある */
+        const coerceOnlineFollowersScalar = (val: unknown): number | null => {
+          if (typeof val === 'number' && Number.isFinite(val)) return val
+          if (val && typeof val === 'object' && !Array.isArray(val)) {
+            let sum = 0
+            for (const x of Object.values(val as Record<string, unknown>)) {
+              if (typeof x === 'number' && Number.isFinite(x)) sum += x
+            }
+            return sum > 0 ? sum : null
+          }
+          return null
+        }
+
+        // --- (B4) online_followers（metric_type=total_value + period=day） ---
         try {
           const { data: olData, rateUsage: olRate } = await igClient.getAccountInsightsOnlineFollowers(since, until)
           if (!isRateLimitExceeded(olRate, 70)) {
@@ -576,6 +613,8 @@ export async function POST(request: Request) {
                 const endDate = new Date(v.end_time)
                 endDate.setDate(endDate.getDate() - 1)
                 const valueDate = endDate.toISOString().slice(0, 10)
+                const scalar = coerceOnlineFollowersScalar(v.value)
+                if (scalar == null) continue
                 const { error: upsertErr } = await admin.from('ig_account_insight_fact').upsert({
                   account_id: account.id,
                   metric_code: 'online_followers',
@@ -583,7 +622,7 @@ export async function POST(request: Request) {
                   dimension_value: '',
                   period_code: 'day',
                   value_date: valueDate,
-                  value: v.value,
+                  value: scalar,
                   fetched_at: new Date().toISOString(),
                 }, { onConflict: 'account_id,metric_code,period_code,value_date,dimension_code,dimension_value' })
                 if (upsertErr) {
@@ -593,6 +632,25 @@ export async function POST(request: Request) {
                 } else {
                   acctUpsertCount++
                 }
+              }
+            } else if (metric) {
+              const tv = metric.total_value?.value
+              const scalar =
+                typeof tv === 'number' && Number.isFinite(tv)
+                  ? tv
+                  : coerceOnlineFollowersScalar(tv)
+              if (scalar != null) {
+                const { error: upsertErr } = await admin.from('ig_account_insight_fact').upsert({
+                  account_id: account.id,
+                  metric_code: 'online_followers',
+                  dimension_code: '',
+                  dimension_value: '',
+                  period_code: 'day',
+                  value_date: until,
+                  value: scalar,
+                  fetched_at: new Date().toISOString(),
+                }, { onConflict: 'account_id,metric_code,period_code,value_date,dimension_code,dimension_value' })
+                if (!upsertErr) acctUpsertCount++
               }
             }
           }

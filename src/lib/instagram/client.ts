@@ -412,39 +412,35 @@ export class InstagramClient {
   }
 
   /**
-   * デモグラフィック系（lifetime + timeframe）
-   * 例: engaged_audience_demographics / follower_demographics + breakdown=country|age|gender
+   * デモグラフィック系（lifetime + total_value + breakdown）
+   * v20+ では last_N_days 系 timeframe が廃止。timeframe は省略するか this_month / this_week のみ。
    */
   async getAccountInsightsDemographics(params: {
     metric: 'engaged_audience_demographics' | 'follower_demographics'
-    /** v20+ では last_90_days 等が廃止。last_30_days / this_month / this_week を使用 */
-    timeframe: 'last_30_days' | 'this_month' | 'this_week'
     breakdown: 'country' | 'age' | 'gender' | 'city'
+    /** 未指定なら timeframe クエリを付けない（推奨）。v20+ では last_N_days 系は廃止 */
+    timeframe?: 'this_month' | 'this_week'
   }) {
-    return this.fetch(
-      `/${this.accountId}/insights`,
-      {
-        metric: params.metric,
-        period: 'lifetime',
-        metric_type: 'total_value',
-        timeframe: params.timeframe,
-        breakdown: params.breakdown,
-      },
-      undefined,
-      'getAccountInsightsDemographics'
-    )
+    const q: Record<string, string> = {
+      metric: params.metric,
+      period: 'lifetime',
+      metric_type: 'total_value',
+      breakdown: params.breakdown,
+    }
+    if (params.timeframe) q.timeframe = params.timeframe
+    return this.fetch(`/${this.accountId}/insights`, q, undefined, 'getAccountInsightsDemographics')
   }
 
   /**
    * online_followers（条件付きで利用可能）
-   * 公式: period=day, metric_type=time_series
+   * v20+ では time_series と組み合わせ不可 → total_value + period=day
    */
   async getAccountInsightsOnlineFollowers(since: string, until: string) {
     return this.fetch(
       `/${this.accountId}/insights`,
       {
         metric: 'online_followers',
-        metric_type: 'time_series',
+        metric_type: 'total_value',
         period: 'day',
         since,
         until,

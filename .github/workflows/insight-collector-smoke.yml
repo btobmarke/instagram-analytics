@@ -1,0 +1,22 @@
+# 手動: insight-collector 疎通（Secrets 要設定）
+name: Insight collector smoke
+
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Run smoke
+        env:
+          BATCH_SMOKE_BASE_URL: ${{ secrets.BATCH_SMOKE_BASE_URL }}
+          CRON_SECRET: ${{ secrets.BATCH_SMOKE_CRON_SECRET }}
+          BATCH_SMOKE_NOTIFY_URL: ${{ secrets.BATCH_SMOKE_NOTIFY_URL }}
+        run: npm run batch:smoke:insight
