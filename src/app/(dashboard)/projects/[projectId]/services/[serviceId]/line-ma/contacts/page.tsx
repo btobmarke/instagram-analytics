@@ -46,6 +46,10 @@ export default function LineMaContactsPage({
   const [cursorStack, setCursorStack] = useState<(string | null)[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const [copyMsg, setCopyMsg] = useState<string | null>(null)
+  const [bulkAddTagIds, setBulkAddTagIds] = useState<string[]>([])
+  const [bulkRemoveTagIds, setBulkRemoveTagIds] = useState<string[]>([])
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null)
   const pageSelectAllRef = useRef<HTMLInputElement>(null)
 
   const { data: svcData } = useSWR<{ success: boolean; data: ServiceDetail }>(
@@ -69,7 +73,7 @@ export default function LineMaContactsPage({
     return `/api/services/${serviceId}/line-messaging/contacts?${q}`
   }, [serviceId, tagFilter, searchQuery, cursor])
 
-  const { data: listResp, isLoading } = useSWR(
+  const { data: listResp, isLoading, mutate: mutList } = useSWR(
     service?.service_type === 'line' ? listUrl : null,
     fetcher,
   )
@@ -141,6 +145,65 @@ export default function LineMaContactsPage({
   const copySelectedLineUserIds = () => {
     const ids = selectedRows.map((r) => r.line_user_id).sort()
     void copyText('LINE userId（改行）', ids.join('\n'))
+  }
+
+  const BULK_MAX = 500
+
+  const runBulkTags = async (mode: 'add' | 'remove') => {
+    const contact_ids = [...selectedIds]
+    if (contact_ids.length === 0) return
+    if (contact_ids.length > BULK_MAX) {
+      setBulkMsg(`選択は最大 ${BULK_MAX} 件までです`)
+      return
+    }
+    const tag_ids_to_add = mode === 'add' ? bulkAddTagIds : []
+    const tag_ids_to_remove = mode === 'remove' ? bulkRemoveTagIds : []
+    if (mode === 'add' && tag_ids_to_add.length === 0) {
+      setBulkMsg('付与するタグを 1 つ以上選んでください（Ctrl で複数）')
+      return
+    }
+    if (mode === 'remove' && tag_ids_to_remove.length === 0) {
+      setBulkMsg('解除するタグを 1 つ以上選んでください（Ctrl で複数）')
+      return
+    }
+    const label =
+      mode === 'add'
+        ? `選択中 ${contact_ids.length} 件にタグを付与します（既に付いている組み合わせはスキップ）`
+        : `選択中 ${contact_ids.length} 件からタグを外します`
+    if (!window.confirm(`${label}。よろしいですか？`)) return
+
+    setBulkBusy(true)
+    setBulkMsg(null)
+    const res = await fetch(`/api/services/${serviceId}/line-messaging/contacts/bulk-tags`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contact_ids,
+        tag_ids_to_add,
+        tag_ids_to_remove,
+      }),
+    })
+    const json = await res.json().catch(() => ({}))
+    setBulkBusy(false)
+    if (!res.ok) {
+      setBulkMsg(
+        typeof json.message === 'string'
+          ? json.message
+          : json.error === 'validation_error'
+            ? '入力内容を確認してください'
+            : json.error ?? '一括タグの更新に失敗しました',
+      )
+      return
+    }
+    const d = json.data as { links_inserted?: number; rows_deleted?: number } | undefined
+    if (mode === 'add') {
+      setBulkMsg(`付与しました（新規リンク ${d?.links_inserted ?? 0} 件）`)
+      setBulkAddTagIds([])
+    } else {
+      setBulkMsg(`解除しました（削除 ${d?.rows_deleted ?? 0} 行）`)
+      setBulkRemoveTagIds([])
+    }
+    void mutList()
   }
 
   const copySelectedDetailLinks = () => {
@@ -286,6 +349,76 @@ export default function LineMaContactsPage({
             </button>
           </div>
           {copyMsg && <p className="text-xs text-gray-600 mt-2">{copyMsg}</p>}
+
+          <div className="mt-4 pt-4 border-t border-green-200/80">
+            <p className="text-xs text-green-900 font-medium mb-2">一括タグ（最大 {BULK_MAX} 件まで）</p>
+            <p className="text-[11px] text-gray-600 mb-3">
+              付与は既存タグに<strong>追加</strong>します（コンタクト詳細の「全置換」とは異なります）。その後、CRM
+              で「このタグを含む」セグメントを作れば一斉配信・リッチメニューに使えます。
+            </p>
+            {selectedIds.size > BULK_MAX && (
+              <p className="text-xs text-amber-700 mb-2">選択が {BULK_MAX} 件を超えています。一括タグは先に選択を減らしてください。</p>
+            )}
+            {tags.length === 0 ? (
+              <p className="text-xs text-gray-500">タグがありません。先に CRM でタグを作成してください。</p>
+            ) : (
+              <div className="flex flex-col sm:flex-row flex-wrap gap-4 items-end">
+                <div className="flex-1 min-w-[200px]">
+                  <label className="block text-xs text-gray-600 mb-1">付与（Ctrl / ⌘ で複数）</label>
+                  <select
+                    multiple
+                    size={Math.min(8, tags.length)}
+                    value={bulkAddTagIds}
+                    onChange={(e) =>
+                      setBulkAddTagIds(Array.from(e.target.selectedOptions, (o) => o.value))
+                    }
+                    className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1 bg-white"
+                  >
+                    {tags.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={bulkBusy || selectedIds.size === 0 || selectedIds.size > BULK_MAX}
+                    onClick={() => void runBulkTags('add')}
+                    className="mt-2 px-3 py-1.5 text-xs font-medium text-white bg-green-700 rounded-lg hover:bg-green-800 disabled:opacity-50"
+                  >
+                    {bulkBusy ? '処理中...' : '付与を実行'}
+                  </button>
+                </div>
+                <div className="flex-1 min-w-[200px]">
+                  <label className="block text-xs text-gray-600 mb-1">解除（Ctrl / ⌘ で複数）</label>
+                  <select
+                    multiple
+                    size={Math.min(8, tags.length)}
+                    value={bulkRemoveTagIds}
+                    onChange={(e) =>
+                      setBulkRemoveTagIds(Array.from(e.target.selectedOptions, (o) => o.value))
+                    }
+                    className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1 bg-white"
+                  >
+                    {tags.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={bulkBusy || selectedIds.size === 0 || selectedIds.size > BULK_MAX}
+                    onClick={() => void runBulkTags('remove')}
+                    className="mt-2 px-3 py-1.5 text-xs font-medium text-amber-900 bg-amber-100 border border-amber-300 rounded-lg hover:bg-amber-50 disabled:opacity-50"
+                  >
+                    {bulkBusy ? '処理中...' : '解除を実行'}
+                  </button>
+                </div>
+              </div>
+            )}
+            {bulkMsg && <p className="text-xs text-gray-700 mt-2">{bulkMsg}</p>}
+          </div>
         </div>
       )}
 
