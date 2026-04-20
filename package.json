@@ -9,7 +9,9 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:ga4-live": "vitest run src/lib/ga4/ga4-client.live.test.ts"
+    "test:ga4-live": "vitest run src/lib/ga4/ga4-client.live.test.ts",
+    "batch:smoke:insight": "node scripts/run-insight-collector-smoke.mjs",
+    "verify": "npm run test"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.68",
