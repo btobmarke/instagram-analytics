@@ -118,7 +118,7 @@ export default function LineMaConnectionPage({
 
   if (service && service.service_type !== 'line') {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
+      <div className="p-6 w-full max-w-none">
         <p className="text-sm text-gray-600">
           このサービスは LINE タイプではありません。プロジェクトの LINE サービスから開いてください。
         </p>
@@ -130,7 +130,7 @@ export default function LineMaConnectionPage({
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6 w-full max-w-none">
       <LineMaBreadcrumb
         projectId={projectId}
         serviceId={serviceId}

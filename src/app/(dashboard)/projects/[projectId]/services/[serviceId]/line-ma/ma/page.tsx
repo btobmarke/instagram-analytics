@@ -317,7 +317,7 @@ export default function LineMaAutomationPage({
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6 w-full max-w-none">
       <LineMaBreadcrumb
         projectId={projectId}
         serviceId={serviceId}

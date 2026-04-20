@@ -227,14 +227,14 @@ export default function LineMaContactsPage({
 
   if (service && service.service_type !== 'line') {
     return (
-      <div className="p-6 max-w-4xl mx-auto text-sm text-gray-600">
+      <div className="p-6 w-full max-w-none text-sm text-gray-600">
         LINE サービスではありません。
       </div>
     )
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-6 w-full max-w-none">
       <LineMaBreadcrumb
         projectId={projectId}
         serviceId={serviceId}

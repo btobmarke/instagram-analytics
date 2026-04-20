@@ -197,7 +197,7 @@ export default function LineMaFormDetailPage({
 
   if (!isLoading && formResp && (formResp as { error?: string }).error === 'not_found') {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
+      <div className="p-6 w-full max-w-none">
         <p className="text-sm text-gray-600">フォームが見つかりません。</p>
         <Link href={`/projects/${projectId}/services/${serviceId}/line-ma/forms`} className="text-green-600 text-sm mt-2 inline-block">
           一覧へ
@@ -207,7 +207,7 @@ export default function LineMaFormDetailPage({
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6 w-full max-w-none">
       <LineMaBreadcrumb
         projectId={projectId}
         serviceId={serviceId}

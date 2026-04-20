@@ -314,7 +314,7 @@ export default function LineMaRichMenuPage({
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-6 w-full max-w-none">
       <LineMaBreadcrumb
         projectId={projectId}
         serviceId={serviceId}

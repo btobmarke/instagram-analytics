@@ -47,7 +47,7 @@ export default function LineServicePage({
   const service = svcData?.data
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6 w-full max-w-none">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-sm text-gray-400 mb-4 flex-wrap">
         <Link href="/projects" className="hover:text-purple-600">プロジェクト</Link>
