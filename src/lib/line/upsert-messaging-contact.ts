@@ -11,6 +11,9 @@ export async function upsertLineMessagingContact(
   opts?: {
     displayName?: string | null
     pictureUrl?: string | null
+    lineStatusMessage?: string | null
+    lineLanguage?: string | null
+    profileFetchedAt?: string | null
     observedAt?: string
     /** 友だち関係（unfollow 時は false） */
     isFollowed?: boolean
@@ -40,6 +43,9 @@ export async function upsertLineMessagingContact(
     }
     if (opts?.displayName !== undefined) patch.display_name = opts.displayName
     if (opts?.pictureUrl !== undefined) patch.picture_url = opts.pictureUrl
+    if (opts?.lineStatusMessage !== undefined) patch.line_status_message = opts.lineStatusMessage
+    if (opts?.lineLanguage !== undefined) patch.line_language = opts.lineLanguage
+    if (opts?.profileFetchedAt !== undefined) patch.profile_fetched_at = opts.profileFetchedAt
     if (opts?.isFollowed !== undefined) patch.is_followed = opts.isFollowed
 
     const { data, error } = await supabase
@@ -61,6 +67,9 @@ export async function upsertLineMessagingContact(
       line_user_id: trimmed,
       display_name: opts?.displayName ?? null,
       picture_url: opts?.pictureUrl ?? null,
+      line_status_message: opts?.lineStatusMessage ?? null,
+      line_language: opts?.lineLanguage ?? null,
+      profile_fetched_at: opts?.profileFetchedAt ?? null,
       is_followed: opts?.isFollowed ?? true,
       first_seen_at: now,
       last_interaction_at: now,

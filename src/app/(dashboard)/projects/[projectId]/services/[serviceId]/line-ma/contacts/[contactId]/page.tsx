@@ -18,6 +18,10 @@ interface Contact {
   id: string
   line_user_id: string
   display_name: string | null
+  picture_url: string | null
+  line_status_message: string | null
+  line_language: string | null
+  profile_fetched_at: string | null
   is_followed: boolean | null
   lead_status: string | null
   ops_memo: string | null
@@ -46,6 +50,52 @@ interface AttrVal {
   definition: AttrDef | null
 }
 
+interface MessagingEventRow {
+  id: string
+  trigger_type: string
+  payload: Record<string, unknown> | null
+  occurred_at: string
+  contact_id: string | null
+  line_user_id: string | null
+}
+
+const TRIGGER_LABELS: Record<string, string> = {
+  'webhook.follow': 'フォロー',
+  'webhook.unfollow': 'アンフォロー',
+  'webhook.message': 'テキストメッセージ',
+  'webhook.postback': 'Postback',
+  'ma.action_error': 'MA アクション失敗',
+  'ma.reply_error': '返信送信失敗',
+  'ma.postback_action_skipped': 'Postback（アクション未実行）',
+  'rich_menu.link_error': 'リッチメニュー紐付け失敗',
+  'rich_menu.linked': 'リッチメニュー紐付け',
+  'dashboard.contact_push': 'ダッシュボードから個人送信',
+  'dashboard.contact_push_error': '個人送信失敗',
+}
+
+function eventSummaryLabel(triggerType: string): string {
+  return TRIGGER_LABELS[triggerType] ?? triggerType
+}
+
+function payloadPreview(payload: Record<string, unknown> | null): string | null {
+  if (!payload || typeof payload !== 'object') return null
+  if (typeof payload.text_length === 'number' && payload.text_length > 0) {
+    return `${payload.text_length} 文字で送信（本文はログに保存していません）`
+  }
+  if (typeof payload.text === 'string' && payload.text.trim()) {
+    const t = payload.text.trim()
+    return t.length > 120 ? `${t.slice(0, 120)}…` : t
+  }
+  if (typeof payload.data === 'string' && payload.data.trim()) {
+    const d = payload.data.trim()
+    return d.length > 100 ? `${d.slice(0, 100)}…` : d
+  }
+  if (typeof payload.error === 'string' && payload.error.trim()) return payload.error.trim()
+  if (typeof payload.message === 'string' && payload.message.trim()) return payload.message.trim()
+  if (typeof payload.reason === 'string' && payload.reason.trim()) return payload.reason.trim()
+  return null
+}
+
 export default function LineMaContactDetailPage({
   params,
 }: {
@@ -60,10 +110,16 @@ export default function LineMaContactDetailPage({
   const service = svcData?.data
 
   const detailUrl = `/api/services/${serviceId}/line-messaging/contacts/${contactId}`
+  const eventsUrl = `${detailUrl}/events?limit=50`
   const { data: detailResp, mutate, isLoading: detailLoading } = useSWR(
     service?.service_type === 'line' ? detailUrl : null,
     fetcher,
   )
+  const { data: eventsResp, mutate: mutateEvents, isLoading: eventsLoading } = useSWR<{
+    success?: boolean
+    data?: MessagingEventRow[]
+    error?: string
+  }>(service?.service_type === 'line' ? eventsUrl : null, fetcher)
 
   const contact: Contact | undefined = detailResp?.data?.contact
   const initialTags: Tag[] = detailResp?.data?.tags ?? []
@@ -109,6 +165,9 @@ export default function LineMaContactDetailPage({
   const [savingProfile, setSavingProfile] = useState(false)
   const [savingTags, setSavingTags] = useState(false)
   const [savingAttr, setSavingAttr] = useState(false)
+  const [syncProfileBusy, setSyncProfileBusy] = useState(false)
+  const [pushText, setPushText] = useState('')
+  const [pushBusy, setPushBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
 
   const toggleTag = (id: string) => {
@@ -189,6 +248,47 @@ export default function LineMaContactDetailPage({
 
   const sortedTags = useMemo(() => [...allTags].sort((a, b) => a.name.localeCompare(b.name)), [allTags])
 
+  const syncLineProfile = async () => {
+    setSyncProfileBusy(true)
+    setMsg(null)
+    const res = await fetch(`${detailUrl}/sync-profile`, { method: 'POST' })
+    const json = await res.json()
+    setSyncProfileBusy(false)
+    if (!res.ok) {
+      setMsg(json.message ?? json.error ?? 'プロフィールの取得に失敗しました')
+      return
+    }
+    setMsg('LINE プロフィールを反映しました')
+    mutate()
+  }
+
+  const sendPushToContact = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const text = pushText.trim()
+    if (!text) {
+      setMsg('送信する本文を入力してください')
+      return
+    }
+    if (!window.confirm('このコンタクト宛に Push 送信します。よろしいですか？')) return
+    setPushBusy(true)
+    setMsg(null)
+    const res = await fetch(`${detailUrl}/push`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    })
+    const json = await res.json()
+    setPushBusy(false)
+    if (!res.ok) {
+      setMsg(json.message ?? json.error ?? '送信に失敗しました')
+      return
+    }
+    setPushText('')
+    setMsg('メッセージを送信しました')
+    void mutate()
+    void mutateEvents()
+  }
+
   if (service && service.service_type !== 'line') {
     return (
       <div className="p-6 text-sm text-gray-600">LINE サービスではありません。</div>
@@ -249,35 +349,158 @@ export default function LineMaContactDetailPage({
       ) : (
         <div className="space-y-6">
           <div className="bg-white rounded-2xl border border-gray-200 p-6">
-            <h2 className="font-bold text-gray-900 mb-4">基本情報</h2>
-            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-              <div>
-                <dt className="text-xs text-gray-400">友だち状態</dt>
-                <dd>
-                  <span
-                    className={`text-xs px-2 py-0.5 rounded-full ${
-                      contact.is_followed ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
-                    }`}
-                  >
-                    {contact.is_followed ? 'フォロー中' : '未フォロー'}
-                  </span>
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-gray-400">初回接触</dt>
-                <dd className="text-gray-800">
-                  {contact.first_seen_at ? new Date(contact.first_seen_at).toLocaleString('ja-JP') : '—'}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-gray-400">最終接触</dt>
-                <dd className="text-gray-800">
-                  {contact.last_interaction_at
-                    ? new Date(contact.last_interaction_at).toLocaleString('ja-JP')
-                    : '—'}
-                </dd>
-              </div>
-            </dl>
+            <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
+              <h2 className="font-bold text-gray-900">基本情報</h2>
+              <button
+                type="button"
+                onClick={syncLineProfile}
+                disabled={syncProfileBusy}
+                className="px-3 py-1.5 text-xs font-medium text-green-800 border border-green-300 rounded-lg hover:bg-green-50 disabled:opacity-50"
+              >
+                {syncProfileBusy ? '取得中...' : 'LINE プロフィールを再取得'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">
+              Webhook 受信時（フォロー・メッセージ・postback）にも自動でプロフィールを取得します。手動は上のボタンから。
+            </p>
+            <div className="flex flex-wrap gap-6 mb-4">
+              {contact.picture_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={contact.picture_url}
+                  alt=""
+                  className="w-20 h-20 rounded-full object-cover border border-gray-200"
+                />
+              ) : (
+                <div className="w-20 h-20 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center text-2xl text-gray-300">
+                  ?
+                </div>
+              )}
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm flex-1 min-w-0">
+                <div>
+                  <dt className="text-xs text-gray-400">表示名（LINE）</dt>
+                  <dd className="text-gray-900 font-medium">{contact.display_name ?? '—'}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-gray-400">友だち状態</dt>
+                  <dd>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full ${
+                        contact.is_followed ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
+                      }`}
+                    >
+                      {contact.is_followed ? 'フォロー中' : '未フォロー'}
+                    </span>
+                  </dd>
+                </div>
+                <div className="sm:col-span-2">
+                  <dt className="text-xs text-gray-400">ステータスメッセージ</dt>
+                  <dd className="text-gray-800 whitespace-pre-wrap break-words">
+                    {contact.line_status_message ?? '—'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-gray-400">言語（LINE）</dt>
+                  <dd className="text-gray-800 font-mono">{contact.line_language ?? '—'}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-gray-400">プロフィール最終取得</dt>
+                  <dd className="text-gray-800">
+                    {contact.profile_fetched_at
+                      ? new Date(contact.profile_fetched_at).toLocaleString('ja-JP')
+                      : '—'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-gray-400">初回接触</dt>
+                  <dd className="text-gray-800">
+                    {contact.first_seen_at ? new Date(contact.first_seen_at).toLocaleString('ja-JP') : '—'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-gray-400">最終接触</dt>
+                  <dd className="text-gray-800">
+                    {contact.last_interaction_at
+                      ? new Date(contact.last_interaction_at).toLocaleString('ja-JP')
+                      : '—'}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+
+          <form onSubmit={sendPushToContact} className="bg-white rounded-2xl border border-gray-200 p-6 space-y-3">
+            <h2 className="font-bold text-gray-900">個人宛に送信（Push）</h2>
+            <p className="text-xs text-gray-500">
+              LINE Messaging API の Push でテキストを 1 通送ります（最大 5000 文字）。ブロック中のユーザーには届きません。
+            </p>
+            <textarea
+              value={pushText}
+              onChange={(e) => setPushText(e.target.value)}
+              rows={5}
+              maxLength={5000}
+              placeholder="送信する本文"
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg"
+            />
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-gray-400">{pushText.length} / 5000</span>
+              <button
+                type="submit"
+                disabled={pushBusy || !pushText.trim()}
+                className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50"
+              >
+                {pushBusy ? '送信中...' : '送信する'}
+              </button>
+            </div>
+          </form>
+
+          <div className="bg-white rounded-2xl border border-gray-200 p-6">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <h2 className="font-bold text-gray-900">行動履歴（MA イベント）</h2>
+              <button
+                type="button"
+                onClick={() => void mutateEvents()}
+                className="text-xs text-green-700 border border-green-200 rounded-lg px-2 py-1 hover:bg-green-50"
+              >
+                再読み込み
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">
+              Webhook・MA・リッチメニュー連携などで記録されたイベントです。古いデータは contact_id が無い場合も line_user_id で表示します。
+            </p>
+            {eventsLoading ? (
+              <p className="text-sm text-gray-500">読み込み中...</p>
+            ) : eventsResp?.error ? (
+              <p className="text-sm text-red-600">{eventsResp.error}</p>
+            ) : !(eventsResp?.data?.length) ? (
+              <p className="text-sm text-gray-500">まだイベントがありません。</p>
+            ) : (
+              <ul className="divide-y divide-gray-100 border border-gray-100 rounded-lg overflow-hidden">
+                {eventsResp.data.map((ev) => {
+                  const preview = payloadPreview(ev.payload)
+                  const linked = ev.contact_id ? 'contact' : 'user_id'
+                  return (
+                    <li key={ev.id} className="px-3 py-2.5 text-sm bg-white hover:bg-gray-50/80">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <span className="font-medium text-gray-900">{eventSummaryLabel(ev.trigger_type)}</span>
+                        <time className="text-xs text-gray-400 tabular-nums shrink-0">
+                          {new Date(ev.occurred_at).toLocaleString('ja-JP')}
+                        </time>
+                      </div>
+                      {preview && (
+                        <p className="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words font-mono">
+                          {preview}
+                        </p>
+                      )}
+                      <p className="text-[10px] text-gray-400 mt-1">
+                        <span className="font-mono">{ev.trigger_type}</span>
+                        {linked === 'user_id' ? ' · contact_id なし（ユーザーID照合）' : ''}
+                      </p>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
           </div>
 
           <form onSubmit={saveProfile} className="bg-white rounded-2xl border border-gray-200 p-6 space-y-4">
