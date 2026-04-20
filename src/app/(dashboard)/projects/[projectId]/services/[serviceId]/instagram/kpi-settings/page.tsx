@@ -79,7 +79,7 @@ function cardLabelForRef(
 ): string {
   const list = cardType === 'custom_card' ? customCards : catalog
   const found = list.find((c) => c.id === cardRef)
-  return found?.label ?? cardRef || '—'
+  return (found?.label ?? cardRef) || '—'
 }
 
 function buildPayloadFromRows(rows: LocalKpiRow[]): { kpis: KpiPutRow[] } | { error: string } {
