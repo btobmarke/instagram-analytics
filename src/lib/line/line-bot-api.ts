@@ -81,3 +81,48 @@ export async function lineBotLinkRichMenuToUser(
     undefined,
   )
 }
+
+/** GET /v2/bot/profile/{userId} のレスポンス（公式仕様に追随） */
+export type LineUserProfile = {
+  userId: string
+  displayName: string
+  pictureUrl?: string
+  statusMessage?: string
+  language?: string
+}
+
+/**
+ * 友だちユーザーのプロフィール取得（Messaging API）
+ * @see https://developers.line.biz/en/reference/messaging-api/#get-profile
+ */
+export async function lineBotGetProfile(
+  accessToken: string,
+  lineUserId: string,
+): Promise<{ ok: true; profile: LineUserProfile; requestId?: string | null } | { ok: false; status: number; message: string; requestId?: string | null }> {
+  const res = await lineBotRequestJson(
+    'GET',
+    `/profile/${encodeURIComponent(lineUserId)}`,
+    accessToken,
+    undefined,
+  )
+  if (!res.ok) {
+    return { ok: false, status: res.status, message: res.message, requestId: res.requestId }
+  }
+  const body = res.body as Record<string, unknown> | undefined
+  if (!body || typeof body !== 'object') {
+    return { ok: false, status: 502, message: 'empty_profile_response', requestId: res.requestId }
+  }
+  const uid = String(body.userId ?? '')
+  const dn = String(body.displayName ?? '')
+  if (!uid) {
+    return { ok: false, status: 502, message: 'profile_missing_userId', requestId: res.requestId }
+  }
+  const profile: LineUserProfile = {
+    userId: uid,
+    displayName: dn,
+    pictureUrl: typeof body.pictureUrl === 'string' ? body.pictureUrl : undefined,
+    statusMessage: typeof body.statusMessage === 'string' ? body.statusMessage : undefined,
+    language: typeof body.language === 'string' ? body.language : undefined,
+  }
+  return { ok: true, profile, requestId: res.requestId }
+}

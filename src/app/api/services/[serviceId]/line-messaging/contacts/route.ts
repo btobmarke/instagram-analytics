@@ -61,7 +61,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     const { data: rows, error: cErr } = await admin
       .from('line_messaging_contacts')
       .select(
-        'id, line_user_id, display_name, picture_url, is_followed, lead_status, ops_memo, assignee_app_user_id, first_seen_at, last_interaction_at',
+        'id, line_user_id, display_name, picture_url, line_status_message, line_language, profile_fetched_at, is_followed, lead_status, ops_memo, assignee_app_user_id, first_seen_at, last_interaction_at',
       )
       .eq('service_id', serviceId)
       .in('id', contactIds)
@@ -75,7 +75,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   let q = admin
     .from('line_messaging_contacts')
     .select(
-      'id, line_user_id, display_name, picture_url, is_followed, lead_status, ops_memo, assignee_app_user_id, first_seen_at, last_interaction_at',
+      'id, line_user_id, display_name, picture_url, line_status_message, line_language, profile_fetched_at, is_followed, lead_status, ops_memo, assignee_app_user_id, first_seen_at, last_interaction_at',
     )
     .eq('service_id', serviceId)
     .order('line_user_id')

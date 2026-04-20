@@ -5,6 +5,7 @@ import { decrypt } from '@/lib/utils/crypto'
 import { verifyLineWebhookSignature } from '@/lib/line/verify-webhook-signature'
 import { upsertLineMessagingContact } from '@/lib/line/upsert-messaging-contact'
 import { processMaForWebhookEvent } from '@/lib/line/process-ma-webhook'
+import { syncLineUserProfileToContact } from '@/lib/line/sync-line-user-profile'
 
 type Params = { params: Promise<{ serviceId: string }> }
 
@@ -120,6 +121,8 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   const observedAt = new Date().toISOString()
+  /** 同一リクエスト内で userId ごとに profile API は最大1回 */
+  const profileSyncedUserIds = new Set<string>()
 
   for (const ev of events) {
     const userId = ev.source?.type === 'user' ? ev.source.userId : undefined
@@ -170,6 +173,25 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
 
     await processMaForWebhookEvent(admin, serviceId, userId, contactId, ev, channelAccessToken)
+
+    if (
+      channelAccessToken &&
+      contactId &&
+      (ev.type === 'follow' || ev.type === 'message' || ev.type === 'postback') &&
+      !profileSyncedUserIds.has(userId)
+    ) {
+      profileSyncedUserIds.add(userId)
+      const sync = await syncLineUserProfileToContact(
+        admin,
+        serviceId,
+        contactId,
+        userId,
+        channelAccessToken,
+      )
+      if (!sync.ok) {
+        console.warn('[line webhook] profile sync', serviceId, userId, sync.error, sync.status)
+      }
+    }
   }
 
   return NextResponse.json({ ok: true })
