@@ -261,8 +261,8 @@ export async function POST(request: Request) {
             }
           }
 
-          // 投稿→プロフィール行動（profile_activity + action_type breakdown）
-          if (mediaType === 'FEED' || mediaType === 'REELS' || mediaType === 'STORY' || mediaType === 'VIDEO') {
+          // 投稿→プロフィール行動（profile_activity）— REELS/VIDEO は API が非対応 (#100)
+          if (mediaType === 'FEED' || mediaType === 'STORY') {
             try {
               const { data: paData, rateUsage: paRate } = await igClient.getMediaProfileActivityInsights(
                 media.platform_media_id,
@@ -465,23 +465,25 @@ export async function POST(request: Request) {
           }
 
           // --- (B2) breakdown 付きアカウント指標（1日レンジ） ---
-          const breakdownPairs: Array<[
-            'reach' | 'views',
-            'media_product_type' | 'follow_type' | 'follower_type',
-          ]> = [
-            ['reach', 'media_product_type'],
-            ['reach', 'follow_type'],
-            ['views', 'follower_type'],
-            ['views', 'media_product_type'],
+          // views のフォロワー内訳は API では breakdown=follow_type（v20+）。DB は既存カタログ互換で dimension_code=follower_type
+          const breakdownPairs: Array<{
+            metric: 'reach' | 'views'
+            apiBreakdown: 'media_product_type' | 'follow_type'
+            dimensionCode: string
+          }> = [
+            { metric: 'reach', apiBreakdown: 'media_product_type', dimensionCode: 'media_product_type' },
+            { metric: 'reach', apiBreakdown: 'follow_type', dimensionCode: 'follow_type' },
+            { metric: 'views', apiBreakdown: 'follow_type', dimensionCode: 'follower_type' },
+            { metric: 'views', apiBreakdown: 'media_product_type', dimensionCode: 'media_product_type' },
           ]
 
-          for (const [metric, breakdown] of breakdownPairs) {
+          for (const { metric, apiBreakdown, dimensionCode } of breakdownPairs) {
             try {
               const { data: bdData, rateUsage: bdRate } = await igClient.getAccountInsightsBreakdownTotalValue({
                 since: daySince,
                 until: dayUntil,
                 metric,
-                breakdown,
+                breakdown: apiBreakdown,
               })
               if (isRateLimitExceeded(bdRate, 70)) {
                 console.warn('[insight-collector] rate usage high, stopping breakdown fetches for day', {
@@ -496,7 +498,7 @@ export async function POST(request: Request) {
               if (row) {
                 await upsertAccountBreakdownRows({
                   metricName: metric,
-                  breakdownKey: breakdown,
+                  breakdownKey: dimensionCode,
                   valueDate: daySince,
                   periodCode: 'day',
                   row,
@@ -507,7 +509,8 @@ export async function POST(request: Request) {
                 account_id: account.id,
                 date: daySince,
                 metric,
-                breakdown,
+                apiBreakdown,
+                dimensionCode,
                 error: bdErr instanceof Error ? bdErr.message : String(bdErr),
               })
             }
@@ -518,8 +521,8 @@ export async function POST(request: Request) {
           await new Promise(resolve => setTimeout(resolve, 200))
         }
 
-        // --- (B3) デモグラフィック（lifetime + timeframe）※分析用途: 90日スナップショットを日次ジョブで更新 ---
-        const demoTimeframe = 'last_90_days' as const
+        // --- (B3) デモグラフィック（lifetime + timeframe）※ v20+ では last_90_days 廃止 → last_30_days
+        const demoTimeframe = 'last_30_days' as const
         const demoBreakdowns = ['country', 'age', 'gender', 'city'] as const
         const demoMetrics = ['engaged_audience_demographics', 'follower_demographics'] as const
         const demoAsOf = until // 直近インサイト取得ウィンドウの終端日をスナップショット日付として使う

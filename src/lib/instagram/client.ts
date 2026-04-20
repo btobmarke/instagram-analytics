@@ -387,13 +387,14 @@ export class InstagramClient {
 
   /**
    * アカウント日次: breakdown 付き total_value（1日レンジ推奨）
-   * 例: reach + media_product_type / follow_type、views + follower_type 等
+   * 例: reach + media_product_type / follow_type、views + follow_type 等
+   * （API v20+ では views の内訳は breakdown=follow_type。follower_type は無効）
    */
   async getAccountInsightsBreakdownTotalValue(params: {
     since: string
     until: string
     metric: 'reach' | 'views'
-    breakdown: 'media_product_type' | 'follow_type' | 'follower_type'
+    breakdown: 'media_product_type' | 'follow_type'
   }) {
     return this.fetch(
       `/${this.accountId}/insights`,
@@ -416,7 +417,8 @@ export class InstagramClient {
    */
   async getAccountInsightsDemographics(params: {
     metric: 'engaged_audience_demographics' | 'follower_demographics'
-    timeframe: 'last_90_days' | 'last_30_days' | 'this_month' | 'this_week'
+    /** v20+ では last_90_days 等が廃止。last_30_days / this_month / this_week を使用 */
+    timeframe: 'last_30_days' | 'this_month' | 'this_week'
     breakdown: 'country' | 'age' | 'gender' | 'city'
   }) {
     return this.fetch(
