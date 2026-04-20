@@ -465,6 +465,7 @@ export async function POST(request: Request) {
           }
 
           // --- (B2) breakdown 付きアカウント指標（1日レンジ） ---
+          // views のフォロワー内訳は API では breakdown=follow_type（v20+）。DB は既存カタログ互換で dimension_code=follower_type
           const breakdownPairs: Array<{
             metric: 'reach' | 'views'
             apiBreakdown: 'media_product_type' | 'follow_type'

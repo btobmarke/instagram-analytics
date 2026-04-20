@@ -418,7 +418,7 @@ export class InstagramClient {
   async getAccountInsightsDemographics(params: {
     metric: 'engaged_audience_demographics' | 'follower_demographics'
     breakdown: 'country' | 'age' | 'gender' | 'city'
-    /** 未指定なら timeframe クエリを付けない（推奨） */
+    /** 未指定なら timeframe クエリを付けない（推奨）。v20+ では last_N_days 系は廃止 */
     timeframe?: 'this_month' | 'this_week'
   }) {
     const q: Record<string, string> = {
