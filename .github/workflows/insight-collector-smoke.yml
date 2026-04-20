@@ -1,4 +1,8 @@
-# 手動: insight-collector 疎通（Secrets 要設定）
+# 手動実行: insight-collector をステージング等に POST し、終了コードで結果を分類する。
+# Secrets（リポジトリ Settings → Secrets）:
+#   BATCH_SMOKE_BASE_URL … 例 https://your-app.vercel.app
+#   BATCH_SMOKE_CRON_SECRET … サーバーの CRON_SECRET と同一
+#   BATCH_SMOKE_NOTIFY_URL … 任意（失敗時に POST する Webhook URL）
 name: Insight collector smoke
 
 on:
@@ -14,7 +18,7 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - run: npm ci
-      - name: Run smoke
+      - name: Run batch smoke
         env:
           BATCH_SMOKE_BASE_URL: ${{ secrets.BATCH_SMOKE_BASE_URL }}
           CRON_SECRET: ${{ secrets.BATCH_SMOKE_CRON_SECRET }}
