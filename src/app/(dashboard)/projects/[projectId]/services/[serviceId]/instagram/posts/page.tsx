@@ -224,7 +224,9 @@ export default function ServicePostsPage({
                     <input type="checkbox" checked={allSelected} onChange={toggleAll} className={postListFancyCheckboxClass} />
                   </th>
                   <th className={thStickyPost} scope="col">投稿</th>
-                  {isOn('type') && <th className={`${thMetrics} text-left min-w-[5.5rem]`}>種別</th>}
+                  {isOn('type') && (
+                    <th className={`${thMetrics} text-left min-w-[5.5rem] whitespace-nowrap`}>種別</th>
+                  )}
                   {isOn('views') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>表示</th>}
                   {isOn('viewsFollowerPct') && (
                     <th
@@ -336,8 +338,10 @@ export default function ServicePostsPage({
                         </div>
                       </td>
                       {isOn('type') && (
-                        <td className="px-4 py-4 align-top">
-                          <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${MEDIA_TYPE_COLORS[post.media_product_type ?? ''] ?? 'bg-gray-100 text-gray-600'}`}>
+                        <td className="px-4 py-4 align-top whitespace-nowrap">
+                          <span
+                            className={`inline-block text-xs font-medium px-2.5 py-1 rounded-full whitespace-nowrap ${MEDIA_TYPE_COLORS[post.media_product_type ?? ''] ?? 'bg-gray-100 text-gray-600'}`}
+                          >
                             {MEDIA_TYPE_LABELS[post.media_product_type ?? ''] ?? post.media_type}
                           </span>
                         </td>
