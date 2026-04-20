@@ -11,6 +11,7 @@ import {
   buildMilestoneDiffTable,
   type OverlaySeriesPost,
 } from '@/lib/instagram/post-insight-chart'
+import { IG_MEDIA_INSIGHT_FACT_MAX_ROWS } from '@/lib/instagram/post-insight-fact-query'
 import { formatPostMetaContextBlock } from '@/lib/instagram/post-meta'
 
 // POST /api/posts/[id]/analysis — AI分析実行（ストリーミング）
@@ -61,7 +62,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .select('metric_code, value, snapshot_at')
     .eq('media_id', id)
     .order('snapshot_at', { ascending: true })
-    .limit(3000)
+    .limit(IG_MEDIA_INSIGHT_FACT_MAX_ROWS)
 
   const timeSeries = buildTimeSeriesMapFromFactRows(insightAsc ?? [])
   const milestones = milestoneCumulativeSummary(post.posted_at, timeSeries, ['reach', 'likes', 'saved'])
@@ -81,7 +82,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       .select('metric_code, value, snapshot_at')
       .eq('media_id', pid)
       .order('snapshot_at', { ascending: true })
-      .limit(3000)
+      .limit(IG_MEDIA_INSIGHT_FACT_MAX_ROWS)
 
     const peerTs = buildTimeSeriesMapFromFactRows(peerFacts ?? [])
     const mainO: OverlaySeriesPost = {
