@@ -76,7 +76,7 @@ function EmbedCodeSection({ lpCode, apiBase, serviceId }: { lpCode: string; apiB
   });
 </script>`
 
-  const copy = useCallback((text: string, type: 'snippet' | 'lpCode') => {
+  const copy = useCallback((text: string, type: 'snippet' | 'lpCode' | 'newKey') => {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(type)
       setTimeout(() => setCopied(null), 2000)

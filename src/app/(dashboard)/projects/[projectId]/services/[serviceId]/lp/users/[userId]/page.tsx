@@ -26,6 +26,8 @@ interface LpUserDetail {
   totalIntentScore: number
   userTemperature: string
   userAgent: string | null
+  /** フォーム等で送信されたプロフィール（キーは LP 側で任意） */
+  formProfile?: Record<string, unknown>
   sessions: SessionItem[]
 }
 
@@ -126,6 +128,22 @@ export default function LpUserDetailPage({
             <p className="text-xs text-gray-400 mt-1">最終訪問日</p>
           </div>
         </div>
+
+        {user.formProfile && Object.keys(user.formProfile).length > 0 && (
+          <div className="mt-6 pt-4 border-t border-gray-100">
+            <p className="text-xs font-semibold text-gray-500 mb-2">フォーム・送信プロフィール</p>
+            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+              {Object.entries(user.formProfile).map(([key, val]) => (
+                <div key={key} className="flex flex-col bg-gray-50 rounded-lg px-3 py-2">
+                  <dt className="text-xs text-gray-400 font-mono break-all">{key}</dt>
+                  <dd className="text-gray-800 font-medium mt-0.5 break-words">
+                    {val === null || val === undefined ? '—' : String(val)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
       </div>
 
       {/* Sessions */}

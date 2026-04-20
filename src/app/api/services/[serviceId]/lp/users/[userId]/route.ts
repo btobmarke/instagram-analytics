@@ -30,7 +30,7 @@ export async function GET(
   // ユーザー取得
   const { data: lpUser, error: userError } = await supabase
     .from('lp_users')
-    .select('id, anonymous_user_key, first_visited_at, last_visited_at, visit_count, total_intent_score, user_temperature')
+    .select('id, anonymous_user_key, first_visited_at, last_visited_at, visit_count, total_intent_score, user_temperature, form_profile_json')
     .eq('id', userId)
     .eq('lp_site_id', lpSite.id)
     .single()
@@ -57,6 +57,12 @@ export async function GET(
       visitCount: lpUser.visit_count,
       totalIntentScore: lpUser.total_intent_score,
       userTemperature: lpUser.user_temperature, // 'HOT' | 'COLD'
+      formProfile:
+        lpUser.form_profile_json &&
+        typeof lpUser.form_profile_json === 'object' &&
+        !Array.isArray(lpUser.form_profile_json)
+          ? (lpUser.form_profile_json as Record<string, unknown>)
+          : {},
       sessions: (sessions ?? []).map(s => ({
         sessionId: s.id,
         startedAt: s.started_at,

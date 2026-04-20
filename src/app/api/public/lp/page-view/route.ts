@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
 
   const { anonymousUserKey, sessionId, occurredAt, pageUrl, pageTitle, scrollPercentMax, staySeconds } = parsed.data
 
-  console.log(`[LP-SDK] page-view  lpCode=${lpSite.lp_code} url=${pageUrl ?? location} scroll=${scrollPercentMax ?? '?'}% stay=${staySeconds ?? '?'}秒`)
+  console.log(`[LP-SDK] page-view  lpCode=${lpSite.lp_code} url=${pageUrl ?? '-'} scroll=${scrollPercentMax ?? '?'}% stay=${staySeconds ?? '?'}秒`)
 
   // セッション確認（lpSite に紐づくユーザーのセッションか）
   const { data: session } = await supabase
