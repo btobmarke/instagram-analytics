@@ -1,11 +1,30 @@
 'use client'
 
-import { use } from 'react'
+import { use, useMemo } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 import { formatDeviceCategoryJa } from '@/lib/lp-device-category'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
+
+/** LpMA `section_in_view` などで送る meta の section_id（snake / camel 両対応） */
+function metaSectionId(meta: Record<string, unknown> | undefined): string | null {
+  if (!meta) return null
+  const v = meta.section_id ?? meta.sectionId
+  if (v === undefined || v === null) return null
+  const s = typeof v === 'string' ? v : String(v)
+  const t = s.trim()
+  return t.length > 0 ? t : null
+}
+
+function metaSectionName(meta: Record<string, unknown> | undefined): string | null {
+  if (!meta) return null
+  const v = meta.section_name ?? meta.sectionName
+  if (v === undefined || v === null) return null
+  const s = typeof v === 'string' ? v : String(v)
+  const t = s.trim()
+  return t.length > 0 ? t : null
+}
 
 type TimelineItem = {
   type: 'page_view' | 'event'
@@ -59,6 +78,22 @@ export default function LpSessionDetailPage({
   )
 
   const session = data?.data
+
+  /** section_in_view を時系列で走査し、各 section_id の「初回到達」順 */
+  const sectionReachFirstOrder = useMemo(() => {
+    const tl = session?.timeline
+    if (!tl?.length) return []
+    const order: string[] = []
+    const seen = new Set<string>()
+    for (const item of tl) {
+      if (item.type !== 'event' || item.eventId !== 'section_in_view') continue
+      const id = metaSectionId(item.meta)
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      order.push(id)
+    }
+    return order
+  }, [session?.timeline])
 
   if (isLoading) {
     return (
@@ -154,6 +189,27 @@ export default function LpSessionDetailPage({
         </div>
       </div>
 
+      {sectionReachFirstOrder.length > 0 && (
+        <div className="bg-gradient-to-br from-purple-50 to-white rounded-2xl border border-purple-100 p-5 mb-6">
+          <h2 className="text-sm font-bold text-purple-900 mb-2">到達したセクション（初回のみ・スクロール順）</h2>
+          <p className="text-xs text-purple-700/80 mb-3">
+            <code className="text-[11px] bg-white/80 px-1 py-0.5 rounded border border-purple-100">section_in_view</code>
+            イベントの <code className="text-[11px] bg-white/80 px-1 py-0.5 rounded border border-purple-100">meta.section_id</code> を集計しています。
+          </p>
+          <ol className="space-y-2 list-none p-0 m-0">
+            {sectionReachFirstOrder.map((id, i) => (
+              <li
+                key={id}
+                className="w-full rounded-xl border border-purple-100 bg-white/90 px-4 py-3 text-sm text-gray-800 shadow-sm"
+              >
+                <span className="text-xs font-semibold text-purple-600 tabular-nums">{i + 1}.</span>{' '}
+                <span className="font-mono text-purple-900 break-all">{id}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
       {/* Timeline */}
       <h2 className="text-lg font-bold text-gray-900 mb-4">行動タイムライン</h2>
 
@@ -165,7 +221,10 @@ export default function LpSessionDetailPage({
         <div className="relative">
           <div className="absolute left-5 top-0 bottom-0 w-px bg-gray-200" />
           <div className="space-y-3">
-            {session.timeline.map((item, idx) => (
+            {session.timeline.map((item, idx) => {
+              const sectionId = item.type === 'event' ? metaSectionId(item.meta) : null
+              const sectionName = item.type === 'event' ? metaSectionName(item.meta) : null
+              return (
               <div key={idx} className="relative flex gap-4">
                 <div className={`relative z-10 w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
                   item.type === 'event'
@@ -176,58 +235,82 @@ export default function LpSessionDetailPage({
                     {item.type === 'event' ? '⚡' : '📄'}
                   </span>
                 </div>
-                <div className="flex-1 bg-white rounded-xl border border-gray-200 p-4">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      {item.type === 'page_view' ? (
-                        <>
-                          <p className="text-sm font-medium text-gray-900">
-                            {item.pageTitle ?? 'ページビュー'}
-                          </p>
-                          {item.pageUrl && (
-                            <p className="text-xs text-gray-400 mt-0.5 truncate max-w-xs">{item.pageUrl}</p>
+                <div className="flex-1 min-w-0 bg-white rounded-xl border border-gray-200 p-4">
+                  {item.type === 'page_view' ? (
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-gray-900">
+                          {item.pageTitle ?? 'ページビュー'}
+                        </p>
+                        {item.pageUrl && (
+                          <p className="text-xs text-gray-400 mt-0.5 truncate">{item.pageUrl}</p>
+                        )}
+                        <div className="flex flex-wrap gap-3 mt-1">
+                          {item.scrollPercentMax !== undefined && (
+                            <span className="text-xs text-gray-500">
+                              スクロール: {item.scrollPercentMax}%
+                            </span>
                           )}
-                          <div className="flex gap-3 mt-1">
-                            {item.scrollPercentMax !== undefined && (
-                              <span className="text-xs text-gray-500">
-                                スクロール: {item.scrollPercentMax}%
-                              </span>
-                            )}
-                            {item.staySeconds !== undefined && item.staySeconds > 0 && (
-                              <span className="text-xs text-gray-500">
-                                滞在: {item.staySeconds}秒
-                              </span>
-                            )}
-                          </div>
-                        </>
-                      ) : (
-                        <>
+                          {item.staySeconds !== undefined && item.staySeconds > 0 && (
+                            <span className="text-xs text-gray-500">
+                              滞在: {item.staySeconds}秒
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-300 flex-shrink-0">
+                        {new Date(item.occurredAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3 w-full min-w-0">
+                      <div className="flex items-start justify-between gap-3 w-full min-w-0">
+                        <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium text-gray-900">
                             {item.eventName ?? item.eventId}
                           </p>
                           {item.eventId && item.eventName && (
-                            <p className="text-xs text-gray-400 mt-0.5 font-mono">{item.eventId}</p>
+                            <p className="text-xs text-gray-400 mt-0.5 font-mono break-all">{item.eventId}</p>
                           )}
-                          {item.pageUrl && (
-                            <p className="text-xs text-gray-400 mt-0.5 truncate max-w-xs">{item.pageUrl}</p>
+                        </div>
+                        <div className="flex items-start gap-3 flex-shrink-0">
+                          {item.intentScore !== undefined && item.intentScore > 0 && (
+                            <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 text-xs font-bold">
+                              +{item.intentScore}
+                            </span>
                           )}
-                        </>
+                          <p className="text-xs text-gray-300">
+                            {new Date(item.occurredAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                          </p>
+                        </div>
+                      </div>
+                      {item.eventId === 'section_in_view' && (sectionId || sectionName) && (
+                        <div className="w-full rounded-xl bg-purple-50 border border-purple-100 px-4 py-3 text-xs box-border">
+                          <span className="text-purple-800 font-semibold">セクション到達</span>
+                          {sectionName && (
+                            <p className="text-gray-900 mt-1 text-sm font-medium break-words">{sectionName}</p>
+                          )}
+                          {sectionId && (
+                            <p
+                              className={
+                                sectionName
+                                  ? 'font-mono text-[11px] text-purple-700 mt-1 break-all'
+                                  : 'font-mono text-sm text-purple-900 mt-1 break-all'
+                              }
+                            >
+                              {sectionId}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      {item.pageUrl && (
+                        <p className="text-xs text-gray-400 truncate w-full min-w-0">{item.pageUrl}</p>
                       )}
                     </div>
-                    <div className="flex items-start gap-3 flex-shrink-0">
-                      {item.type === 'event' && item.intentScore !== undefined && item.intentScore > 0 && (
-                        <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 text-xs font-bold">
-                          +{item.intentScore}
-                        </span>
-                      )}
-                      <p className="text-xs text-gray-300">
-                        {new Date(item.occurredAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                      </p>
-                    </div>
-                  </div>
+                  )}
                 </div>
               </div>
-            ))}
+            )})}
           </div>
         </div>
       )}

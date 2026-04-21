@@ -10,6 +10,9 @@
  *     lpCode: 'your-lp-code',
  *     spa: true, // 同一ドキュメント内の History 遷移ごとに pageView（省略時は従来どおり）
  *   });
+ *   // セクション到達（IntersectionObserver 等から1セクション1回推奨）
+ *   // LpMA.trackSectionInView('pricing');
+ *   // LpMA.trackSectionInView('pricing', '料金');
  * </script>
  */
 (function (global) {
@@ -126,6 +129,19 @@
       pageUrl: location.href,
       meta: meta || {},
     });
+  }
+
+  /**
+   * セクション到達（ビューポート内表示）の推奨イベント。
+   * meta は { section_id: string, section_name?: string } 形式（ダッシュボードのセッション詳細と連携）。
+   */
+  function trackSectionInView(sectionId, sectionName) {
+    if (!sectionId) return Promise.resolve(null);
+    var meta = { section_id: String(sectionId) };
+    if (sectionName != null && String(sectionName).length > 0) {
+      meta.section_name = String(sectionName);
+    }
+    return sendEvent('section_in_view', meta);
   }
 
   function heartbeat() {
@@ -313,6 +329,7 @@
   global.LpMA = {
     init: init,
     track: sendEvent,
+    trackSectionInView: trackSectionInView,
     pageView: sendPageView,
     endSession: endSession,
     setFormProfile: setFormProfile,

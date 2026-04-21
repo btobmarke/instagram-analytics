@@ -3,6 +3,11 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { isAiModelOptionId } from '@/lib/ai/model-options'
 import { normalizeLpMaIpExcludeList } from '@/lib/lp-ip-exclude'
 
+function normalizeStoredCidrs(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return raw.filter((x): x is string => typeof x === 'string')
+}
+
 // GET /api/clients/:clientId - クライアント詳細取得（プロジェクト一覧付き）
 export async function GET(
   _request: NextRequest,
@@ -23,10 +28,21 @@ export async function GET(
       )
     `)
     .eq('id', clientId)
-    .single()
+    .maybeSingle()
 
-  if (error || !data) {
-    return NextResponse.json({ success: false, error: { code: 'NOT_FOUND', message: 'クライアントが見つかりません' } }, { status: 404 })
+  if (error) {
+    console.error('[GET /api/clients/[clientId]]', clientId, error)
+    return NextResponse.json(
+      { success: false, error: { code: 'DB_ERROR', message: error.message } },
+      { status: 500 }
+    )
+  }
+
+  if (!data) {
+    return NextResponse.json(
+      { success: false, error: { code: 'NOT_FOUND', message: 'クライアントが見つかりません' } },
+      { status: 404 }
+    )
   }
 
   const projects = ((data as Record<string, unknown>).projects as Record<string, unknown>[] ?? [])
@@ -122,7 +138,6 @@ export async function PATCH(
   return NextResponse.json({ success: true, data })
 }
 
-<<<<<<< HEAD
 // DELETE /api/clients/:clientId — クライアントを削除（プロジェクトが1件でもある場合は不可）
 export async function DELETE(
   _request: NextRequest,
@@ -183,9 +198,4 @@ export async function DELETE(
   }
 
   return NextResponse.json({ success: true, data: { id: clientId } })
-=======
-function normalizeStoredCidrs(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return []
-  return raw.filter((x): x is string => typeof x === 'string')
->>>>>>> 2d0f04191b8a2e97576305015fd46e5b2692e7a9
 }

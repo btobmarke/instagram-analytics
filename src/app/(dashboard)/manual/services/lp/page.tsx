@@ -22,6 +22,27 @@ export default function LpServiceManual() {
         />
       </Section>
 
+      <Section title="LpMA 推奨カスタムイベント（セクション到達）">
+        <p>
+          LP 側の計測タグ（<Code>LpMA.track</Code> / 自前の <Code>fetch</Code> でも可）で、スクロールにより「どのセクションがビューポートに入ったか」を残す場合は、次の契約に揃えるとダッシュボードのセッション詳細で要約・タイムライン表示されます。
+        </p>
+        <ul className="list-disc pl-5 space-y-1 mt-2 text-sm">
+          <li><strong>event_id</strong>：<Code>section_in_view</Code>（固定文字列）</li>
+          <li><strong>meta</strong>：<Code>{'{ section_id: string }'}</Code> 必須。任意で <Code>section_name</Code>（表示用ラベル）を付与可能。</li>
+        </ul>
+        <p className="mt-3 text-sm text-gray-600">
+          同一セクションで連続送信されても、セッション詳細の「到達したセクション」一覧は <strong>各 <Code>section_id</Code> の初回のみ</strong>を順序付きで表示します（タイムライン上は従来どおり全件）。
+        </p>
+        <pre className="mt-3 bg-gray-900 text-gray-100 text-xs font-mono p-4 rounded-xl overflow-x-auto leading-relaxed">
+{`// lp-sdk.js 利用時（推奨）
+LpMA.trackSectionInView('pricing');
+LpMA.trackSectionInView('pricing', '料金');
+
+// または LpMA.track と同一ペイロード
+LpMA.track('section_in_view', { section_id: 'pricing' });`}
+        </pre>
+      </Section>
+
       <Section title="サービスに紐づく設定項目">
         <ul className="list-disc pl-5 space-y-1">
           <li><strong>LP_ID</strong>：計測タグのスクリプトや MA 連携で利用する一意のコード。サービス登録時に入力します。</li>
