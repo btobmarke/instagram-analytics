@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { authenticateLpRequest } from '@/lib/lp-auth'
+import { parseDeviceCategoryFromUserAgent } from '@/lib/lp-device-category'
 
 const SessionStartSchema = z.object({
   lpCode: z.string().min(1),
@@ -9,6 +10,7 @@ const SessionStartSchema = z.object({
   startedAt: z.string().optional(),
   referrerSource: z.string().max(500).optional(),
   landingPageUrl: z.string().max(1000).optional(),
+  userAgent: z.string().max(2000).optional(),
 })
 
 /**
@@ -35,7 +37,9 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const { anonymousUserKey, startedAt, referrerSource, landingPageUrl } = parsed.data
+  const { anonymousUserKey, startedAt, referrerSource, landingPageUrl, userAgent: rawUa } = parsed.data
+  const userAgent = rawUa && rawUa.length > 2000 ? rawUa.slice(0, 2000) : rawUa ?? null
+  const deviceCategory = parseDeviceCategoryFromUserAgent(userAgent)
 
   console.log(`[LP-SDK] session/start  lpCode=${lpSite.lp_code} anonKey=${anonymousUserKey.slice(0,16)}... referrer=${referrerSource ?? 'direct'} url=${landingPageUrl ?? '-'}`)
 
@@ -96,6 +100,8 @@ export async function POST(request: NextRequest) {
       last_activity_at: now.toISOString(),
       referrer_source: referrerSource ?? null,
       landing_page_url: landingPageUrl ?? null,
+      user_agent: userAgent,
+      device_category: deviceCategory,
     })
     .select('id')
     .single()

@@ -8,6 +8,7 @@
  *     apiBase: 'https://your-app.vercel.app/api/public/lp',
  *     apiKey: 'lp_xxxxxxxx',
  *     lpCode: 'your-lp-code',
+ *     spa: true, // 同一ドキュメント内の History 遷移ごとに pageView（省略時は従来どおり）
  *   });
  * </script>
  */
@@ -22,6 +23,10 @@
   var sessionId = null;
   var heartbeatTimer = null;
   var sessionEnded = false; // 二重送信防止フラグ
+  var spaHooksInstalled = false;
+  /** popstate 時に「離脱した仮想ページ」URL・タイトルを送るための直前状態 */
+  var spaLastUrl = '';
+  var spaLastTitle = '';
 
   function getStoredAnonKey() {
     try { return localStorage.getItem(STORAGE_KEY_ANON); } catch (e) { return null; }
@@ -86,6 +91,7 @@
       startedAt: new Date().toISOString(),
       referrerSource: document.referrer ? new URL(document.referrer).hostname : 'direct',
       landingPageUrl: location.href,
+      userAgent: navigator.userAgent,
     }).then(function (res) {
       if (res && res.success) {
         sessionId = res.data.sessionId;
@@ -196,6 +202,67 @@
     });
   }
 
+  /**
+   * 現在表示中の仮想ページの PV を送り、スクロール・滞在カウンタを次ページ用にリセットする。
+   * pushState / replaceState の直前（location がまだ旧 URL）と popstate で利用。
+   */
+  function flushSpaVirtualPage(leavingUrl, leavingTitle) {
+    if (!sessionId || sessionEnded) return;
+    var staySeconds = Math.round((Date.now() - pageEnteredAt) / 1000);
+    sendPageView(leavingUrl, leavingTitle, maxScrollPercent, staySeconds);
+    maxScrollPercent = 0;
+    pageEnteredAt = Date.now();
+  }
+
+  function installSpaHistoryHooks() {
+    if (spaHooksInstalled || !config || !config.spa) return;
+    spaHooksInstalled = true;
+    spaLastUrl = location.href;
+    spaLastTitle = document.title;
+
+    var origPush = history.pushState;
+    var origReplace = history.replaceState;
+
+    history.pushState = function (state, title, url) {
+      var hrefBefore = location.href;
+      var titleBefore = document.title;
+      var ret = origPush.call(history, state, title, url);
+      if (sessionId && !sessionEnded && location.href !== hrefBefore) {
+        flushSpaVirtualPage(hrefBefore, titleBefore);
+      }
+      spaLastUrl = location.href;
+      spaLastTitle = document.title;
+      return ret;
+    };
+
+    history.replaceState = function (state, title, url) {
+      var hrefBefore = location.href;
+      var titleBefore = document.title;
+      var ret = origReplace.call(history, state, title, url);
+      if (sessionId && !sessionEnded && location.href !== hrefBefore) {
+        flushSpaVirtualPage(hrefBefore, titleBefore);
+      }
+      spaLastUrl = location.href;
+      spaLastTitle = document.title;
+      return ret;
+    };
+
+    window.addEventListener('popstate', function () {
+      if (!sessionId || sessionEnded) return;
+      flushSpaVirtualPage(spaLastUrl, spaLastTitle);
+      spaLastUrl = location.href;
+      spaLastTitle = document.title;
+    });
+
+    window.addEventListener('hashchange', function () {
+      if (!sessionId || sessionEnded) return;
+      if (location.href === spaLastUrl) return;
+      flushSpaVirtualPage(spaLastUrl, spaLastTitle);
+      spaLastUrl = location.href;
+      spaLastTitle = document.title;
+    });
+  }
+
   function endSession() {
     flushAndEnd();
   }
@@ -212,6 +279,9 @@
       return startSession();
     }).then(function () {
       window.addEventListener('scroll', trackScroll, { passive: true });
+      if (config.spa) {
+        installSpaHistoryHooks();
+      }
     });
 
     // ブラウザ閉じ・タブ閉じ・ページ遷移時（デスクトップ）

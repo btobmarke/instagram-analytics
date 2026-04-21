@@ -3,6 +3,7 @@
 import { use, useMemo, useState } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
+import { salesHourlySlotsForRevenueSum } from '@/lib/summary/sales-slot-aggregate'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -83,7 +84,8 @@ export default function SalesDashboardPage({
       const slots = [...(day.sales_hourly_slots ?? [])].sort((a, b) =>
         a.slot_label.localeCompare(b.slot_label, 'ja')
       )
-      for (const s of slots) {
+      const slotsForSum = salesHourlySlotsForRevenueSum(slots)
+      for (const s of slotsForSum) {
         revenue += s.total_amount_with_tax ?? 0
       }
       if (!byDate[day.sales_date]) byDate[day.sales_date] = []
@@ -109,7 +111,7 @@ export default function SalesDashboardPage({
   ]
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6 w-full max-w-none min-w-0">
       <nav className="flex items-center gap-2 text-sm text-gray-400 mb-4 flex-wrap">
         <Link href="/projects" className="hover:text-amber-600">プロジェクト</Link>
         <span>›</span>
@@ -220,10 +222,10 @@ export default function SalesDashboardPage({
           <div className="divide-y divide-gray-50">
             {sortedDates.map(date => {
               const blocks = groupedByDate[date]
-              const dayTotal = blocks.reduce(
-                (sum, { slots }) => sum + slots.reduce((s, sl) => s + (sl.total_amount_with_tax ?? 0), 0),
-                0
-              )
+              const dayTotal = blocks.reduce((sum, { slots }) => {
+                const forSum = salesHourlySlotsForRevenueSum(slots)
+                return sum + forSum.reduce((s, sl) => s + (sl.total_amount_with_tax ?? 0), 0)
+              }, 0)
               return (
                 <div key={date} className="px-6 py-4">
                   <div className="flex items-center justify-between mb-2">

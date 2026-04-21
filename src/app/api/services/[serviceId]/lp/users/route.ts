@@ -56,7 +56,7 @@ export async function GET(
   let query = supabase
     .from('lp_users')
     .select(
-      'id, anonymous_user_key, first_visited_at, last_visited_at, visit_count, total_intent_score, user_temperature',
+      'id, anonymous_user_key, first_visited_at, last_visited_at, visit_count, total_intent_score, user_temperature, device_category',
       { count: 'exact' }
     )
     .eq('lp_site_id', lpSite.id)
@@ -84,6 +84,7 @@ export async function GET(
       visitCount: u.visit_count,
       totalIntentScore: u.total_intent_score,
       userTemperature: u.user_temperature, // 'HOT' | 'COLD'
+      deviceCategory: u.device_category ?? 'unknown',
     })),
     meta: { page, pageSize, totalCount: count ?? 0 },
   })

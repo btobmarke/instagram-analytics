@@ -355,7 +355,7 @@ export default function ServiceIntegrationsPage({
   const clarity = integrations.find(i => i.integration_type === 'CLARITY')
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div className="p-6 w-full max-w-none min-w-0">
       {/* ヘッダー */}
       <div className="flex items-center gap-3 mb-6">
         <Link

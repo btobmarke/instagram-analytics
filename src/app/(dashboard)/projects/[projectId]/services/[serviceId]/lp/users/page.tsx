@@ -3,6 +3,7 @@
 import { useState, use } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
+import { formatDeviceCategoryJa } from '@/lib/lp-device-category'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -24,6 +25,7 @@ interface LpUserItem {
   visitCount: number
   totalIntentScore: number
   userTemperature: string
+  deviceCategory?: string
 }
 
 export default function LpUsersPage({
@@ -53,7 +55,7 @@ export default function LpUsersPage({
   const meta = data?.meta
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="p-6 w-full max-w-none min-w-0">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-sm text-gray-400 mb-6">
         <Link href={`/projects/${projectId}`} className="hover:text-purple-600">プロジェクト</Link>
@@ -125,6 +127,7 @@ export default function LpUsersPage({
               <tr className="border-b border-gray-100">
                 <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">ユーザー</th>
                 <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">温度</th>
+                <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">端末</th>
                 <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">訪問数</th>
                 <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">インテントスコア</th>
                 <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">最終訪問</th>
@@ -156,6 +159,7 @@ export default function LpUsersPage({
                       </span>
                     )}
                   </td>
+                  <td className="px-5 py-4 text-gray-600 text-xs">{formatDeviceCategoryJa(u.deviceCategory)}</td>
                   <td className="px-5 py-4 text-gray-700 font-medium">{u.visitCount}回</td>
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-2">

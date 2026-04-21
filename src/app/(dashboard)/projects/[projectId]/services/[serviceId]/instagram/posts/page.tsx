@@ -114,7 +114,7 @@ export default function ServicePostsPage({
   const thMetrics = `${thTop} z-10`
 
   return (
-    <div className="p-6 w-full max-w-none mx-auto min-w-0 pb-24">
+    <div className="p-6 w-full max-w-none min-w-0 pb-24">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-sm text-gray-400 mb-4 flex-wrap">
         <Link href="/clients" className="hover:text-purple-600">クライアント一覧</Link>

@@ -29,7 +29,9 @@ export async function GET(
   // セッション取得
   const { data: session, error: sessionError } = await supabase
     .from('lp_sessions')
-    .select('id, lp_user_id, started_at, ended_at, duration_seconds, session_intent_score, interaction_count, referrer_source, referrer_url, landing_page_url, exit_page_url')
+    .select(
+      'id, lp_user_id, started_at, ended_at, duration_seconds, session_intent_score, interaction_count, referrer_source, landing_page_url, exit_page_url, user_agent, device_category',
+    )
     .eq('id', sessionId)
     .eq('lp_site_id', lpSite.id)
     .single()
@@ -93,6 +95,8 @@ export async function GET(
       referrerSource: session.referrer_source,
       landingPageUrl: session.landing_page_url,
       exitPageUrl: session.exit_page_url,
+      userAgent: session.user_agent ?? null,
+      deviceCategory: session.device_category ?? 'unknown',
       pageViewCount: (pageViews ?? []).length,
       eventCount: (eventLogs ?? []).length,
       timeline,

@@ -30,7 +30,9 @@ export async function GET(
   // ユーザー取得
   const { data: lpUser, error: userError } = await supabase
     .from('lp_users')
-    .select('id, anonymous_user_key, first_visited_at, last_visited_at, visit_count, total_intent_score, user_temperature, form_profile_json')
+    .select(
+      'id, anonymous_user_key, first_visited_at, last_visited_at, visit_count, total_intent_score, user_temperature, form_profile_json, user_agent, device_category',
+    )
     .eq('id', userId)
     .eq('lp_site_id', lpSite.id)
     .single()
@@ -42,7 +44,9 @@ export async function GET(
   // セッション一覧取得（最新20件）
   const { data: sessions } = await supabase
     .from('lp_sessions')
-    .select('id, started_at, ended_at, duration_seconds, session_intent_score, referrer_source, landing_page_url, exit_page_url')
+    .select(
+      'id, started_at, ended_at, duration_seconds, session_intent_score, referrer_source, landing_page_url, exit_page_url, device_category',
+    )
     .eq('lp_user_id', userId)
     .order('started_at', { ascending: false })
     .limit(20)
@@ -57,6 +61,8 @@ export async function GET(
       visitCount: lpUser.visit_count,
       totalIntentScore: lpUser.total_intent_score,
       userTemperature: lpUser.user_temperature, // 'HOT' | 'COLD'
+      userAgent: lpUser.user_agent ?? null,
+      deviceCategory: lpUser.device_category ?? 'unknown',
       formProfile:
         lpUser.form_profile_json &&
         typeof lpUser.form_profile_json === 'object' &&
@@ -72,6 +78,7 @@ export async function GET(
         referrerSource: s.referrer_source,
         landingPageUrl: s.landing_page_url,
         exitPageUrl: s.exit_page_url,
+        deviceCategory: s.device_category ?? 'unknown',
       })),
     },
   })

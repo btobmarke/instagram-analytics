@@ -53,7 +53,7 @@ export async function GET(
   let query = supabase
     .from('lp_sessions')
     .select(
-      'id, lp_user_id, started_at, ended_at, duration_seconds, session_intent_score, interaction_count, referrer_source, landing_page_url',
+      'id, lp_user_id, started_at, ended_at, duration_seconds, session_intent_score, interaction_count, referrer_source, landing_page_url, device_category',
       { count: 'exact' }
     )
     .eq('lp_site_id', lpSite.id)
@@ -83,6 +83,7 @@ export async function GET(
       interactionCount: s.interaction_count,
       referrerSource: s.referrer_source,
       landingPageUrl: s.landing_page_url,
+      deviceCategory: s.device_category ?? 'unknown',
     })),
     meta: { page, pageSize, totalCount: count ?? 0 },
   })
