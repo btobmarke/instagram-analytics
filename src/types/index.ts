@@ -280,6 +280,11 @@ export interface Client {
   is_active: boolean
   /** Anthropic API のモデル ID（例: claude-sonnet-4-6） */
   ai_model?: string
+  /**
+   * LP計測・MA（公開 LP API）の送信元 IPv4 を除外する CIDR 一覧。
+   * 例: ["203.0.113.10/32","198.51.100.0/24"]
+   */
+  lp_ma_ip_exclude_cidr?: string[]
   created_at: string
   updated_at: string
 }
