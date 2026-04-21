@@ -2,15 +2,47 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 
-// GET /api/services/:serviceId/sales/records/:recordId/orders
+async function assertSlotBelongsToService(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  serviceId: string,
+  slotId: string
+): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
+  const { data: slot, error: slotErr } = await supabase
+    .from('sales_hourly_slots')
+    .select('id, sales_day_id')
+    .eq('id', slotId)
+    .maybeSingle()
+
+  if (slotErr) return { ok: false, status: 500, message: slotErr.message }
+  if (!slot) return { ok: false, status: 404, message: '時間帯が見つかりません' }
+
+  const { data: day, error: dayErr } = await supabase
+    .from('sales_days')
+    .select('service_id')
+    .eq('id', slot.sales_day_id)
+    .maybeSingle()
+
+  if (dayErr) return { ok: false, status: 500, message: dayErr.message }
+  if (!day || day.service_id !== serviceId) {
+    return { ok: false, status: 404, message: '時間帯が見つかりません' }
+  }
+  return { ok: true }
+}
+
+// GET /api/services/:serviceId/sales/hourly-slots/:slotId/orders
 export async function GET(
   _req: NextRequest,
-  { params }: { params: Promise<{ serviceId: string; recordId: string }> }
+  { params }: { params: Promise<{ serviceId: string; slotId: string }> }
 ) {
-  const { recordId } = await params
+  const { serviceId, slotId } = await params
   const supabase = await createSupabaseServerClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ success: false, error: { code: 'UNAUTHORIZED' } }, { status: 401 })
+
+  const check = await assertSlotBelongsToService(supabase, serviceId, slotId)
+  if (!check.ok) {
+    return NextResponse.json({ success: false, error: check.message }, { status: check.status })
+  }
 
   const { data, error } = await supabase
     .from('orders')
@@ -22,7 +54,7 @@ export async function GET(
         cost_price, discount_amount, created_at
       )
     `)
-    .eq('sales_id', recordId)
+    .eq('sales_hourly_slot_id', slotId)
     .order('ordered_at', { ascending: true })
 
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 })
@@ -30,15 +62,20 @@ export async function GET(
   return NextResponse.json({ success: true, data })
 }
 
-// POST /api/services/:serviceId/sales/records/:recordId/orders
+// POST /api/services/:serviceId/sales/hourly-slots/:slotId/orders
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ serviceId: string; recordId: string }> }
+  { params }: { params: Promise<{ serviceId: string; slotId: string }> }
 ) {
-  const { recordId } = await params
+  const { serviceId, slotId } = await params
   const supabase = await createSupabaseServerClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ success: false, error: { code: 'UNAUTHORIZED' } }, { status: 401 })
+
+  const check = await assertSlotBelongsToService(supabase, serviceId, slotId)
+  if (!check.ok) {
+    return NextResponse.json({ success: false, error: check.message }, { status: check.status })
+  }
 
   const body = await req.json()
   const {
@@ -60,7 +97,7 @@ export async function POST(
   const { data: order, error: orderError } = await admin
     .from('orders')
     .insert({
-      sales_id: recordId,
+      sales_hourly_slot_id: slotId,
       ordered_at,
       amount_with_tax: amount_with_tax ?? null,
       amount_without_tax: amount_without_tax ?? null,

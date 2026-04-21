@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 
-// GET /api/services/:serviceId/sales/daily-outputs?sales_id=xxx
+// GET /api/services/:serviceId/sales/daily-outputs?slot_id=xxx
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ serviceId: string }> }
@@ -12,13 +12,13 @@ export async function GET(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ success: false, error: { code: 'UNAUTHORIZED' } }, { status: 401 })
 
-  const salesId = new URL(req.url).searchParams.get('sales_id')
-  if (!salesId) return NextResponse.json({ success: false, error: 'sales_id は必須です' }, { status: 400 })
+  const slotId = new URL(req.url).searchParams.get('slot_id')
+  if (!slotId) return NextResponse.json({ success: false, error: 'slot_id は必須です' }, { status: 400 })
 
   const { data, error } = await supabase
     .from('product_daily_outputs')
     .select('*')
-    .eq('sales_id', salesId)
+    .eq('sales_hourly_slot_id', slotId)
     .order('item_code', { ascending: true })
 
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 })
@@ -38,17 +38,17 @@ export async function POST(
   if (!user) return NextResponse.json({ success: false, error: { code: 'UNAUTHORIZED' } }, { status: 401 })
 
   const body = await req.json()
-  const { sales_id, items } = body
+  const { slot_id, items } = body
 
-  if (!sales_id) {
-    return NextResponse.json({ success: false, error: { code: 'VALIDATION', message: 'sales_id は必須です' } }, { status: 400 })
+  if (!slot_id) {
+    return NextResponse.json({ success: false, error: { code: 'VALIDATION', message: 'slot_id は必須です' } }, { status: 400 })
   }
   if (!Array.isArray(items) || items.length === 0) {
     return NextResponse.json({ success: false, error: { code: 'VALIDATION', message: 'items は1件以上必要です' } }, { status: 400 })
   }
 
   const rows = items.map((item: Record<string, unknown>) => ({
-    sales_id,
+    sales_hourly_slot_id: slot_id,
     item_id: item.item_id ?? null,
     item_code: item.item_code ?? null,
     item_name: item.item_name,
@@ -62,7 +62,7 @@ export async function POST(
   const admin = createSupabaseAdminClient()
   const { data, error } = await admin
     .from('product_daily_outputs')
-    .upsert(rows, { onConflict: 'sales_id,item_id' })
+    .upsert(rows, { onConflict: 'sales_hourly_slot_id,item_id' })
     .select()
 
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 })
