@@ -924,6 +924,145 @@ export async function fetchLpTable(
   return result
 }
 
+/**
+ * 売上分析サービス（sales_days + sales_hourly_slots + orders を日付バケットに集約）
+ * metric_ref は仮想テーブル sales_rollup.*（project_metrics_daily / 統合サマリー用）
+ */
+export async function fetchSalesRollup(
+  supabase: SupabaseServerClient,
+  serviceId: string,
+  fields: string[],
+  periods: Period[],
+): Promise<Record<string, Record<string, number | null>>> {
+  const result: Record<string, Record<string, number | null>> = {}
+
+  const rangeStart = periods[0].start.toISOString().slice(0, 10)
+  const rangeEnd = periods[periods.length - 1].end.toISOString().slice(0, 10)
+
+  const { data: dayRows, error: dayErr } = await supabase
+    .from('sales_days')
+    .select('id, sales_date')
+    .eq('service_id', serviceId)
+    .gte('sales_date', rangeStart)
+    .lte('sales_date', rangeEnd)
+
+  if (dayErr) {
+    console.error('[fetchSalesRollup] sales_days error:', dayErr)
+    for (const field of fields) {
+      result[`sales_rollup.${field}`] = Object.fromEntries(periods.map(p => [p.label, null]))
+    }
+    return result
+  }
+
+  const days = dayRows ?? []
+  const dayIdToDate = new Map<string, string>(
+    days.map(d => [d.id as string, String(d.sales_date).slice(0, 10)]),
+  )
+
+  if (days.length === 0) {
+    for (const field of fields) {
+      result[`sales_rollup.${field}`] = Object.fromEntries(periods.map(p => [p.label, null]))
+    }
+    return result
+  }
+
+  const dayIds = days.map(d => d.id as string)
+  const { data: slotRows, error: slotErr } = await supabase
+    .from('sales_hourly_slots')
+    .select('id, sales_day_id, total_amount_with_tax, total_amount_without_tax, is_rest_break')
+    .in('sales_day_id', dayIds)
+
+  if (slotErr) {
+    console.error('[fetchSalesRollup] sales_hourly_slots error:', slotErr)
+    for (const field of fields) {
+      result[`sales_rollup.${field}`] = Object.fromEntries(periods.map(p => [p.label, null]))
+    }
+    return result
+  }
+
+  const slots = slotRows ?? []
+  const slotIdToDate = new Map<string, string>()
+  for (const s of slots) {
+    const sid = s.sales_day_id as string
+    const d = dayIdToDate.get(sid)
+    if (d) slotIdToDate.set(s.id as string, d)
+  }
+
+  const orderCountsByDate = new Map<string, number>()
+  if (slots.length > 0) {
+    const slotIds = slots.map(s => s.id as string)
+    const { data: orderRows, error: ordErr } = await supabase
+      .from('orders')
+      .select('id, sales_hourly_slot_id')
+      .in('sales_hourly_slot_id', slotIds)
+
+    if (ordErr) {
+      console.error('[fetchSalesRollup] orders error:', ordErr)
+    } else {
+      for (const o of orderRows ?? []) {
+        const slotId = o.sales_hourly_slot_id as string
+        const dateStr = slotIdToDate.get(slotId)
+        if (!dateStr) continue
+        orderCountsByDate.set(dateStr, (orderCountsByDate.get(dateStr) ?? 0) + 1)
+      }
+    }
+  }
+
+  const accWithTax = emptyAccum(periods)
+  const accWithoutTax = emptyAccum(periods)
+  const accSlots = emptyAccum(periods)
+  const accRest = emptyAccum(periods)
+  const accOrders = emptyAccum(periods)
+
+  for (const s of slots) {
+    const dateStr = dayIdToDate.get(s.sales_day_id as string)
+    if (!dateStr) continue
+    const label = bucketDate(new Date(`${dateStr}T12:00:00+09:00`), periods)
+    if (!label) continue
+
+    const wt = s.total_amount_with_tax as number | null
+    const wtx = s.total_amount_without_tax as number | null
+    if (wt != null) addValue(accWithTax, label, wt)
+    if (wtx != null) addValue(accWithoutTax, label, wtx)
+    addValue(accSlots, label, 1)
+    if (s.is_rest_break === true) addValue(accRest, label, 1)
+  }
+
+  for (const [dateStr, cnt] of orderCountsByDate) {
+    const label = bucketDate(new Date(`${dateStr}T12:00:00+09:00`), periods)
+    if (!label) continue
+    addValue(accOrders, label, cnt)
+  }
+
+  const finalize = (accum: Record<string, { sum: number; count: number } | null>) =>
+    finalizeAccum(accum, 'sum')
+
+  for (const field of fields) {
+    const ref = `sales_rollup.${field}`
+    switch (field) {
+      case 'total_amount_with_tax':
+        result[ref] = finalize(accWithTax)
+        break
+      case 'total_amount_without_tax':
+        result[ref] = finalize(accWithoutTax)
+        break
+      case 'slot_count':
+        result[ref] = finalize(accSlots)
+        break
+      case 'rest_break_slot_count':
+        result[ref] = finalize(accRest)
+        break
+      case 'order_count':
+        result[ref] = finalize(accOrders)
+        break
+      default:
+        result[ref] = Object.fromEntries(periods.map(p => [p.label, null]))
+    }
+  }
+
+  return result
+}
+
 // ── 統合ディスパッチャ ──────────────────────────────────────────────────────
 
 /**
@@ -991,6 +1130,9 @@ export async function fetchMetricsByRefs(
         break
       case 'ig_media_insight_story':
         queries.push(fetchIgMediaInsightByProduct(supabase, serviceId, 'ig_media_insight_story', fields, periods))
+        break
+      case 'sales_rollup':
+        queries.push(fetchSalesRollup(supabase, serviceId, fields, periods))
         break
       default:
         break

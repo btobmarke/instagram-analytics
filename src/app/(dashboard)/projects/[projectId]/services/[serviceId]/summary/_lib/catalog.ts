@@ -250,6 +250,15 @@ export function resolveIGLabel(metricRef: string, storedLabel: string): string {
   return full + storedLabel
 }
 
+/** 売上サービス: sales_days + sales_hourly_slots を日付で集約した仮想テーブル sales_rollup */
+const SALES_ROLLUP: [string, string, string][] = [
+  ['total_amount_with_tax', '売上（税込）', '当日・当該締めの全時間帯の税込合計。'],
+  ['total_amount_without_tax', '売上（税抜）', '当日・当該締めの全時間帯の税抜合計。'],
+  ['slot_count', '時間帯行数', '登録されている時間帯（子行）の件数。'],
+  ['order_count', '注文件数', '当該営業日に紐づく時間帯へぶら下がる注文の件数。'],
+  ['rest_break_slot_count', '休憩枠数', '休憩としてマークされた時間帯行の件数。'],
+]
+
 export function getMetricCatalog(serviceType: string): MetricCard[] {
   switch (serviceType) {
     case 'instagram': return [
@@ -277,6 +286,9 @@ export function getMetricCatalog(serviceType: string): MetricCard[] {
       ...LP_PAGE_VIEW  .map(([f,l,d]) => card('lp_page_views',     f, l, 'ページビュー',   d)),
       ...LP_EVENT      .map(([f,l,d]) => card('lp_event_logs',     f, l, 'イベント',       d)),
       ...LP_USER       .map(([f,l,d]) => card('lp_users',          f, l, 'ユーザー',       d)),
+    ]
+    case 'sales': return [
+      ...SALES_ROLLUP.map(([f, l, d]) => card('sales_rollup', f, l, '売上（日次集計）', d)),
     ]
     default: return []
   }
