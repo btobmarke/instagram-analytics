@@ -3,6 +3,7 @@
 import { use } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
+import { formatDeviceCategoryJa } from '@/lib/lp-device-category'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -15,6 +16,7 @@ interface SessionItem {
   referrerSource: string | null
   landingPageUrl: string | null
   exitPageUrl: string | null
+  deviceCategory?: string
 }
 
 interface LpUserDetail {
@@ -26,6 +28,7 @@ interface LpUserDetail {
   totalIntentScore: number
   userTemperature: string
   userAgent: string | null
+  deviceCategory?: string
   /** フォーム等で送信されたプロフィール（キーは LP 側で任意） */
   formProfile?: Record<string, unknown>
   sessions: SessionItem[]
@@ -112,6 +115,18 @@ export default function LpUserDetailPage({
           </div>
         </div>
 
+        <div className="mt-6 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-3">
+          <span className="text-xs font-semibold text-gray-500">端末（最新）</span>
+          <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 border border-gray-200">
+            {formatDeviceCategoryJa(user.deviceCategory)}
+          </span>
+          {user.userAgent && (
+            <p className="text-xs text-gray-400 font-mono break-all max-w-full md:max-w-[min(100%,48rem)]" title={user.userAgent}>
+              UA: {user.userAgent.length > 160 ? `${user.userAgent.slice(0, 160)}…` : user.userAgent}
+            </p>
+          )}
+        </div>
+
         <div className="grid grid-cols-3 gap-4 mt-6 pt-4 border-t border-gray-100">
           <div className="text-center">
             <p className="text-2xl font-bold text-gray-900">{user.visitCount}</p>
@@ -178,6 +193,9 @@ export default function LpUserDetailPage({
                         <span className="text-xs text-gray-400">流入: {session.referrerSource}</span>
                       )}
                       <span className="text-xs text-gray-400">滞在: {formatDuration(session.durationSeconds)}</span>
+                      <span className="text-xs text-gray-500">
+                        {formatDeviceCategoryJa(session.deviceCategory)}
+                      </span>
                     </div>
                   </div>
                 </div>

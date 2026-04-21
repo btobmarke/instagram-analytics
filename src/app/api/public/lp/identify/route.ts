@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { authenticateLpRequest } from '@/lib/lp-auth'
+import { parseDeviceCategoryFromUserAgent } from '@/lib/lp-device-category'
 
 const IdentifySchema = z.object({
   lpCode: z.string().min(1),
   existingAnonymousKey: z.string().nullable().optional(),
-  userAgent: z.string().max(1000).optional(),
+  userAgent: z.string().max(2000).optional(),
   clientTimestamp: z.string().optional(),
 })
 
@@ -35,7 +36,9 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const { existingAnonymousKey } = parsed.data
+  const { existingAnonymousKey, userAgent: rawUa } = parsed.data
+  const userAgent = rawUa && rawUa.length > 2000 ? rawUa.slice(0, 2000) : rawUa ?? null
+  const deviceCategory = parseDeviceCategoryFromUserAgent(userAgent)
 
   console.log(`[LP-SDK] identify  lpCode=${lpSite.lp_code} existingKey=${existingAnonymousKey ?? 'none'}`)
 
@@ -49,6 +52,14 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (existingUser) {
+      await supabase
+        .from('lp_users')
+        .update({
+          user_agent: userAgent,
+          device_category: deviceCategory,
+        })
+        .eq('id', existingUser.id)
+
       console.log(`[LP-SDK] identify  → 既存ユーザー visits=${existingUser.visit_count} temp=${existingUser.user_temperature}`)
       return NextResponse.json({
         success: true,
@@ -73,6 +84,8 @@ export async function POST(request: NextRequest) {
       first_visited_at: now,
       last_visited_at: now,
       visit_count: 0, // session/start で +1 するため 0 で初期化（DEFAULT 1 を上書き）
+      user_agent: userAgent,
+      device_category: deviceCategory,
     })
     .select('id, anonymous_user_key')
     .single()

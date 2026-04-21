@@ -2,6 +2,10 @@
 // Supabase DB Types
 // ==============================
 
+import type { LpDeviceCategory } from '@/lib/lp-device-category'
+
+export type { LpDeviceCategory }
+
 export interface IgAccount {
   id: string
   platform_account_id: string
@@ -357,6 +361,8 @@ export interface LpUser {
   anonymous_user_key: string
   /** フォーム送信などで紐づけたプロフィール（LP 公開 API からマージ更新） */
   form_profile_json?: Record<string, unknown>
+  user_agent?: string | null
+  device_category?: LpDeviceCategory
   first_visited_at: string
   last_visited_at: string
   visit_count: number
@@ -380,6 +386,8 @@ export interface LpSession {
   landing_page_url: string | null
   exit_page_url: string | null
   duration_seconds: number
+  user_agent?: string | null
+  device_category?: LpDeviceCategory
   created_at: string
   updated_at: string
 }

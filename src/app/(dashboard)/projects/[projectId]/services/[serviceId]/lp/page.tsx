@@ -73,6 +73,7 @@ function EmbedCodeSection({ lpCode, apiBase, serviceId }: { lpCode: string; apiB
     apiBase: '${apiBase}/api/public/lp',
     apiKey: 'YOUR_API_KEY',  // サービス作成時に発行されたキー
     lpCode: '${lpCode}',
+    spa: true,  // SPA: pushState / replaceState / popstate / hashchange で仮想ページの pageView
   });
 </script>`
 

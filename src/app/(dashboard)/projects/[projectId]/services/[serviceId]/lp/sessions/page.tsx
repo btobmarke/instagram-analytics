@@ -3,6 +3,7 @@
 import { useState, use } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
+import { formatDeviceCategoryJa } from '@/lib/lp-device-category'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -25,6 +26,7 @@ interface SessionItem {
   interactionCount: number
   referrerSource: string | null
   landingPageUrl: string | null
+  deviceCategory?: string
 }
 
 function formatDuration(seconds: number): string {
@@ -96,6 +98,7 @@ export default function LpSessionsPage({
                 <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">スコア</th>
                 <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">操作数</th>
                 <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">流入元</th>
+                <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">端末</th>
                 <th className="px-5 py-3.5" />
               </tr>
             </thead>
@@ -121,6 +124,7 @@ export default function LpSessionsPage({
                   </td>
                   <td className="px-5 py-4 text-gray-600">{s.interactionCount}回</td>
                   <td className="px-5 py-4 text-gray-400 text-xs">{s.referrerSource ?? 'direct'}</td>
+                  <td className="px-5 py-4 text-gray-600 text-xs">{formatDeviceCategoryJa(s.deviceCategory)}</td>
                   <td className="px-5 py-4 text-right">
                     <Link
                       href={`/projects/${projectId}/services/${serviceId}/lp/sessions/${s.sessionId}`}

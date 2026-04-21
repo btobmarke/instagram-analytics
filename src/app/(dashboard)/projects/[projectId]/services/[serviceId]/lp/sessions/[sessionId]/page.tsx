@@ -3,6 +3,7 @@
 import { use } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
+import { formatDeviceCategoryJa } from '@/lib/lp-device-category'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -31,6 +32,8 @@ interface SessionDetail {
   referrerSource: string | null
   landingPageUrl: string | null
   exitPageUrl: string | null
+  userAgent: string | null
+  deviceCategory: string
   pageViewCount: number
   eventCount: number
   timeline: TimelineItem[]
@@ -111,6 +114,18 @@ export default function LpSessionDetailPage({
             <p className="text-sm font-semibold text-gray-900">{session.interactionCount}回</p>
           </div>
         </div>
+
+        <div className="flex flex-wrap items-center gap-2 pt-4 border-t border-gray-100">
+          <span className="text-xs font-semibold text-gray-500">端末（セッション開始時）</span>
+          <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 border border-gray-200">
+            {formatDeviceCategoryJa(session.deviceCategory)}
+          </span>
+        </div>
+        {session.userAgent && (
+          <p className="text-xs text-gray-400 font-mono break-all mt-2" title={session.userAgent}>
+            UA: {session.userAgent.length > 200 ? `${session.userAgent.slice(0, 200)}…` : session.userAgent}
+          </p>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-4 border-t border-gray-100">
           {session.referrerSource && (
