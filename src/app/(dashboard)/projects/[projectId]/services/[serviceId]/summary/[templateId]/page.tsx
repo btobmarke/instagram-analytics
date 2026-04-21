@@ -470,7 +470,7 @@ export default function TemplateEditorPage({
 
   return (
     <DndContext id={dndId} sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div className="p-6 max-w-6xl mx-auto">
+      <div className="p-6 w-full max-w-none min-w-0">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-sm text-gray-400 mb-4 flex-wrap">
           <Link href={`/projects/${projectId}`} className="hover:text-purple-600">{service?.project?.project_name ?? 'プロジェクト'}</Link>

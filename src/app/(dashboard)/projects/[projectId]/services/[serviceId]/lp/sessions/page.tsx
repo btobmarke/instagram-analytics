@@ -53,7 +53,7 @@ export default function LpSessionsPage({
   const meta = data?.meta
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="p-6 w-full max-w-none min-w-0">
       <nav className="flex items-center gap-2 text-sm text-gray-400 mb-6">
         <Link href={`/projects/${projectId}/services/${serviceId}/lp`} className="hover:text-purple-600">LP</Link>
         <span>›</span>

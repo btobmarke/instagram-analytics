@@ -35,7 +35,7 @@ export default function InstagramServiceLikeUsersPage({
   const postsHref = `/projects/${projectId}/services/${serviceId}/instagram/posts`
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6 pb-16">
+    <div className="p-6 w-full max-w-none min-w-0 space-y-6 pb-16">
       <nav className="flex items-center gap-2 text-sm text-gray-400 flex-wrap">
         <Link href="/clients" className="hover:text-purple-600">
           クライアント一覧
