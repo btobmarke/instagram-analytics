@@ -4,7 +4,7 @@ import { use, useState } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 
-// TODO(phase2): 注文データが揃う場合は、夜間の注文集計バッチで時間帯別および日次の売上レコードを自動登録する（手動の時間帯別登録と整合させる設計が必要）。
+// TODO(phase2): 注文データが揃う場合は、夜間の注文集計バッチで時間帯別および日次の売上（親・子）を自動登録する（手動の時間帯別登録と整合させる設計が必要）。
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -14,17 +14,26 @@ interface ServiceDetail {
   project: { id: string; project_name: string }
 }
 
-interface SalesRecord {
+interface SalesHourlySlot {
   id: string
-  sales_date: string
-  session_label: string
+  slot_label: string
   session_start_time: string | null
   session_end_time: string | null
-  data_source: 'pos' | 'manual'
   total_amount_with_tax: number | null
   total_amount_without_tax: number | null
   business_hours_minutes: number | null
+  is_rest_break: boolean
   memo: string | null
+}
+
+interface SalesDay {
+  id: string
+  service_id: string
+  sales_date: string
+  session_label: string
+  data_source: 'pos' | 'manual'
+  memo: string | null
+  sales_hourly_slots: SalesHourlySlot[] | null
 }
 
 export default function SalesRecordsPage({
@@ -41,14 +50,14 @@ export default function SalesRecordsPage({
   )
   const service = svcData?.data
 
-  // 直近90日分を表示
   const to = new Date().toISOString().slice(0, 10)
   const from = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10)
-  const { data: recordsData, mutate } = useSWR<{ success: boolean; data: SalesRecord[] }>(
+  const { data: recordsData, mutate } = useSWR<{ success: boolean; data: SalesDay[] }>(
     `/api/services/${serviceId}/sales/records?from=${from}&to=${to}`,
     fetcher
   )
-  const records = recordsData?.data ?? []
+  const days = recordsData?.data ?? []
+  const slotCount = days.reduce((n, d) => n + (d.sales_hourly_slots?.length ?? 0), 0)
 
   const tabs = [
     { href: `/projects/${projectId}/services/${serviceId}/sales/dashboard`, label: 'ダッシュボード', active: false },
@@ -59,7 +68,6 @@ export default function SalesRecordsPage({
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
-      {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-sm text-gray-400 mb-4 flex-wrap">
         <Link href="/projects" className="hover:text-amber-600">プロジェクト</Link>
         <span>›</span>
@@ -82,7 +90,6 @@ export default function SalesRecordsPage({
         </div>
       </div>
 
-      {/* タブ */}
       <div className="flex items-center gap-1 mb-6 border-b border-gray-200">
         {tabs.map(tab => (
           <Link
@@ -103,7 +110,9 @@ export default function SalesRecordsPage({
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
           <h2 className="font-bold text-gray-900">
             売上データ
-            <span className="ml-2 text-sm font-normal text-gray-400">直近90日 / {records.length}件</span>
+            <span className="ml-2 text-sm font-normal text-gray-400">
+              直近90日 / 日次 {days.length}件・時間帯 {slotCount}行
+            </span>
           </h2>
           {!showForm && (
             <div className="flex flex-wrap items-center gap-2">
@@ -147,7 +156,7 @@ export default function SalesRecordsPage({
           </div>
         )}
 
-        {records.length === 0 && !showForm ? (
+        {days.length === 0 && !showForm ? (
           <div className="flex flex-col items-center justify-center py-16 text-gray-400">
             <p className="text-sm mb-2">売上データがありません</p>
             <div className="flex flex-col sm:flex-row gap-2 items-center">
@@ -162,12 +171,13 @@ export default function SalesRecordsPage({
           </div>
         ) : (
           <div className="divide-y divide-gray-50">
-            {records.map(record => (
-              <RecordRow
-                key={record.id}
-                record={record}
+            {days.map(day => (
+              <DayBlock
+                key={day.id}
+                day={day}
                 serviceId={serviceId}
-                onDeleted={() => mutate()}
+                onDeletedSlot={() => mutate()}
+                onDeletedDay={() => mutate()}
               />
             ))}
           </div>
@@ -177,7 +187,129 @@ export default function SalesRecordsPage({
   )
 }
 
-// ---------- 売上登録フォーム ----------
+function DayBlock({
+  day,
+  serviceId,
+  onDeletedSlot,
+  onDeletedDay,
+}: {
+  day: SalesDay
+  serviceId: string
+  onDeletedSlot: () => void
+  onDeletedDay: () => void
+}) {
+  const slots = day.sales_hourly_slots ?? []
+  const [deletingDay, setDeletingDay] = useState(false)
+
+  const deleteWholeDay = async () => {
+    if (!confirm(`${day.sales_date} / 締め「${day.session_label}」の売上（時間帯${slots.length}件・注文含む）をすべて削除しますか？`)) return
+    setDeletingDay(true)
+    await fetch(`/api/services/${serviceId}/sales/records?id=${day.id}`, { method: 'DELETE' })
+    setDeletingDay(false)
+    onDeletedDay()
+  }
+
+  return (
+    <div className="px-6 py-4">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-gray-800">
+              {new Date(day.sales_date + 'T00:00:00').toLocaleDateString('ja-JP', {
+                year: 'numeric', month: 'long', day: 'numeric', weekday: 'short',
+              })}
+            </span>
+            <span className="text-sm text-gray-600">締め: {day.session_label}</span>
+            <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+              day.data_source === 'pos' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
+            }`}>
+              {day.data_source === 'pos' ? 'POS' : '手動'}
+            </span>
+          </div>
+          <p className="text-xs text-gray-400 mt-0.5">日次（親）ID: {day.id.slice(0, 8)}…</p>
+        </div>
+        <button
+          type="button"
+          onClick={deleteWholeDay}
+          disabled={deletingDay}
+          className="text-xs text-gray-400 hover:text-red-500 transition disabled:opacity-60 flex-shrink-0"
+        >
+          この日の締めをまとめて削除
+        </button>
+      </div>
+      <div className="space-y-2 pl-2 border-l-2 border-amber-100">
+        {slots.length === 0 ? (
+          <p className="text-xs text-gray-400">時間帯行がありません</p>
+        ) : (
+          slots.map(slot => (
+            <SlotRow key={slot.id} slot={slot} serviceId={serviceId} onDeleted={onDeletedSlot} />
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SlotRow({
+  slot,
+  serviceId,
+  onDeleted,
+}: {
+  slot: SalesHourlySlot
+  serviceId: string
+  onDeleted: () => void
+}) {
+  const [deleting, setDeleting] = useState(false)
+
+  const handleDelete = async () => {
+    if (!confirm(`時間帯「${slot.slot_label}」を削除しますか？\n※関連する注文データも削除されます`)) return
+    setDeleting(true)
+    await fetch(`/api/services/${serviceId}/sales/records?slot_id=${slot.id}`, { method: 'DELETE' })
+    setDeleting(false)
+    onDeleted()
+  }
+
+  return (
+    <div className="flex items-start justify-between gap-3 py-2 pl-2 rounded-lg bg-gray-50/80">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap text-xs">
+          <span className="font-medium text-gray-800">{slot.slot_label}</span>
+          {slot.session_start_time && (
+            <span className="text-gray-500">
+              {formatTime(slot.session_start_time)}
+              {slot.session_end_time ? ` 〜 ${formatTime(slot.session_end_time)}` : ''}
+            </span>
+          )}
+          {slot.is_rest_break && (
+            <span className="text-violet-600 font-medium">休憩</span>
+          )}
+        </div>
+        <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
+          <span>
+            税込:{' '}
+            <strong className="text-amber-600">
+              {slot.total_amount_with_tax != null ? `¥${slot.total_amount_with_tax.toLocaleString('ja-JP')}` : '—'}
+            </strong>
+          </span>
+          {slot.total_amount_without_tax != null && (
+            <span>税抜: ¥{slot.total_amount_without_tax.toLocaleString('ja-JP')}</span>
+          )}
+          {slot.business_hours_minutes != null && <span>枠: {slot.business_hours_minutes}分</span>}
+        </div>
+        {slot.memo && <p className="text-xs text-gray-400 mt-0.5">{slot.memo}</p>}
+      </div>
+      <button
+        type="button"
+        onClick={handleDelete}
+        disabled={deleting}
+        className="text-xs text-gray-400 hover:text-red-500 transition disabled:opacity-60 flex-shrink-0"
+      >
+        削除
+      </button>
+    </div>
+  )
+}
+
 function SalesRecordForm({
   serviceId,
   onClose,
@@ -188,17 +320,17 @@ function SalesRecordForm({
   onSaved: () => void
 }) {
   const today = new Date().toISOString().slice(0, 10)
-  const [salesDate, setSalesDate]                       = useState(today)
-  const [sessionLabel, setSessionLabel]                 = useState('all')
-  const [sessionStartTime, setSessionStartTime]         = useState('')
-  const [sessionEndTime, setSessionEndTime]             = useState('')
-  const [dataSource, setDataSource]                     = useState<'pos' | 'manual'>('pos')
-  const [totalAmountWithTax, setTotalAmountWithTax]     = useState('')
+  const [salesDate, setSalesDate] = useState(today)
+  const [sessionLabel, setSessionLabel] = useState('all')
+  const [sessionStartTime, setSessionStartTime] = useState('')
+  const [sessionEndTime, setSessionEndTime] = useState('')
+  const [dataSource, setDataSource] = useState<'pos' | 'manual'>('pos')
+  const [totalAmountWithTax, setTotalAmountWithTax] = useState('')
   const [totalAmountWithoutTax, setTotalAmountWithoutTax] = useState('')
   const [businessHoursMinutes, setBusinessHoursMinutes] = useState('')
-  const [memo, setMemo]                                 = useState('')
-  const [saving, setSaving]                             = useState(false)
-  const [error, setError]                               = useState('')
+  const [memo, setMemo] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -213,6 +345,7 @@ function SalesRecordForm({
       body: JSON.stringify({
         sales_date: salesDate,
         session_label: sessionLabel.trim(),
+        slot_label: 'all',
         session_start_time: sessionStartTime || null,
         session_end_time: sessionEndTime || null,
         data_source: dataSource,
@@ -220,6 +353,7 @@ function SalesRecordForm({
         total_amount_without_tax: totalAmountWithoutTax ? Number(totalAmountWithoutTax) : null,
         business_hours_minutes: businessHoursMinutes ? Number(businessHoursMinutes) : null,
         memo: memo || null,
+        is_rest_break: false,
       }),
     })
     const json = await res.json()
@@ -230,29 +364,30 @@ function SalesRecordForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <p className="text-sm font-semibold text-gray-700">売上データを追加</p>
+      <p className="text-sm font-semibold text-gray-700">売上データを追加（1時間帯・親は日＋締めで自動作成）</p>
+      <p className="text-xs text-gray-500">時間帯ラベルは「all」で登録されます。複数時間帯は「時間帯別登録」を利用してください。</p>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="col-span-2 md:col-span-1">
           <label className="block text-xs font-medium text-gray-600 mb-1">売上日 <span className="text-red-500">*</span></label>
           <input type="date" value={salesDate} onChange={e => setSalesDate(e.target.value)}
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300" />
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white" />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">締め区分 <span className="text-red-500">*</span></label>
           <input type="text" value={sessionLabel} onChange={e => setSessionLabel(e.target.value)}
             placeholder="例: all, 第1部"
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300" />
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white" />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">開始時刻</label>
           <input type="time" value={sessionStartTime} onChange={e => setSessionStartTime(e.target.value)}
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300" />
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white" />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">終了時刻</label>
           <input type="time" value={sessionEndTime} onChange={e => setSessionEndTime(e.target.value)}
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300" />
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white" />
         </div>
       </div>
 
@@ -260,7 +395,7 @@ function SalesRecordForm({
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">データソース</label>
           <select value={dataSource} onChange={e => setDataSource(e.target.value as 'pos' | 'manual')}
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300">
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white">
             <option value="pos">POS（注文データあり）</option>
             <option value="manual">手動（商品出数のみ）</option>
           </select>
@@ -269,19 +404,19 @@ function SalesRecordForm({
           <label className="block text-xs font-medium text-gray-600 mb-1">売上金額（税込）</label>
           <input type="number" value={totalAmountWithTax} onChange={e => setTotalAmountWithTax(e.target.value)}
             placeholder="例: 50000" min="0"
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300" />
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white" />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">売上金額（税抜）</label>
           <input type="number" value={totalAmountWithoutTax} onChange={e => setTotalAmountWithoutTax(e.target.value)}
             placeholder="例: 45455" min="0"
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300" />
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white" />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">営業時間（分）</label>
           <input type="number" value={businessHoursMinutes} onChange={e => setBusinessHoursMinutes(e.target.value)}
             placeholder="例: 180" min="0"
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300" />
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white" />
         </div>
       </div>
 
@@ -289,14 +424,14 @@ function SalesRecordForm({
         <label className="block text-xs font-medium text-gray-600 mb-1">メモ</label>
         <input type="text" value={memo} onChange={e => setMemo(e.target.value)}
           placeholder="備考（任意）"
-          className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300" />
+          className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white" />
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="flex gap-2">
         <button type="button" onClick={onClose}
-          className="px-4 py-2 text-sm text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">
+          className="px-4 py-2 text-sm text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 bg-white">
           キャンセル
         </button>
         <button type="submit" disabled={saving}
@@ -322,7 +457,6 @@ function newRowId(): string {
   return `r-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
-/** "HH:MM" または "HH:MM:SS" を分に変換 */
 function parseTimeToMinutes(t: string): number | null {
   const s = t.trim().slice(0, 8)
   const m = s.match(/^(\d{1,2}):(\d{2})/)
@@ -339,7 +473,6 @@ function minutesToTimeInputValue(total: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
-/** DB の TIME 用（秒付き） */
 function toDbTime(hhmm: string): string {
   const base = hhmm.trim().slice(0, 5)
   return /^\d{2}:\d{2}$/.test(base) ? `${base}:00` : base
@@ -357,7 +490,6 @@ function expandHourlySlots(startMin: number, endMin: number): { startMin: number
   return slots
 }
 
-// ---------- 時間帯別まとめ登録 ----------
 function HourlySalesBatchForm({
   serviceId,
   onClose,
@@ -369,6 +501,7 @@ function HourlySalesBatchForm({
 }) {
   const today = new Date().toISOString().slice(0, 10)
   const [salesDate, setSalesDate] = useState(today)
+  const [sessionLabel, setSessionLabel] = useState('all')
   const [rangeStart, setRangeStart] = useState('10:00')
   const [rangeEnd, setRangeEnd] = useState('12:00')
   const [dataSource, setDataSource] = useState<'pos' | 'manual'>('manual')
@@ -427,8 +560,7 @@ function HourlySalesBatchForm({
     setRows(prev =>
       prev.map(r => {
         if (r.id !== id) return r
-        const next = { ...r, ...patch }
-        return applyRestToRow(next)
+        return applyRestToRow({ ...r, ...patch })
       })
     )
   }
@@ -437,6 +569,10 @@ function HourlySalesBatchForm({
     e.preventDefault()
     if (!salesDate) {
       setError('売上日を入力してください')
+      return
+    }
+    if (!sessionLabel.trim()) {
+      setError('締め区分を入力してください')
       return
     }
     if (rows.length === 0) {
@@ -460,40 +596,53 @@ function HourlySalesBatchForm({
     setSaving(true)
     setError('')
 
+    let salesDayId: string | null = null
+
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i]
       const sm = parseTimeToMinutes(r.startTime)!
       const em = parseTimeToMinutes(r.endTime)!
-      const sessionLabel = `時間帯:${minutesToTimeInputValue(sm)}-${minutesToTimeInputValue(em)}`
+      const slotLabel = `時間帯:${minutesToTimeInputValue(sm)}-${minutesToTimeInputValue(em)}`
       const withTax = r.isRestBreak ? 0 : r.withTax ? Number(r.withTax) : null
       const withoutTax = r.isRestBreak ? 0 : r.withoutTax ? Number(r.withoutTax) : null
       const memoParts = [r.isRestBreak ? '休憩時間' : null, sharedMemo.trim() || null].filter(Boolean)
       const memo = memoParts.length ? memoParts.join(' / ') : null
 
+      const body: Record<string, unknown> = {
+        slot_label: slotLabel,
+        session_start_time: toDbTime(r.startTime),
+        session_end_time: toDbTime(r.endTime),
+        data_source: dataSource,
+        total_amount_with_tax: withTax,
+        total_amount_without_tax: withoutTax,
+        business_hours_minutes: em - sm,
+        memo,
+        is_rest_break: r.isRestBreak,
+      }
+      if (salesDayId) {
+        body.sales_day_id = salesDayId
+      } else {
+        body.sales_date = salesDate
+        body.session_label = sessionLabel.trim()
+      }
+
       const res = await fetch(`/api/services/${serviceId}/sales/records`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sales_date: salesDate,
-          session_label: sessionLabel,
-          session_start_time: toDbTime(r.startTime),
-          session_end_time: toDbTime(r.endTime),
-          data_source: dataSource,
-          total_amount_with_tax: withTax,
-          total_amount_without_tax: withoutTax,
-          business_hours_minutes: em - sm,
-          memo,
-        }),
+        body: JSON.stringify(body),
       })
       const json = await res.json()
       if (!json.success) {
         setSaving(false)
         setError(
           json.error?.message
-            ? `${i + 1}行目（${sessionLabel}）: ${json.error.message}`
+            ? `${i + 1}行目（${slotLabel}）: ${json.error.message}`
             : `${i + 1}行目の保存に失敗しました`
         )
         return
+      }
+      if (!salesDayId && json.data?.sales_day_id) {
+        salesDayId = json.data.sales_day_id as string
       }
     }
 
@@ -505,8 +654,7 @@ function HourlySalesBatchForm({
     <form onSubmit={handleSubmit} className="space-y-4">
       <p className="text-sm font-semibold text-gray-800">時間帯別に売上をまとめて登録</p>
       <p className="text-xs text-gray-600 leading-relaxed">
-        各行は「売上日」と異なる <span className="font-medium">締め区分（自動）</span>で保存されます（例: 時間帯:10:00-11:00）。
-        休憩にチェックを入れると税込・税抜は 0 円で登録されます。
+        同一の売上日・締め区分では親（日次）を1件にまとめ、各行が時間帯（子）として保存されます。注文は各時間帯に紐づけます（API: hourly-slots/…/orders）。
       </p>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -516,6 +664,16 @@ function HourlySalesBatchForm({
             type="date"
             value={salesDate}
             onChange={e => setSalesDate(e.target.value)}
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">締め区分 <span className="text-red-500">*</span></label>
+          <input
+            type="text"
+            value={sessionLabel}
+            onChange={e => setSessionLabel(e.target.value)}
+            placeholder="例: all, 第1部"
             className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
           />
         </div>
@@ -537,15 +695,16 @@ function HourlySalesBatchForm({
             className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
           />
         </div>
-        <div className="flex items-end">
-          <button
-            type="button"
-            onClick={generateRows}
-            className="w-full px-3 py-2 text-sm font-medium text-violet-800 bg-white border border-violet-300 rounded-lg hover:bg-violet-100 transition"
-          >
-            時間帯を生成（1時間刻み）
-          </button>
-        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2 items-end">
+        <button
+          type="button"
+          onClick={generateRows}
+          className="px-3 py-2 text-sm font-medium text-violet-800 bg-white border border-violet-300 rounded-lg hover:bg-violet-100 transition"
+        >
+          時間帯を生成（1時間刻み）
+        </button>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -580,7 +739,6 @@ function HourlySalesBatchForm({
         >
           行を追加
         </button>
-        <span className="text-xs text-gray-500">開始・終了は各行で編集できます</span>
       </div>
 
       {rows.length > 0 && (
@@ -681,72 +839,6 @@ function HourlySalesBatchForm({
         </button>
       </div>
     </form>
-  )
-}
-
-// ---------- 売上行 ----------
-function RecordRow({
-  record,
-  serviceId,
-  onDeleted,
-}: {
-  record: SalesRecord
-  serviceId: string
-  onDeleted: () => void
-}) {
-  const [deleting, setDeleting] = useState(false)
-
-  const handleDelete = async () => {
-    if (!confirm(`${record.sales_date} / ${record.session_label} の売上データを削除しますか？\n※関連する注文データも削除されます`)) return
-    setDeleting(true)
-    await fetch(`/api/services/${serviceId}/sales/records?id=${record.id}`, { method: 'DELETE' })
-    setDeleting(false)
-    onDeleted()
-  }
-
-  return (
-    <div className="px-6 py-4 flex items-start justify-between gap-4">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap mb-1">
-          <span className="text-sm font-semibold text-gray-800">
-            {new Date(record.sales_date + 'T00:00:00').toLocaleDateString('ja-JP', {
-              year: 'numeric', month: 'long', day: 'numeric', weekday: 'short'
-            })}
-          </span>
-          <span className="text-sm text-gray-600">/ {record.session_label}</span>
-          {record.session_start_time && (
-            <span className="text-xs text-gray-400">
-              {formatTime(record.session_start_time)}
-              {record.session_end_time ? ` 〜 ${formatTime(record.session_end_time)}` : ''}
-            </span>
-          )}
-          <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-            record.data_source === 'pos'
-              ? 'bg-blue-100 text-blue-700'
-              : 'bg-gray-100 text-gray-600'
-          }`}>
-            {record.data_source === 'pos' ? 'POS' : '手動'}
-          </span>
-        </div>
-        <div className="flex items-center gap-4 text-xs text-gray-500">
-          <span>税込: <strong className="text-amber-600 text-sm">{record.total_amount_with_tax != null ? `¥${record.total_amount_with_tax.toLocaleString('ja-JP')}` : '—'}</strong></span>
-          {record.total_amount_without_tax != null && (
-            <span>税抜: ¥{record.total_amount_without_tax.toLocaleString('ja-JP')}</span>
-          )}
-          {record.business_hours_minutes != null && (
-            <span>営業: {record.business_hours_minutes}分</span>
-          )}
-        </div>
-        {record.memo && <p className="text-xs text-gray-400 mt-0.5">{record.memo}</p>}
-      </div>
-      <button
-        onClick={handleDelete}
-        disabled={deleting}
-        className="text-xs text-gray-400 hover:text-red-500 transition disabled:opacity-60 flex-shrink-0"
-      >
-        削除
-      </button>
-    </div>
   )
 }
 

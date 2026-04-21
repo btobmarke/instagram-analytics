@@ -9,17 +9,18 @@
 ## 売上分析機能
 
 ### DB / マイグレーション
-- [x] `023_sales_analytics.sql` 作成（5テーブル + service_type 制約更新）
+- [x] `023_sales_analytics.sql` 作成（6テーブル + service_type 制約更新）
   - [x] `product_master`（商品マスタ）
-  - [x] `sales_records`（売上データ・日次・締め単位）
-  - [x] `orders`（注文データ）
+  - [x] `sales_days`（売上・日次・締めの親）
+  - [x] `sales_hourly_slots`（時間帯別売上・子）
+  - [x] `orders`（注文データ・`sales_hourly_slot_id`）
   - [x] `order_items`（注文明細）
-  - [x] `product_daily_outputs`（商品出数）
+  - [x] `product_daily_outputs`（商品出数・時間帯単位）
 - [ ] Supabase に `023` マイグレーションを適用する
 
 ### API
-- [x] `GET/POST/DELETE /api/services/[serviceId]/sales/records` — 売上データ
-- [x] `GET/POST /api/services/[serviceId]/sales/records/[recordId]/orders` — 注文データ
+- [x] `GET/POST/DELETE /api/services/[serviceId]/sales/records` — 売上（親子: `sales_days` + `sales_hourly_slots`）
+- [x] `GET/POST /api/services/[serviceId]/sales/hourly-slots/[slotId]/orders` — 注文データ
 - [x] `GET/POST/DELETE /api/services/[serviceId]/sales/orders/[orderId]/items` — 注文明細
 - [x] `GET/POST/PATCH/DELETE /api/services/[serviceId]/sales/products` — 商品マスタ
 - [x] `GET/POST/DELETE /api/services/[serviceId]/sales/daily-outputs` — 商品出数

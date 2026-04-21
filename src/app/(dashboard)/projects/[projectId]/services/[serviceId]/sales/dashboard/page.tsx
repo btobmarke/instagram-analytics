@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useState } from 'react'
+import { use, useMemo, useState } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 
@@ -13,18 +13,26 @@ interface ServiceDetail {
   client: { id: string; client_name: string }
 }
 
-interface SalesRecord {
+interface SalesHourlySlot {
+  id: string
+  slot_label: string
+  session_start_time: string | null
+  session_end_time: string | null
+  total_amount_with_tax: number | null
+  total_amount_without_tax: number | null
+  business_hours_minutes: number | null
+  is_rest_break: boolean
+  memo: string | null
+}
+
+interface SalesDay {
   id: string
   service_id: string
   sales_date: string
   session_label: string
-  session_start_time: string | null
-  session_end_time: string | null
   data_source: 'pos' | 'manual'
-  total_amount_with_tax: number | null
-  total_amount_without_tax: number | null
-  business_hours_minutes: number | null
   memo: string | null
+  sales_hourly_slots: SalesHourlySlot[] | null
 }
 
 function formatCurrency(amount: number | null): string {
@@ -62,24 +70,36 @@ export default function SalesDashboardPage({
   const service = svcData?.data
 
   const { from, to } = getDateRange(range)
-  const { data: recordsData, isLoading } = useSWR<{ success: boolean; data: SalesRecord[] }>(
+  const { data: recordsData, isLoading } = useSWR<{ success: boolean; data: SalesDay[] }>(
     `/api/services/${serviceId}/sales/records?from=${from}&to=${to}`,
     fetcher
   )
-  const records = recordsData?.data ?? []
+  const days = recordsData?.data ?? []
 
-  // 集計
-  const totalRevenue = records.reduce((sum, r) => sum + (r.total_amount_with_tax ?? 0), 0)
-  const totalDays = new Set(records.map(r => r.sales_date)).size
+  const { totalRevenue, totalDays, slotCount, groupedByDate } = useMemo(() => {
+    let revenue = 0
+    const byDate: Record<string, { day: SalesDay; slots: SalesHourlySlot[] }[]> = {}
+    for (const day of days) {
+      const slots = [...(day.sales_hourly_slots ?? [])].sort((a, b) =>
+        a.slot_label.localeCompare(b.slot_label, 'ja')
+      )
+      for (const s of slots) {
+        revenue += s.total_amount_with_tax ?? 0
+      }
+      if (!byDate[day.sales_date]) byDate[day.sales_date] = []
+      byDate[day.sales_date].push({ day, slots })
+    }
+    const dates = Object.keys(byDate)
+    return {
+      totalRevenue: revenue,
+      totalDays: dates.length,
+      slotCount: days.reduce((n, d) => n + (d.sales_hourly_slots?.length ?? 0), 0),
+      groupedByDate: byDate,
+    }
+  }, [days])
+
   const avgDaily = totalDays > 0 ? Math.round(totalRevenue / totalDays) : 0
-
-  // 日付グループ
-  const grouped = records.reduce<Record<string, SalesRecord[]>>((acc, r) => {
-    if (!acc[r.sales_date]) acc[r.sales_date] = []
-    acc[r.sales_date].push(r)
-    return acc
-  }, {})
-  const sortedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a))
+  const sortedDates = Object.keys(groupedByDate).sort((a, b) => b.localeCompare(a))
 
   const tabs = [
     { href: `/projects/${projectId}/services/${serviceId}/sales/dashboard`, label: 'ダッシュボード', active: true },
@@ -90,7 +110,6 @@ export default function SalesDashboardPage({
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
-      {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-sm text-gray-400 mb-4 flex-wrap">
         <Link href="/projects" className="hover:text-amber-600">プロジェクト</Link>
         <span>›</span>
@@ -103,7 +122,6 @@ export default function SalesDashboardPage({
         <span className="text-gray-500">ダッシュボード</span>
       </nav>
 
-      {/* ヘッダー */}
       <div className="flex items-center gap-3 mb-4">
         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-100 to-yellow-100 flex items-center justify-center text-xl">
           💰
@@ -114,7 +132,6 @@ export default function SalesDashboardPage({
         </div>
       </div>
 
-      {/* タブ */}
       <div className="flex items-center gap-1 mb-6 border-b border-gray-200">
         {tabs.map(tab => (
           <Link
@@ -131,12 +148,12 @@ export default function SalesDashboardPage({
         ))}
       </div>
 
-      {/* 期間セレクター */}
       <div className="flex items-center gap-2 mb-6">
         <span className="text-sm text-gray-500">表示期間:</span>
         {([7, 30, 90] as const).map(d => (
           <button
             key={d}
+            type="button"
             onClick={() => setRange(d)}
             className={`px-3 py-1 text-xs font-medium rounded-full border transition ${
               range === d
@@ -149,12 +166,11 @@ export default function SalesDashboardPage({
         ))}
       </div>
 
-      {/* KPIカード */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
         <KpiCard
           label={`合計売上（直近${range}日）`}
           value={formatCurrency(totalRevenue)}
-          sub={`${records.length}セッション`}
+          sub={`時間帯 ${slotCount} 行`}
           color="amber"
         />
         <KpiCard
@@ -166,12 +182,11 @@ export default function SalesDashboardPage({
         <KpiCard
           label="1日平均売上"
           value={formatCurrency(avgDaily)}
-          sub="税込"
+          sub="税込（時間帯合計ベース）"
           color="yellow"
         />
       </div>
 
-      {/* 売上一覧 */}
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
           <h2 className="font-bold text-gray-900">
@@ -204,41 +219,54 @@ export default function SalesDashboardPage({
         ) : (
           <div className="divide-y divide-gray-50">
             {sortedDates.map(date => {
-              const sessions = grouped[date]
-              const dayTotal = sessions.reduce((s, r) => s + (r.total_amount_with_tax ?? 0), 0)
+              const blocks = groupedByDate[date]
+              const dayTotal = blocks.reduce(
+                (sum, { slots }) => sum + slots.reduce((s, sl) => s + (sl.total_amount_with_tax ?? 0), 0),
+                0
+              )
               return (
                 <div key={date} className="px-6 py-4">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-semibold text-gray-800">
                       {new Date(date + 'T00:00:00').toLocaleDateString('ja-JP', {
-                        year: 'numeric', month: 'long', day: 'numeric', weekday: 'short'
+                        year: 'numeric', month: 'long', day: 'numeric', weekday: 'short',
                       })}
                     </span>
                     <span className="text-sm font-bold text-amber-600">{formatCurrency(dayTotal)}</span>
                   </div>
-                  <div className="space-y-1.5">
-                    {sessions.map(session => (
-                      <div key={session.id} className="flex items-center gap-3 text-xs text-gray-500 pl-2">
-                        <span className={`px-1.5 py-0.5 rounded-full font-medium ${
-                          session.data_source === 'pos'
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'bg-gray-100 text-gray-600'
-                        }`}>
-                          {session.data_source === 'pos' ? 'POS' : '手動'}
-                        </span>
-                        <span className="font-medium text-gray-700">{session.session_label}</span>
-                        {session.session_start_time && (
-                          <span>
-                            {formatTime(session.session_start_time)}
-                            {session.session_end_time ? ` 〜 ${formatTime(session.session_end_time)}` : ''}
+                  <div className="space-y-3">
+                    {blocks.map(({ day, slots }) => (
+                      <div key={day.id} className="pl-2 border-l-2 border-amber-100">
+                        <div className="text-xs text-gray-500 mb-1">
+                          <span className="font-medium text-gray-700">締め: {day.session_label}</span>
+                          <span className={`ml-2 px-1.5 py-0.5 rounded-full font-medium ${
+                            day.data_source === 'pos' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
+                          }`}>
+                            {day.data_source === 'pos' ? 'POS' : '手動'}
                           </span>
-                        )}
-                        <span className="ml-auto font-semibold text-gray-800">
-                          {formatCurrency(session.total_amount_with_tax)}
-                        </span>
-                        {session.business_hours_minutes && (
-                          <span className="text-gray-400">{session.business_hours_minutes}分</span>
-                        )}
+                        </div>
+                        <div className="space-y-1">
+                          {slots.map(slot => (
+                            <div key={slot.id} className="flex items-center gap-3 text-xs text-gray-500 pl-2">
+                              <span className="font-medium text-gray-700">{slot.slot_label}</span>
+                              {slot.session_start_time && (
+                                <span>
+                                  {formatTime(slot.session_start_time)}
+                                  {slot.session_end_time ? ` 〜 ${formatTime(slot.session_end_time)}` : ''}
+                                </span>
+                              )}
+                              {slot.is_rest_break && (
+                                <span className="text-violet-600">休憩</span>
+                              )}
+                              <span className="ml-auto font-semibold text-gray-800">
+                                {formatCurrency(slot.total_amount_with_tax)}
+                              </span>
+                              {slot.business_hours_minutes != null && slot.business_hours_minutes > 0 && (
+                                <span className="text-gray-400">{slot.business_hours_minutes}分</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ))}
                   </div>
