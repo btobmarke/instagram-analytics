@@ -54,7 +54,7 @@ export default function GoogleAdsAiPage({
   }, [complete, analysisType])
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
+    <div className="p-6 w-full max-w-none min-w-0 space-y-6">
       <nav className="flex items-center gap-2 text-sm text-gray-400 mb-4 flex-wrap">
         <Link href={`/projects/${projectId}/services/${serviceId}/google-ads/analytics`} className="hover:text-blue-600">
           Google 広告

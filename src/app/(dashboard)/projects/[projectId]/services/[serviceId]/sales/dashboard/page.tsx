@@ -111,7 +111,7 @@ export default function SalesDashboardPage({
   ]
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6 w-full max-w-none min-w-0">
       <nav className="flex items-center gap-2 text-sm text-gray-400 mb-4 flex-wrap">
         <Link href="/projects" className="hover:text-amber-600">プロジェクト</Link>
         <span>›</span>

@@ -283,14 +283,14 @@ export default function InstagramServiceKpiSettingsPage({
 
   if (service && service.service_type !== 'instagram') {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
+      <div className="p-6 w-full max-w-none min-w-0">
         <p className="text-sm text-gray-600">このサービスは Instagram ではありません。</p>
       </div>
     )
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
+    <div className="p-6 w-full max-w-none min-w-0 space-y-6">
       <nav className="flex items-center gap-2 text-sm text-gray-400 flex-wrap">
         <Link href="/clients" className="hover:text-purple-600">
           クライアント一覧
