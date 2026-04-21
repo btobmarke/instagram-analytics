@@ -8,6 +8,7 @@
 
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { generateCustomRangePeriod, generateJstDayPeriods, generateJstDayPeriodsFromRange } from '@/lib/summary/jst-periods'
+import { salesHourlySlotsForRevenueSum } from '@/lib/summary/sales-slot-aggregate'
 
 export type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>
 export type TimeUnit = 'hour' | 'day' | 'week' | 'month' | 'custom_range'
@@ -980,17 +981,18 @@ export async function fetchSalesRollup(
     return result
   }
 
-  const slots = slotRows ?? []
+  const allSlots = slotRows ?? []
+  const slotsForRevenue = salesHourlySlotsForRevenueSum(allSlots)
   const slotIdToDate = new Map<string, string>()
-  for (const s of slots) {
+  for (const s of allSlots) {
     const sid = s.sales_day_id as string
     const d = dayIdToDate.get(sid)
     if (d) slotIdToDate.set(s.id as string, d)
   }
 
   const orderCountsByDate = new Map<string, number>()
-  if (slots.length > 0) {
-    const slotIds = slots.map(s => s.id as string)
+  if (allSlots.length > 0) {
+    const slotIds = allSlots.map(s => s.id as string)
     const { data: orderRows, error: ordErr } = await supabase
       .from('orders')
       .select('id, sales_hourly_slot_id')
@@ -1014,7 +1016,7 @@ export async function fetchSalesRollup(
   const accRest = emptyAccum(periods)
   const accOrders = emptyAccum(periods)
 
-  for (const s of slots) {
+  for (const s of slotsForRevenue) {
     const dateStr = dayIdToDate.get(s.sales_day_id as string)
     if (!dateStr) continue
     const label = bucketDate(new Date(`${dateStr}T12:00:00+09:00`), periods)
