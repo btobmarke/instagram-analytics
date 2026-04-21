@@ -4,7 +4,7 @@ import { use, useState } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 
-// TODO(phase2): 注文データが揃う場合は、夜間の注文集計バッチで時間帯別および日次の売上（親・子）を自動登録する。
+// TODO(phase2): 注文データが揃う場合は、夜間の注文集計バッチで時間帯別および日次の売上（親・子）を自動登録する（手動の時間帯別登録と整合させる設計が必要）。
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -129,7 +129,7 @@ export default function SalesRecordsPage({
               <button
                 type="button"
                 onClick={() => setShowForm('hourly')}
-                className="px-3 py-1.5 text-xs font-medium text-violet-700 border border-violet-300 rounded-lg hover:bg-violet-50 transition"
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-violet-700 border border-violet-300 rounded-lg hover:bg-violet-50 transition"
               >
                 時間帯別登録
               </button>
