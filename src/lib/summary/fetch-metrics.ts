@@ -8,7 +8,7 @@
 
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { generateCustomRangePeriod, generateJstDayPeriods, generateJstDayPeriodsFromRange } from '@/lib/summary/jst-periods'
-import { salesHourlySlotsForRevenueSum } from '@/lib/summary/sales-slot-aggregate'
+import { salesHourlySlotsForRevenueSumByDay } from '@/lib/summary/sales-slot-aggregate'
 
 export type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>
 export type TimeUnit = 'hour' | 'day' | 'week' | 'month' | 'custom_range'
@@ -970,7 +970,7 @@ export async function fetchSalesRollup(
   const dayIds = days.map(d => d.id as string)
   const { data: slotRows, error: slotErr } = await supabase
     .from('sales_hourly_slots')
-    .select('id, sales_day_id, total_amount_with_tax, total_amount_without_tax, is_rest_break')
+    .select('id, sales_day_id, slot_label, total_amount_with_tax, total_amount_without_tax, is_rest_break')
     .in('sales_day_id', dayIds)
 
   if (slotErr) {
@@ -982,7 +982,7 @@ export async function fetchSalesRollup(
   }
 
   const allSlots = slotRows ?? []
-  const slotsForRevenue = salesHourlySlotsForRevenueSum(allSlots)
+  const slotsForRevenue = salesHourlySlotsForRevenueSumByDay(allSlots)
   const slotIdToDate = new Map<string, string>()
   for (const s of allSlots) {
     const sid = s.sales_day_id as string

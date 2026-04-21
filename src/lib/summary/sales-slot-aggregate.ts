@@ -31,3 +31,24 @@ export function salesHourlySlotsForRevenueSum<T extends { slot_label: string }>(
   if (!hasHourly) return slots
   return slots.filter(s => String(s.slot_label ?? '').trim().toLowerCase() !== 'all')
 }
+
+/**
+ * 複数営業日のスロットをまとめて渡す場合（fetchSalesRollup 等）:
+ * sales_day_id ごとに salesHourlySlotsForRevenueSum を適用する。
+ * 期間内の別日に時間帯行が1件でもあると、他日の「all のみ」の行まで誤って除外しない。
+ */
+export function salesHourlySlotsForRevenueSumByDay<
+  T extends { sales_day_id: string; slot_label: string },
+>(slots: T[]): T[] {
+  const byDay = new Map<string, T[]>()
+  for (const s of slots) {
+    const id = String(s.sales_day_id)
+    if (!byDay.has(id)) byDay.set(id, [])
+    byDay.get(id)!.push(s)
+  }
+  const out: T[] = []
+  for (const daySlots of byDay.values()) {
+    out.push(...salesHourlySlotsForRevenueSum(daySlots))
+  }
+  return out
+}
