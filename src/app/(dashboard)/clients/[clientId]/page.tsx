@@ -188,6 +188,12 @@ export default function ClientDetailPage({ params }: { params: Promise<{ clientI
             onSaved={() => mutate()}
           />
 
+          <LpMaIpExcludeSection
+            clientId={clientId}
+            currentCidrs={client.lp_ma_ip_exclude_cidr ?? []}
+            onSaved={() => mutate()}
+          />
+
           {/* Instagram アクセストークン設定 */}
           <InstagramTokenSection clientId={clientId} />
 
@@ -432,6 +438,83 @@ function AiModelSection({
               </option>
             ))}
           </select>
+        </div>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <button
+          type="submit"
+          disabled={saving}
+          className="px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-60"
+        >
+          {saving ? '保存中...' : '保存する'}
+        </button>
+      </form>
+    </div>
+  )
+}
+
+// --------------------------------------------------------------------------
+// LP計測・MA 送信元 IP 除外（クライアント単位・IPv4 CIDR）
+// --------------------------------------------------------------------------
+function LpMaIpExcludeSection({
+  clientId,
+  currentCidrs,
+  onSaved,
+}: {
+  clientId: string
+  currentCidrs: string[]
+  onSaved: () => void
+}) {
+  const [text, setText] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    setText(currentCidrs.length ? currentCidrs.join('\n') : '')
+  }, [currentCidrs])
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    setError('')
+    const lines = text
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+    try {
+      const res = await fetch(`/api/clients/${clientId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lp_ma_ip_exclude_cidr: lines }),
+      })
+      const json = await res.json()
+      if (!json.success) {
+        setError(json.error?.message ?? '保存に失敗しました')
+        return
+      }
+      onSaved()
+    } catch {
+      setError('通信エラーが発生しました')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 p-5 mb-6">
+      <h3 className="text-sm font-semibold text-gray-700 mb-1">LP計測・MA 送信元 IP 除外</h3>
+      <p className="text-xs text-gray-500 mb-4">
+        このクライアント配下の LP 公開 API（計測 SDK）について、指定した IPv4 範囲からのアクセスを記録しません。社内・制作会社のグローバル IP などを 1 行 1 CIDR で入力してください（例: 203.0.113.10/32 または 198.51.100.0/24）。
+      </p>
+      <form onSubmit={handleSave} className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">除外 CIDR（IPv4・最大50件）</label>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={'203.0.113.0/24\n198.51.100.10/32'}
+            rows={5}
+            className="w-full px-3 py-2 text-sm font-mono border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-400 resize-y"
+          />
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
         <button

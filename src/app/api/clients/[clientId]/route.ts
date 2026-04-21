@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { isAiModelOptionId } from '@/lib/ai/model-options'
+import { normalizeLpMaIpExcludeList } from '@/lib/lp-ip-exclude'
 
 // GET /api/clients/:clientId - クライアント詳細取得（プロジェクト一覧付き）
 export async function GET(
@@ -15,7 +16,7 @@ export async function GET(
   const { data, error } = await supabase
     .from('clients')
     .select(`
-      id, client_name, note, is_active, ai_model, created_at, updated_at,
+      id, client_name, note, is_active, ai_model, lp_ma_ip_exclude_cidr, created_at, updated_at,
       projects (
         id, project_name, note, is_active, created_at, updated_at,
         services(id)
@@ -48,6 +49,7 @@ export async function GET(
       note: data.note,
       is_active: data.is_active,
       ai_model: (data as { ai_model?: string }).ai_model ?? 'claude-sonnet-4-6',
+      lp_ma_ip_exclude_cidr: normalizeStoredCidrs((data as { lp_ma_ip_exclude_cidr?: unknown }).lp_ma_ip_exclude_cidr),
       created_at: data.created_at,
       updated_at: data.updated_at,
       projects,
@@ -66,7 +68,10 @@ export async function PATCH(
   if (!user) return NextResponse.json({ success: false, error: { code: 'UNAUTHORIZED', message: '認証が必要です' } }, { status: 401 })
 
   const body = await request.json().catch(() => ({}))
-  const { ai_model } = body as { ai_model?: string }
+  const { ai_model, lp_ma_ip_exclude_cidr } = body as {
+    ai_model?: string
+    lp_ma_ip_exclude_cidr?: unknown
+  }
 
   if (ai_model !== undefined) {
     if (!isAiModelOptionId(ai_model)) {
@@ -77,18 +82,34 @@ export async function PATCH(
     }
   }
 
-  if (ai_model === undefined) {
+  let normalizedCidrs: string[] | undefined
+  if (lp_ma_ip_exclude_cidr !== undefined) {
+    const parsed = normalizeLpMaIpExcludeList(lp_ma_ip_exclude_cidr)
+    if (!parsed.ok) {
+      return NextResponse.json(
+        { success: false, error: { code: 'INVALID_CIDR_LIST', message: parsed.message } },
+        { status: 400 }
+      )
+    }
+    normalizedCidrs = parsed.cidrs
+  }
+
+  if (ai_model === undefined && lp_ma_ip_exclude_cidr === undefined) {
     return NextResponse.json(
       { success: false, error: { code: 'BAD_REQUEST', message: '更新フィールドがありません' } },
       { status: 400 }
     )
   }
 
+  const patch: Record<string, unknown> = {}
+  if (ai_model !== undefined) patch.ai_model = ai_model
+  if (normalizedCidrs !== undefined) patch.lp_ma_ip_exclude_cidr = normalizedCidrs
+
   const { data, error } = await supabase
     .from('clients')
-    .update({ ai_model })
+    .update(patch)
     .eq('id', clientId)
-    .select('id, ai_model')
+    .select('id, ai_model, lp_ma_ip_exclude_cidr')
     .single()
 
   if (error) {
@@ -101,6 +122,7 @@ export async function PATCH(
   return NextResponse.json({ success: true, data })
 }
 
+<<<<<<< HEAD
 // DELETE /api/clients/:clientId — クライアントを削除（プロジェクトが1件でもある場合は不可）
 export async function DELETE(
   _request: NextRequest,
@@ -161,4 +183,9 @@ export async function DELETE(
   }
 
   return NextResponse.json({ success: true, data: { id: clientId } })
+=======
+function normalizeStoredCidrs(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return raw.filter((x): x is string => typeof x === 'string')
+>>>>>>> 2d0f04191b8a2e97576305015fd46e5b2692e7a9
 }
