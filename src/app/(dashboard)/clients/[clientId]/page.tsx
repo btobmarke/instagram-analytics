@@ -2,9 +2,11 @@
 
 import { useState, use, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import type { ClientDetail } from '@/types'
 import { AI_MODEL_OPTIONS } from '@/lib/ai/model-options'
+import { canDeleteClient } from '@/lib/clients/can-delete-client'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -23,6 +25,7 @@ interface GoogleAdsCredentialInfo {
 
 export default function ClientDetailPage({ params }: { params: Promise<{ clientId: string }> }) {
   const { clientId } = use(params)
+  const router = useRouter()
   const [showCreateProject, setShowCreateProject] = useState(false)
   const [activeTab, setActiveTab] = useState<'projects' | 'settings'>('projects')
 
@@ -196,6 +199,13 @@ export default function ClientDetailPage({ params }: { params: Promise<{ clientI
 
           {/* LINE OAM セッション設定 */}
           <LineOamSessionSection clientId={clientId} />
+
+          <ClientDeleteSection
+            clientId={clientId}
+            clientName={client.client_name}
+            projectCount={client.projects.length}
+            onDeleted={() => router.push('/clients')}
+          />
         </>
       )}
 
@@ -207,6 +217,70 @@ export default function ClientDetailPage({ params }: { params: Promise<{ clientI
           onCreated={() => { setShowCreateProject(false); mutate() }}
         />
       )}
+    </div>
+  )
+}
+
+function ClientDeleteSection({
+  clientId,
+  clientName,
+  projectCount,
+  onDeleted,
+}: {
+  clientId: string
+  clientName: string
+  projectCount: number
+  onDeleted: () => void
+}) {
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleDelete = async () => {
+    if (!canDeleteClient(projectCount)) {
+      window.alert(
+        `「${clientName}」にはプロジェクトが ${projectCount} 件あります。先にプロジェクトを削除または整理してください。`
+      )
+      return
+    }
+    if (!window.confirm(`「${clientName}」を完全に削除します。取り消せません。続行しますか？`)) return
+
+    setDeleting(true)
+    setError('')
+    try {
+      const res = await fetch(`/api/clients/${clientId}`, { method: 'DELETE' })
+      const json = await res.json()
+      if (!json.success) {
+        setError(json.error?.message ?? '削除に失敗しました')
+        return
+      }
+      onDeleted()
+    } catch {
+      setError('通信エラーが発生しました')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-red-100 p-5 mb-6">
+      <h3 className="text-sm font-semibold text-gray-900 mb-1">クライアントの削除</h3>
+      <p className="text-xs text-gray-500 mb-4">
+        削除すると、このクライアントに紐づく連携設定（Instagram トークン・GBP・Google 広告など）もデータベース上から失われます。
+        {projectCount > 0 && (
+          <span className="block mt-2 text-amber-700">
+            現在プロジェクトが {projectCount} 件あるため削除できません。
+          </span>
+        )}
+      </p>
+      {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+      <button
+        type="button"
+        onClick={() => void handleDelete()}
+        disabled={deleting || !canDeleteClient(projectCount)}
+        className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {deleting ? '削除中...' : 'このクライアントを削除'}
+      </button>
     </div>
   )
 }

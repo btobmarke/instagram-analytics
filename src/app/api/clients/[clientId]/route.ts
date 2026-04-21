@@ -100,3 +100,65 @@ export async function PATCH(
 
   return NextResponse.json({ success: true, data })
 }
+
+// DELETE /api/clients/:clientId — クライアントを削除（プロジェクトが1件でもある場合は不可）
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ clientId: string }> }
+) {
+  const { clientId } = await params
+  const supabase = await createSupabaseServerClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    return NextResponse.json({ success: false, error: { code: 'UNAUTHORIZED', message: '認証が必要です' } }, { status: 401 })
+  }
+
+  const { data: clientRow, error: clientErr } = await supabase
+    .from('clients')
+    .select('id')
+    .eq('id', clientId)
+    .maybeSingle()
+
+  if (clientErr || !clientRow) {
+    return NextResponse.json(
+      { success: false, error: { code: 'NOT_FOUND', message: 'クライアントが見つかりません' } },
+      { status: 404 }
+    )
+  }
+
+  const { count, error: countErr } = await supabase
+    .from('projects')
+    .select('id', { count: 'exact', head: true })
+    .eq('client_id', clientId)
+
+  if (countErr) {
+    return NextResponse.json(
+      { success: false, error: { code: 'DB_ERROR', message: countErr.message } },
+      { status: 500 }
+    )
+  }
+
+  if ((count ?? 0) > 0) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: {
+          code: 'HAS_PROJECTS',
+          message: 'プロジェクトが残っているため削除できません。先にプロジェクトを整理してください。',
+        },
+      },
+      { status: 409 }
+    )
+  }
+
+  const { error: delErr } = await supabase.from('clients').delete().eq('id', clientId)
+
+  if (delErr) {
+    return NextResponse.json(
+      { success: false, error: { code: 'DB_ERROR', message: delErr.message } },
+      { status: 500 }
+    )
+  }
+
+  return NextResponse.json({ success: true, data: { id: clientId } })
+}
