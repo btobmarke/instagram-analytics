@@ -21,6 +21,7 @@ import { getMetricCatalog } from '../_lib/catalog'
 import { getTemplate, updateTemplate } from '../_lib/store'
 import { generateJstDayPeriodLabels, generateCustomRangePeriod } from '@/lib/summary/jst-periods'
 import { DEFAULT_LINE_FRIENDS_ATTR_SLICES } from '@/lib/summary/line-friends-attr-default-slices'
+import { buildFormulaPlainLanguageSummary } from '@/lib/summary/formula-humanize'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -187,15 +188,18 @@ function OperandValueRow({
           定数
         </label>
         {showTimeOp && !isConst && (
-          <select
-            value={timeOp}
-            onChange={e => onTimeOp(e.target.value as FormulaOperandTimeOp)}
-            className="text-[10px] px-2 py-1 border border-gray-200 rounded-lg bg-white max-w-[200px]"
-          >
-            {(Object.keys(TIME_OP_LABELS) as FormulaOperandTimeOp[]).map(k => (
-              <option key={k} value={k}>{TIME_OP_LABELS[k]}</option>
-            ))}
-          </select>
+          <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+            <span className="text-[9px] text-gray-500 leading-tight">同じ指標を、表の<strong>横（列）</strong>のどこで読むか</span>
+            <select
+              value={timeOp}
+              onChange={e => onTimeOp(e.target.value as FormulaOperandTimeOp)}
+              className="text-[10px] px-2 py-1.5 border border-gray-200 rounded-lg bg-white w-full max-w-full sm:max-w-[280px]"
+            >
+              {(Object.keys(TIME_OP_LABELS) as FormulaOperandTimeOp[]).map(k => (
+                <option key={k} value={k}>{TIME_OP_LABELS[k]}</option>
+              ))}
+            </select>
+          </div>
         )}
       </div>
       {isConst ? (
@@ -313,7 +317,10 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
             <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="例: 友だち増減" className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400" />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-2">項 A（起点）</label>
+            <label className="block text-xs font-medium text-gray-700 mb-1">ステップ 1（起点）</label>
+            <p className="text-[10px] text-gray-500 mb-2 leading-relaxed">
+              サマリ表の<strong>1マス</strong>ごとに計算します。「左の列」は表で<strong>すぐ左となりの列</strong>のことです（カレンダーの前日とは限りません）。
+            </p>
             <OperandValueRow
               label="A"
               value={baseOperandId}
@@ -327,7 +334,10 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-2">続きの演算</label>
+            <label className="block text-xs font-medium text-gray-700 mb-1">ステップ 2 以降（演算）</label>
+            <p className="text-[10px] text-gray-500 mb-2">
+              上から順に適用します。<strong>＋</strong>と<strong>−</strong>だけは欠損を 0 とみなして計算します（詳しくは下の注記）。
+            </p>
             {steps.map((step, idx) => (
               <div key={idx} className="mb-3 pb-3 border-b border-gray-100 last:border-0">
                 <div className="flex items-start gap-2">
@@ -450,14 +460,26 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
             </div>
           )}
           {previewFormula && (
-            <div className="rounded-lg bg-gray-50 border border-gray-200 p-3">
-              <p className="text-[10px] text-gray-400 mb-1">プレビュー</p>
+            <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 space-y-2">
+              <p className="text-[10px] text-gray-400">プレビュー</p>
               <p className="text-sm font-medium text-gray-800">{name || '（指標名未入力）'}</p>
-              <p className="text-xs text-gray-500 mt-1 font-mono break-all">{formatFormula(previewFormula, findLabel)}</p>
+              <div className="rounded-md bg-white border border-amber-100 px-3 py-2">
+                <p className="text-[10px] font-medium text-amber-800 mb-1">この指標の意味（各セル）</p>
+                <p className="text-xs text-gray-700 leading-relaxed">{buildFormulaPlainLanguageSummary(previewFormula, findLabel)}</p>
+              </div>
+              <p className="text-[10px] text-gray-500 font-mono break-all">内部参照: {formatFormula(previewFormula, findLabel, 'id')}</p>
             </div>
           )}
         </div>
-        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 flex-shrink-0">
+        <div className="px-6 py-3 border-t border-gray-100 bg-gray-50/80 space-y-1.5 flex-shrink-0">
+          <p className="text-[10px] text-gray-600 leading-relaxed">
+            <strong>左端の列</strong>では「左の列の同じ指標」や「この列 − 左の列」はデータがなく <strong>—</strong> になることがあります。
+          </p>
+          <p className="text-[10px] text-gray-600 leading-relaxed">
+            <strong>＋ / −</strong> のあとに <strong>+ 0</strong> などを続けると、欠損（—）が <strong>0 として足し込まれる</strong>ため、左端が 0 に見えることがあります。差分だけを — のまま残したい場合は <strong>+0 を付けない</strong>でください。
+          </p>
+        </div>
+        <div className="px-6 py-3 border-t border-gray-100 flex justify-end gap-3 flex-shrink-0">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">キャンセル</button>
           <button onClick={handleSave} disabled={!canSave} className={`px-5 py-2 text-sm font-medium rounded-lg transition ${canSave ? 'bg-amber-500 text-white hover:bg-amber-600 shadow-sm' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
             {editTarget ? '更新' : '作成'}

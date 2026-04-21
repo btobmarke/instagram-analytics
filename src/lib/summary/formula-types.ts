@@ -45,8 +45,9 @@ export const NARY_OPERATOR_LABELS: Record<FormulaNAryOperator, string> = {
   coalesce: '先頭の有効値',
 }
 
+/** セレクトボックス用（サマリ表の横軸＝列であることを明示） */
 export const TIME_OP_LABELS: Record<FormulaOperandTimeOp, string> = {
-  none: 'なし',
-  lag1: '前期の値（1 つ前の列）',
-  diff_prev: '前期差（当期 − 前期）',
+  none: 'この列の値（いつもどおり）',
+  lag1: '左の列の同じ指標の値',
+  diff_prev: 'この列 − 左の列（同じ指標）',
 }
