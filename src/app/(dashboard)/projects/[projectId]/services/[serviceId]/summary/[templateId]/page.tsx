@@ -10,14 +10,17 @@ import {
   type DragStartEvent, type DragEndEvent,
 } from '@dnd-kit/core'
 import type {
-  ServiceDetail, MetricCard, FormulaNode, FormulaStep, FormulaOperator,
-  FormulaThresholdMode,
-  TableRow, TimeUnit, SummaryTemplate,
+  ServiceDetail, MetricCard, FormulaNode, FormulaStep,
+  FormulaBinaryOperator, FormulaNAryOperator, FormulaOperandTimeOp, FormulaThresholdMode,
+  TableRow, TimeUnit, SummaryTemplate, StoredTemplateRow,
 } from '../_lib/types'
-import { OPERATOR_SYMBOLS, TIME_UNIT_LABELS, formatFormula } from '../_lib/types'
+import {
+  OPERATOR_SYMBOLS, TIME_UNIT_LABELS, formatFormula, NARY_OPERATOR_LABELS, TIME_OP_LABELS,
+} from '../_lib/types'
 import { getMetricCatalog } from '../_lib/catalog'
 import { getTemplate, updateTemplate } from '../_lib/store'
 import { generateJstDayPeriodLabels, generateCustomRangePeriod } from '@/lib/summary/jst-periods'
+import { DEFAULT_LINE_FRIENDS_ATTR_SLICES } from '@/lib/summary/line-friends-attr-default-slices'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -127,14 +130,86 @@ function FieldSelect({ value, onChange, grouped }: { value: string; onChange: (v
 }
 
 // ── 演算子ボタン ───────────────────────────────────────────────
-function OperatorSelect({ value, onChange }: { value: FormulaOperator; onChange: (op: FormulaOperator) => void }) {
+function OperatorSelect({ value, onChange }: { value: FormulaStep['operator']; onChange: (op: FormulaStep['operator']) => void }) {
+  const binary = (Object.keys(OPERATOR_SYMBOLS) as FormulaBinaryOperator[]).map(op => (
+    <button key={op} type="button" onClick={() => onChange(op)} className={`w-9 h-9 rounded-lg text-sm font-bold border-2 transition ${value === op ? 'border-amber-400 bg-amber-50 text-amber-700' : 'border-gray-200 bg-white text-gray-400 hover:border-gray-300'}`}>
+      {OPERATOR_SYMBOLS[op]}
+    </button>
+  ))
   return (
-    <div className="flex items-center gap-1">
-      {(Object.keys(OPERATOR_SYMBOLS) as FormulaOperator[]).map(op => (
-        <button key={op} type="button" onClick={() => onChange(op)} className={`w-9 h-9 rounded-lg text-sm font-bold border-2 transition ${value === op ? 'border-amber-400 bg-amber-50 text-amber-700' : 'border-gray-200 bg-white text-gray-400 hover:border-gray-300'}`}>
-          {OPERATOR_SYMBOLS[op]}
+    <div className="flex flex-wrap items-center gap-1">
+      {binary}
+      {( ['min', 'max', 'coalesce'] as const satisfies readonly FormulaNAryOperator[]).map(op => (
+        <button
+          key={op}
+          type="button"
+          onClick={() => onChange(op)}
+          className={`px-2 h-9 rounded-lg text-[10px] font-bold border-2 transition whitespace-nowrap ${value === op ? 'border-amber-400 bg-amber-50 text-amber-700' : 'border-gray-200 bg-white text-gray-400 hover:border-gray-300'}`}
+        >
+          {NARY_OPERATOR_LABELS[op]}
         </button>
       ))}
+    </div>
+  )
+}
+
+function isNAryOp(op: FormulaStep['operator']): boolean {
+  return op === 'min' || op === 'max' || op === 'coalesce'
+}
+
+function OperandValueRow({
+  label,
+  value,
+  isConst,
+  onChangeValue,
+  onChangeIsConst,
+  grouped,
+  timeOp,
+  onTimeOp,
+  showTimeOp,
+}: {
+  label: string
+  value: string
+  isConst: boolean
+  onChangeValue: (v: string) => void
+  onChangeIsConst: (v: boolean) => void
+  grouped: Record<string, MetricCard[]>
+  timeOp: FormulaOperandTimeOp
+  onTimeOp: (v: FormulaOperandTimeOp) => void
+  showTimeOp: boolean
+}) {
+  return (
+    <div className="space-y-1 mb-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] text-gray-500 w-16 flex-shrink-0">{label}</span>
+        <label className="flex items-center gap-1 text-[10px] text-gray-600">
+          <input type="checkbox" checked={isConst} onChange={e => onChangeIsConst(e.target.checked)} />
+          定数
+        </label>
+        {showTimeOp && !isConst && (
+          <select
+            value={timeOp}
+            onChange={e => onTimeOp(e.target.value as FormulaOperandTimeOp)}
+            className="text-[10px] px-2 py-1 border border-gray-200 rounded-lg bg-white max-w-[200px]"
+          >
+            {(Object.keys(TIME_OP_LABELS) as FormulaOperandTimeOp[]).map(k => (
+              <option key={k} value={k}>{TIME_OP_LABELS[k]}</option>
+            ))}
+          </select>
+        )}
+      </div>
+      {isConst ? (
+        <input
+          type="number"
+          step="any"
+          value={value}
+          onChange={e => onChangeValue(e.target.value)}
+          placeholder="数値"
+          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
+        />
+      ) : (
+        <FieldSelect value={value} onChange={onChangeValue} grouped={grouped} />
+      )}
     </div>
   )
 }
@@ -148,7 +223,9 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
   const allCards = [...catalog, ...customCards]
   const [name, setName] = useState(editTarget?.label ?? '')
   const [baseOperandId, setBaseOperandId] = useState(editTarget?.formula?.baseOperandId ?? '')
-  const [steps, setSteps] = useState<FormulaStep[]>(editTarget?.formula?.steps ?? [{ operator: '+', operandId: '' }])
+  const [baseOperandIsConst, setBaseOperandIsConst] = useState(editTarget?.formula?.baseOperandIsConst ?? false)
+  const [baseTimeOp, setBaseTimeOp] = useState<FormulaOperandTimeOp>(editTarget?.formula?.baseTimeOp ?? 'none')
+  const [steps, setSteps] = useState<FormulaStep[]>(editTarget?.formula?.steps ?? [{ operator: '+', operandId: '', operandTimeOp: 'none' }])
   const [thresholdMode, setThresholdMode] = useState<FormulaThresholdMode>(editTarget?.formula?.thresholdMode ?? 'none')
   const [thresholdValueStr, setThresholdValueStr] = useState(
     editTarget?.formula?.thresholdValue != null && !Number.isNaN(editTarget.formula.thresholdValue)
@@ -156,19 +233,49 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
       : '',
   )
   const findLabel = (id: string) => allCards.find(c => c.id === id)?.label ?? id
-  const updateStep = (idx: number, patch: Partial<FormulaStep>) => setSteps(prev => prev.map((s, i) => i === idx ? { ...s, ...patch } : s))
-  const addStep = () => setSteps(prev => [...prev, { operator: '+', operandId: '' }])
+  const updateStep = (idx: number, patch: Partial<FormulaStep>) => setSteps(prev => prev.map((s, i) => (i === idx ? { ...s, ...patch } : s)))
+  const addStep = () => setSteps(prev => [...prev, { operator: '+', operandId: '', operandTimeOp: 'none' }])
   const removeStep = (idx: number) => setSteps(prev => prev.filter((_, i) => i !== idx))
   const thresholdNum = Number(thresholdValueStr)
   const thresholdValid =
     !showThresholdControls ||
     thresholdMode === 'none' ||
     (thresholdValueStr.trim() !== '' && Number.isFinite(thresholdNum))
-  const canSave = !!(name.trim() && baseOperandId && steps.every(s => s.operandId) && steps.length >= 1 && thresholdValid)
-  const grouped = allCards.reduce<Record<string, MetricCard[]>>((acc, c) => { if (!c.formula) { ;(acc[c.category] ??= []).push(c) } return acc }, {})
+
+  const operandOk = (id: string, isConst: boolean) => {
+    if (isConst) return id.trim() !== '' && Number.isFinite(Number(id))
+    return !!id
+  }
+
+  const stepsOk = steps.every((s) => {
+    if (isNAryOp(s.operator)) {
+      const extras = s.extraOperandIds ?? []
+      if (!operandOk(s.operandId, Boolean(s.operandIsConst))) return false
+      const flags = [Boolean(s.operandIsConst), ...((s.extraOperandsAreConst ?? []).map(Boolean))]
+      for (let i = 0; i < extras.length; i++) {
+        if (!operandOk(extras[i]!, flags[i + 1] ?? false)) return false
+      }
+      return true
+    }
+    return operandOk(s.operandId, Boolean(s.operandIsConst))
+  })
+
+  const baseOk = operandOk(baseOperandId, baseOperandIsConst)
+  const canSave = !!(name.trim() && baseOk && steps.length >= 1 && stepsOk && thresholdValid)
+
+  const grouped = allCards.reduce<Record<string, MetricCard[]>>((acc, c) => {
+    if (!c.formula) { ;(acc[c.category] ??= []).push(c) }
+    return acc
+  }, {})
+
   const previewFormula: FormulaNode | null = baseOperandId && steps.length > 0
     ? (() => {
-        const f: FormulaNode = { baseOperandId, steps }
+        const f: FormulaNode = {
+          baseOperandId,
+          baseOperandIsConst: baseOperandIsConst || undefined,
+          baseTimeOp: !baseOperandIsConst && baseTimeOp !== 'none' ? baseTimeOp : undefined,
+          steps,
+        }
         if (showThresholdControls && thresholdMode !== 'none' && Number.isFinite(thresholdNum)) {
           f.thresholdMode = thresholdMode
           f.thresholdValue = thresholdNum
@@ -176,44 +283,143 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
         return f
       })()
     : null
+
   const handleSave = () => {
     if (!canSave) return
     const id = editTarget?.id ?? `custom.${Date.now()}`
-    const formula: FormulaNode = { baseOperandId, steps }
+    const formula: FormulaNode = {
+      baseOperandId,
+      baseOperandIsConst: baseOperandIsConst || undefined,
+      baseTimeOp: !baseOperandIsConst && baseTimeOp !== 'none' ? baseTimeOp : undefined,
+      steps,
+    }
     if (showThresholdControls && thresholdMode !== 'none' && Number.isFinite(thresholdNum)) {
       formula.thresholdMode = thresholdMode
       formula.thresholdValue = thresholdNum
     }
     onSave({ id, label: name.trim(), category: 'カスタム指標', fieldRef: formatFormula(formula, findLabel, 'id'), formula })
   }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[85vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl mx-4 max-h-[85vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-amber-50 to-orange-50 flex-shrink-0">
           <h2 className="text-base font-bold text-gray-900">{editTarget ? 'カスタム指標を編集' : 'カスタム指標を作成'}</h2>
-          <p className="text-xs text-gray-500 mt-0.5">生フィールドを組み合わせて計算指標を定義（項は自由に追加可能）</p>
+          <p className="text-xs text-gray-500 mt-0.5">四則演算に加え、前期差・定数・min/max/coalesce を利用できます。</p>
         </div>
         <div className="px-6 py-5 space-y-5 overflow-y-auto flex-1">
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1.5">指標名</label>
-            <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="例: エンゲージメント率" className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400" />
+            <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="例: 友だち増減" className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400" />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-2">計算式</label>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="w-9 h-9 rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center text-xs font-bold flex-shrink-0">A</span>
-              <div className="flex-1"><FieldSelect value={baseOperandId} onChange={setBaseOperandId} grouped={grouped} /></div>
-            </div>
+            <label className="block text-xs font-medium text-gray-700 mb-2">項 A（起点）</label>
+            <OperandValueRow
+              label="A"
+              value={baseOperandId}
+              isConst={baseOperandIsConst}
+              onChangeValue={setBaseOperandId}
+              onChangeIsConst={(v) => { setBaseOperandIsConst(v); if (v) setBaseTimeOp('none') }}
+              grouped={grouped}
+              timeOp={baseTimeOp}
+              onTimeOp={setBaseTimeOp}
+              showTimeOp={!baseOperandIsConst}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-2">続きの演算</label>
             {steps.map((step, idx) => (
-              <div key={idx} className="flex items-center gap-2 mb-2">
-                <OperatorSelect value={step.operator} onChange={op => updateStep(idx, { operator: op })} />
-                <div className="flex-1"><FieldSelect value={step.operandId} onChange={v => updateStep(idx, { operandId: v })} grouped={grouped} /></div>
-                {steps.length > 1 && <button type="button" onClick={() => removeStep(idx)} className="w-7 h-7 rounded-lg border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-300 flex items-center justify-center transition flex-shrink-0"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>}
+              <div key={idx} className="mb-3 pb-3 border-b border-gray-100 last:border-0">
+                <div className="flex items-start gap-2">
+                  <div className="flex-shrink-0 pt-1">
+                    <OperatorSelect value={step.operator} onChange={op => {
+                      if (isNAryOp(op)) {
+                        updateStep(idx, {
+                          operator: op,
+                          extraOperandIds: step.extraOperandIds?.length ? step.extraOperandIds : [],
+                          extraOperandsAreConst: step.extraOperandsAreConst,
+                          operandTimeOp: 'none',
+                        })
+                      } else {
+                        updateStep(idx, { operator: op, extraOperandIds: undefined, extraOperandsAreConst: undefined })
+                      }
+                    }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    {isNAryOp(step.operator) ? (
+                      <div className="space-y-2">
+                        <OperandValueRow
+                          label="引数1"
+                          value={step.operandId}
+                          isConst={Boolean(step.operandIsConst)}
+                          onChangeValue={v => updateStep(idx, { operandId: v })}
+                          onChangeIsConst={v => updateStep(idx, { operandIsConst: v || undefined, operandTimeOp: v ? 'none' : step.operandTimeOp })}
+                          grouped={grouped}
+                          timeOp={step.operandTimeOp ?? 'none'}
+                          onTimeOp={v => updateStep(idx, { operandTimeOp: v })}
+                          showTimeOp={!step.operandIsConst}
+                        />
+                        {(step.extraOperandIds ?? []).map((ex, j) => (
+                          <OperandValueRow
+                            key={j}
+                            label={`引数${j + 2}`}
+                            value={ex}
+                            isConst={Boolean(step.extraOperandsAreConst?.[j])}
+                            onChangeValue={v => {
+                              const next = [...(step.extraOperandIds ?? [])]
+                              next[j] = v
+                              updateStep(idx, { extraOperandIds: next })
+                            }}
+                            onChangeIsConst={v => {
+                              const nextF = [...(step.extraOperandsAreConst ?? [])]
+                              while (nextF.length <= j) nextF.push(false)
+                              nextF[j] = v
+                              updateStep(idx, { extraOperandsAreConst: nextF })
+                            }}
+                            grouped={grouped}
+                            timeOp="none"
+                            onTimeOp={() => {}}
+                            showTimeOp={false}
+                          />
+                        ))}
+                        <button
+                          type="button"
+                          className="text-[10px] text-amber-600 hover:underline"
+                          onClick={() => {
+                            const next = [...(step.extraOperandIds ?? []), '']
+                            const nextF = [...(step.extraOperandsAreConst ?? [])]
+                            nextF.push(false)
+                            updateStep(idx, { extraOperandIds: next, extraOperandsAreConst: nextF })
+                          }}
+                        >
+                          + 引数を追加（3項以上の min / max / coalesce）
+                        </button>
+                      </div>
+                    ) : (
+                      <OperandValueRow
+                        label="項"
+                        value={step.operandId}
+                        isConst={Boolean(step.operandIsConst)}
+                        onChangeValue={v => updateStep(idx, { operandId: v })}
+                        onChangeIsConst={v => updateStep(idx, { operandIsConst: v || undefined, operandTimeOp: v ? 'none' : step.operandTimeOp })}
+                        grouped={grouped}
+                        timeOp={step.operandTimeOp ?? 'none'}
+                        onTimeOp={v => updateStep(idx, { operandTimeOp: v })}
+                        showTimeOp={!step.operandIsConst}
+                      />
+                    )}
+                  </div>
+                  {steps.length > 1 && (
+                    <button type="button" onClick={() => removeStep(idx)} className="w-7 h-7 rounded-lg border border-gray-200 text-gray-400 hover:text-red-500 flex-shrink-0" title="この段を削除">
+                      <svg className="w-3.5 h-3.5 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
             <button type="button" onClick={addStep} className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-amber-600 hover:text-amber-700 hover:bg-amber-50 rounded-lg transition mt-1">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-              項を追加
+              演算ステップを追加
             </button>
           </div>
           {showThresholdControls && (
@@ -247,7 +453,7 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
             <div className="rounded-lg bg-gray-50 border border-gray-200 p-3">
               <p className="text-[10px] text-gray-400 mb-1">プレビュー</p>
               <p className="text-sm font-medium text-gray-800">{name || '（指標名未入力）'}</p>
-              <p className="text-xs text-gray-500 mt-1 font-mono">{formatFormula(previewFormula, findLabel)}</p>
+              <p className="text-xs text-gray-500 mt-1 font-mono break-all">{formatFormula(previewFormula, findLabel)}</p>
             </div>
           )}
         </div>
@@ -299,7 +505,15 @@ export default function TemplateEditorPage({
       setRangeEnd(tmpl.rangeEnd?.slice(0, 10) ?? '')
       // rows を復元（セルは空状態）
       const headers = generateTimeHeaders(tmpl.timeUnit, 8, tmpl.rangeStart, tmpl.rangeEnd)
-      setRows(tmpl.rows.map(r => ({ id: r.id, label: r.label, cells: Object.fromEntries(headers.map(h => [h, ''])) })))
+      setRows(
+        tmpl.rows.map(r => ({
+          id: r.id,
+          label: r.label,
+          rowKind: r.rowKind ?? 'scalar',
+          breakdown: r.breakdown,
+          cells: Object.fromEntries(headers.map(h => [h, ''])),
+        })),
+      )
     })
   }, [templateId, projectId, serviceId, router])
 
@@ -331,7 +545,12 @@ export default function TemplateEditorPage({
     setSaveState('saving')
     setSaveError(null)
     // カスタム指標はライブラリで管理するため formula を rows に埋め込まない
-    const storedRows = rows.map(r => ({ id: r.id, label: r.label }))
+    const storedRows: StoredTemplateRow[] = rows.map((r) => {
+      if (r.rowKind === 'breakdown' && r.breakdown) {
+        return { id: r.id, label: r.label, rowKind: 'breakdown', breakdown: r.breakdown }
+      }
+      return { id: r.id, label: r.label, rowKind: 'scalar' }
+    })
     try {
       await updateTemplate(templateId, serviceId, {
         name: templateName,
@@ -411,7 +630,12 @@ export default function TemplateEditorPage({
     if (!over || over.id !== 'table-drop-zone') return
     const c = active.data.current?.card as MetricCard | undefined
     if (!c || addedIds.has(c.id)) return
-    setRows(prev => [...prev, { id: c.id, label: c.label, cells: Object.fromEntries(timeHeaders.map(h => [h, ''])) }])
+    setRows(prev => [...prev, {
+      id: c.id,
+      label: c.label,
+      rowKind: 'scalar',
+      cells: Object.fromEntries(timeHeaders.map(h => [h, ''])),
+    }])
     setIsDirty(true)
   }
   const removeRowAt = (index: number) => {
@@ -556,6 +780,29 @@ export default function TemplateEditorPage({
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
                 カスタム指標
               </button>
+              {serviceType === 'line' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = `breakdown.line_oam_friends_attr.${Date.now()}`
+                    setRows(prev => [...prev, {
+                      id,
+                      label: 'LINE 友だち属性（内訳）',
+                      rowKind: 'breakdown',
+                      breakdown: {
+                        table: 'line_oam_friends_attr',
+                        valueField: 'percentage',
+                        slices: [...DEFAULT_LINE_FRIENDS_ATTR_SLICES],
+                      },
+                      cells: Object.fromEntries(timeHeaders.map(h => [h, ''])),
+                    }])
+                    setIsDirty(true)
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition shadow-sm whitespace-nowrap"
+                >
+                  内訳行を追加
+                </button>
+              )}
             </div>
             {/* カテゴリタブ */}
             <div className="flex gap-1 overflow-x-auto pb-1">
@@ -646,11 +893,20 @@ export default function TemplateEditorPage({
                 <tbody>
                   {rows.map((row, idx) => {
                     const srcCard = allCards.find(c => c.id === row.id)
+                    const isBd = row.rowKind === 'breakdown'
                     return (
                       <tr key={`row-${idx}-${row.id}`} className="border-b border-gray-100 hover:bg-gray-50/50">
                         <td className="sticky left-0 bg-white px-4 py-2.5 z-10">
-                          <div className="text-xs font-medium text-gray-800">{row.label}</div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <div className="text-xs font-medium text-gray-800">{row.label}</div>
+                            {isBd && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">内訳</span>
+                            )}
+                          </div>
                           {srcCard?.formula && <div className="text-[9px] text-amber-500 font-mono mt-0.5">{formatFormula(srcCard.formula, id => allCards.find(c => c.id === id)?.label ?? id)}</div>}
+                          {isBd && row.breakdown && (
+                            <div className="text-[9px] text-gray-500 mt-0.5">{row.breakdown.slices.length} スライス（保存でテンプレに記録）</div>
+                          )}
                         </td>
                         {timeHeaders.map(h => <td key={h} className="px-3 py-2.5 text-center text-xs text-gray-400">—</td>)}
                         <td className="px-2 py-2.5 text-center">

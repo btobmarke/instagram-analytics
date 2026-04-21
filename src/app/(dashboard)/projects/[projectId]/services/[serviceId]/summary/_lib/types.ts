@@ -1,5 +1,26 @@
 // ── 共有型定義 ──────────────────────────────────────────────────
 
+import type { FormulaNode, FormulaBinaryOperator, FormulaNAryOperator } from '@/lib/summary/formula-types'
+import {
+  OPERATOR_SYMBOLS,
+  NARY_OPERATOR_LABELS,
+  TIME_OP_LABELS,
+} from '@/lib/summary/formula-types'
+
+export type {
+  FormulaNode,
+  FormulaStep,
+  FormulaBinaryOperator,
+  FormulaNAryOperator,
+  FormulaOperandTimeOp,
+  FormulaThresholdMode,
+} from '@/lib/summary/formula-types'
+
+export { OPERATOR_SYMBOLS, NARY_OPERATOR_LABELS, TIME_OP_LABELS } from '@/lib/summary/formula-types'
+
+/** 後方互換: 四則のみの演算子 */
+export type FormulaOperator = import('@/lib/summary/formula-types').FormulaBinaryOperator
+
 export interface ServiceDetail {
   id: string
   service_name: string
@@ -19,31 +40,16 @@ export interface MetricCard {
   formula?: FormulaNode
 }
 
-/** 計算式: 複数ステップ対応 */
-export type FormulaOperator = '+' | '-' | '*' | '/'
-
-export interface FormulaStep {
-  operator: FormulaOperator
-  operandId: string
-}
-
-/** 計算結果に適用する閾値（LINE カスタム指標など）。満たさないときは null 扱い */
-export type FormulaThresholdMode = 'none' | 'gte' | 'lte'
-
-export interface FormulaNode {
-  baseOperandId: string
-  steps: FormulaStep[]
-  /** 演算後の値が条件を満たすときだけ表示（満たさないセルは —） */
-  thresholdMode?: FormulaThresholdMode
-  /** thresholdMode が gte / lte のとき必須 */
-  thresholdValue?: number | null
-}
-
-export const OPERATOR_SYMBOLS: Record<FormulaOperator, string> = {
-  '+': '+',
-  '-': '−',
-  '*': '×',
-  '/': '÷',
+function operandDisplay(
+  id: string,
+  findLabel: (id: string) => string,
+  mode: 'label' | 'id',
+  isConst?: boolean,
+  timeOp?: import('@/lib/summary/formula-types').FormulaOperandTimeOp,
+): string {
+  const core = isConst ? id : mode === 'label' ? findLabel(id) : id
+  const t = timeOp && timeOp !== 'none' ? ` [${TIME_OP_LABELS[timeOp]}]` : ''
+  return isConst ? `定数 ${core}` : `${core}${t}`
 }
 
 /** 式を人間可読な文字列に変換 */
@@ -52,12 +58,13 @@ export function formatFormula(
   findLabel: (id: string) => string,
   mode: 'label' | 'id' = 'label',
 ): string {
-  const get = mode === 'label' ? findLabel : (id: string) => id
-  const parts: string[] = [get(formula.baseOperandId)]
+  const baseStr = operandDisplay(formula.baseOperandId, findLabel, mode, formula.baseOperandIsConst, formula.baseTimeOp)
+  const parts: string[] = [baseStr]
   let needsGroup = false
   for (let i = 0; i < formula.steps.length; i++) {
     const s = formula.steps[i]
-    if (i > 0 && (s.operator === '*' || s.operator === '/') && !needsGroup) {
+    const isNary = s.operator === 'min' || s.operator === 'max' || s.operator === 'coalesce'
+    if (!isNary && (s.operator === '*' || s.operator === '/') && !needsGroup) {
       const prevOps = formula.steps.slice(0, i).map(p => p.operator)
       if (prevOps.some(o => o === '+' || o === '-')) {
         parts.unshift('(')
@@ -65,8 +72,21 @@ export function formatFormula(
         needsGroup = true
       }
     }
-    parts.push(` ${OPERATOR_SYMBOLS[s.operator]} `)
-    parts.push(get(s.operandId))
+    if (isNary) {
+      const labelN = NARY_OPERATOR_LABELS[s.operator as FormulaNAryOperator]
+      const ids = [s.operandId, ...(s.extraOperandIds ?? [])]
+      const constFlags = [
+        Boolean(s.operandIsConst),
+        ...((s.extraOperandsAreConst ?? []).map(Boolean)),
+      ]
+      const sub = ids
+        .map((id, j) => operandDisplay(id, findLabel, mode, constFlags[j], s.operandTimeOp))
+        .join(', ')
+      parts.push(` ${labelN}(${sub})`)
+      continue
+    }
+    parts.push(` ${OPERATOR_SYMBOLS[s.operator as FormulaBinaryOperator]} `)
+    parts.push(operandDisplay(s.operandId, findLabel, mode, s.operandIsConst, s.operandTimeOp))
   }
   let out = parts.join('')
   const tm = formula.thresholdMode ?? 'none'
@@ -83,6 +103,8 @@ export interface TableRow {
   id: string
   label: string
   cells: Record<string, string>
+  rowKind?: 'scalar' | 'breakdown'
+  breakdown?: SummaryBreakdownConfig
 }
 
 export type TimeUnit = 'hour' | 'day' | 'week' | 'month' | 'custom_range'
@@ -95,12 +117,31 @@ export const TIME_UNIT_LABELS: Record<TimeUnit, string> = {
   custom_range: '期間指定（YYYYMMDD~YYYYMMDD）',
 }
 
-// ── テンプレート保存形式 ──────────────────────────────────────
+/** 友だち属性などの内訳行（サマリーテーブル専用） */
+export interface BreakdownSliceSpec {
+  /** 表示ラベル（例: 男性 20〜24歳） */
+  label: string
+  /** DB の gender 列と一致させる（例: male / female） */
+  gender?: string | null
+  /** DB の age 列と一致（部分一致不可。OAM CSV の表記に合わせる） */
+  age?: string | null
+}
+
+/** 内訳行の設定（テンプレ保存・編集 UI 共用） */
+export type SummaryBreakdownConfig = {
+  table: 'line_oam_friends_attr'
+  valueField: 'percentage'
+  slices: BreakdownSliceSpec[]
+}
 
 export interface StoredTemplateRow {
   id: string
   label: string
-  formula?: FormulaNode   // カスタム指標の場合
+  formula?: FormulaNode
+  /** 内訳行: 横軸セルに小さな表を表示（LINE 友だち属性など） */
+  rowKind?: 'scalar' | 'breakdown'
+  /** rowKind === breakdown のとき必須 */
+  breakdown?: SummaryBreakdownConfig
 }
 
 export interface SummaryTemplate {

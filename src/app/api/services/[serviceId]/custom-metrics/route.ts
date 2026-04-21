@@ -1,20 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-
-// ── FormulaNode バリデーション ─────────────────────────────────────────────────
-
-const FormulaStepSchema = z.object({
-  operator:  z.enum(['+', '-', '*', '/']),
-  operandId: z.string().min(1),
-})
-
-const FormulaNodeSchema = z.object({
-  baseOperandId:  z.string().min(1),
-  steps:          z.array(FormulaStepSchema),
-  thresholdMode:  z.enum(['none', 'gte', 'lte']).optional(),
-  thresholdValue: z.number().nullable().optional(),
-})
+import { FormulaNodeSchema } from '@/lib/summary/formula-zod'
 
 const CreateSchema = z.object({
   name:    z.string().min(1).max(100),

@@ -8,8 +8,24 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Legend,
 } from 'recharts'
-import type { ServiceDetail, SummaryTemplate, TimeUnit, FormulaNode, MetricCard } from '../../_lib/types'
+import type { ServiceDetail, SummaryTemplate, TimeUnit, FormulaNode, MetricCard, StoredTemplateRow } from '../../_lib/types'
 import { TIME_UNIT_LABELS, OPERATOR_SYMBOLS, formatFormula } from '../../_lib/types'
+import { evalSummaryFormula, collectFormulaMetricRefs } from '@/lib/summary/eval-formula'
+
+async function summaryQueryFetcher([url, body]: [string, Record<string, unknown>]) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return res.json() as Promise<{
+    success: boolean
+    data?: {
+      metrics: Record<string, Record<string, number | null>>
+      breakdownByRow: Record<string, Record<string, Array<{ label: string; value: number | null }>>>
+    }
+  }>
+}
 import { getMetricCatalog } from '../../_lib/catalog'
 import { getTemplate } from '../../_lib/store'
 import { generateJstDayPeriodLabels, generateJstDayPeriods, generateCustomRangePeriod } from '@/lib/summary/jst-periods'
@@ -57,57 +73,13 @@ function isSummaryDataFieldRef(ref: string): boolean {
   return true
 }
 
-/**
- * フォーミュラを期間ごとに計算
- * + / − は欠損（null）を 0 として足し引き（片方だけデータがある合算を表示するため）
- * × / ÷ はいずれか欠損なら null
- */
 function evalFormula(
   formula: FormulaNode,
   rawData: Record<string, Record<string, number | null>>,
   label: string,
+  timeHeaders: string[],
 ): number | null {
-  let sawNumeric = false
-  const get = (id: string): number | null => {
-    const v = rawData[id]?.[label]
-    if (v !== null && v !== undefined) sawNumeric = true
-    return v ?? null
-  }
-
-  const asPlusMinus = (v: number | null) => (v === null ? 0 : v)
-
-  let result: number | null = get(formula.baseOperandId)
-
-  for (const step of formula.steps) {
-    const operand = get(step.operandId)
-    switch (step.operator) {
-      case '+':
-        result = asPlusMinus(result) + asPlusMinus(operand)
-        break
-      case '-':
-        result = asPlusMinus(result) - asPlusMinus(operand)
-        break
-      case '*': {
-        if (result === null || operand === null) return null
-        result *= operand
-        break
-      }
-      case '/': {
-        if (result === null || operand === null) return null
-        if (operand === 0) return null
-        result /= operand
-        break
-      }
-    }
-  }
-
-  if (!sawNumeric) return null
-  const rounded = Math.round((result ?? 0) * 100) / 100
-  const tm = formula.thresholdMode ?? 'none'
-  const tv = formula.thresholdValue
-  if (tm === 'gte' && tv != null && rounded < tv) return null
-  if (tm === 'lte' && tv != null && rounded > tv) return null
-  return rounded
+  return evalSummaryFormula(formula, rawData, label, timeHeaders)
 }
 
 /** 数値を読みやすい形式にフォーマット */
@@ -115,6 +87,39 @@ function formatCell(value: number | null): string {
   if (value === null) return '—'
   if (Number.isInteger(value)) return value.toLocaleString('ja-JP')
   return value.toLocaleString('ja-JP', { maximumFractionDigits: 2 })
+}
+
+function formatPctCell(value: number | null): string {
+  if (value === null) return '—'
+  return `${value.toLocaleString('ja-JP', { maximumFractionDigits: 2 })}%`
+}
+
+function BreakdownMiniTable({
+  slices,
+}: {
+  slices: { label: string; value: number | null }[]
+}) {
+  if (slices.length === 0) {
+    return <span className="text-gray-300 text-xs">—</span>
+  }
+  return (
+    <div className="inline-block text-left min-w-[100px] max-w-[200px]">
+      <table className="w-full text-[9px] leading-tight border-collapse">
+        <tbody>
+          {slices.map((s, i) => (
+            <tr key={i}>
+              <td className="pr-1.5 py-0.5 text-gray-500 align-top truncate max-w-[90px]" title={s.label}>
+                {s.label}
+              </td>
+              <td className="py-0.5 text-gray-800 font-mono text-right whitespace-nowrap">
+                {formatPctCell(s.value)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
 }
 
 // テーブル名を人間が読みやすい形に変換
@@ -310,6 +315,8 @@ interface ChartRow {
   id: string
   label: string
   formula?: FormulaNode
+  rowKind?: StoredTemplateRow['rowKind']
+  breakdown?: StoredTemplateRow['breakdown']
 }
 
 function ServiceSummaryChartView({
@@ -328,7 +335,12 @@ function ServiceSummaryChartView({
   rawData: Record<string, Record<string, number | null>>
   dataLoading: boolean
   themeAccent: string
-  evalFormula: (f: FormulaNode, d: Record<string, Record<string, number | null>>, label: string) => number | null
+  evalFormula: (
+    f: FormulaNode,
+    d: Record<string, Record<string, number | null>>,
+    label: string,
+    headers: string[],
+  ) => number | null
   formatCell: (v: number | null) => string
 }) {
   if (dataLoading) {
@@ -348,6 +360,14 @@ function ServiceSummaryChartView({
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {rows.map((row, rowIdx) => {
+        if (row.rowKind === 'breakdown') {
+          return (
+            <div key={`chart-${rowIdx}-${row.id}`} className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+              <p className="text-xs text-gray-500">{allCards.find(c => c.id === row.id)?.label ?? row.label}</p>
+              <p className="text-[11px] text-gray-400 mt-2">内訳行は表モードで表示します。</p>
+            </div>
+          )
+        }
         const srcCard = allCards.find(c => c.id === row.id)
         const formula: FormulaNode | undefined = row.formula ?? srcCard?.formula
         const isCustom = !!formula
@@ -357,7 +377,7 @@ function ServiceSummaryChartView({
 
         // Recharts 用データ配列
         const chartData = timeHeaders.map(h => {
-          const v = formula ? evalFn(formula, rawData, h) : (rawData[row.id]?.[h] ?? null)
+          const v = formula ? evalFn(formula, rawData, h, timeHeaders) : (rawData[row.id]?.[h] ?? null)
           return { period: h, value: v }
         })
 
@@ -449,12 +469,18 @@ function ServiceSummaryCombinedChart({
   timeHeaders: string[]
   rawData: Record<string, Record<string, number | null>>
   dataLoading: boolean
-  evalFormula: (f: FormulaNode, d: Record<string, Record<string, number | null>>, label: string) => number | null
+  evalFormula: (
+    f: FormulaNode,
+    d: Record<string, Record<string, number | null>>,
+    label: string,
+    headers: string[],
+  ) => number | null
   formatCell: (v: number | null) => string
 }) {
-  const [selected, setSelected] = useState<Set<number>>(
-    () => new Set(rows.map((_, i) => i)),
-  )
+  const [selected, setSelected] = useState<Set<number>>(() => {
+    const idxs = rows.map((_, i) => i).filter(i => rows[i]?.rowKind !== 'breakdown')
+    return new Set(idxs.length > 0 ? idxs : [])
+  })
 
   const toggle = (i: number) =>
     setSelected(prev => {
@@ -471,9 +497,10 @@ function ServiceSummaryCombinedChart({
   const chartData = timeHeaders.map(h => {
     const point: Record<string, string | number | null> = { period: h }
     rows.forEach((row, i) => {
+      if (row.rowKind === 'breakdown') return
       const srcCard = allCards.find(c => c.id === row.id)
       const formula = row.formula ?? srcCard?.formula
-      point[`m_${i}`] = formula ? evalFn(formula, rawData, h) : (rawData[row.id]?.[h] ?? null)
+      point[`m_${i}`] = formula ? evalFn(formula, rawData, h, timeHeaders) : (rawData[row.id]?.[h] ?? null)
     })
     return point
   })
@@ -493,6 +520,7 @@ function ServiceSummaryCombinedChart({
       <p className="text-[11px] text-gray-400 mb-3">表示する指標を選択（複数可）</p>
       <div className="flex flex-wrap gap-2 mb-5 pb-4 border-b border-gray-100">
         {rows.map((row, i) => {
+          if (row.rowKind === 'breakdown') return null
           const color        = CHART_COLORS[i % CHART_COLORS.length]
           const checked      = selected.has(i)
           const displayLabel = allCards.find(c => c.id === row.id)?.label ?? row.label
@@ -552,6 +580,7 @@ function ServiceSummaryCombinedChart({
           />
           <Legend wrapperStyle={{ fontSize: 10, paddingTop: 12 }} />
           {rows.map((row, i) => {
+            if (row.rowKind === 'breakdown') return null
             const displayLabel = allCards.find(c => c.id === row.id)?.label ?? row.label
             return selected.has(i) ? (
               <Line
@@ -629,10 +658,8 @@ export default function SummaryViewPage({
     const allCards = [...catalog, ...libraryCards, ...(template.customCards ?? [])]
     const refs = new Set<string>()
     const addFormulaRefs = (f: FormulaNode | undefined) => {
-      if (!f) return
-      if (f.baseOperandId) refs.add(f.baseOperandId)
-      for (const step of f.steps) {
-        if (step.operandId) refs.add(step.operandId)
+      for (const id of collectFormulaMetricRefs(f)) {
+        refs.add(id)
       }
     }
     for (const row of template.rows) {
@@ -650,33 +677,72 @@ export default function SummaryViewPage({
     return [...refs].filter(isSummaryDataFieldRef)
   }, [template, serviceType, libraryCards])
 
-  // 集計データ取得
-  const dataUrl = useMemo(() => {
-    if (!template || allFieldRefs.length === 0) return null
+  const breakdownRows = useMemo(() => {
+    if (!template) return [] as { rowId: string; slices: NonNullable<StoredTemplateRow['breakdown']>['slices'] }[]
+    return template.rows
+      .filter((r) => r.rowKind === 'breakdown' && r.breakdown?.table === 'line_oam_friends_attr')
+      .map((r) => ({
+        rowId: r.id,
+        slices: r.breakdown!.slices,
+      }))
+  }, [template])
+
+  const summaryQueryBody = useMemo(() => {
+    if (!template) return null
     if (template.timeUnit === 'custom_range') {
       if (!template.rangeStart || !template.rangeEnd || template.rangeStart > template.rangeEnd) return null
     }
-    let u = `/api/services/${serviceId}/summary/data?fields=${encodeURIComponent(allFieldRefs.join(','))}&timeUnit=${template.timeUnit}&count=${TIME_COL_COUNT}`
-    if (template.timeUnit === 'custom_range' && template.rangeStart && template.rangeEnd) {
-      u += `&rangeStart=${encodeURIComponent(template.rangeStart)}&rangeEnd=${encodeURIComponent(template.rangeEnd)}`
+    const body: Record<string, unknown> = {
+      timeUnit: template.timeUnit,
+      count: TIME_COL_COUNT,
+      fieldRefs: allFieldRefs,
     }
-    return u
-  }, [template, serviceId, allFieldRefs])
+    if (template.timeUnit === 'custom_range' && template.rangeStart && template.rangeEnd) {
+      body.rangeStart = template.rangeStart
+      body.rangeEnd = template.rangeEnd
+    }
+    if (breakdownRows.length > 0) {
+      body.breakdowns = breakdownRows.map((b) => ({
+        rowId: b.rowId,
+        table: 'line_oam_friends_attr' as const,
+        slices: b.slices,
+      }))
+    }
+    return body
+  }, [template, allFieldRefs, breakdownRows])
 
-  const { data: rawDataRes, isLoading: dataLoading } = useSWR<{
-    success: boolean
-    data: Record<string, Record<string, number | null>>
-  }>(dataUrl, fetcher)
+  const summaryQueryKey = useMemo((): [string, Record<string, unknown>] | null => {
+    if (!template || !summaryQueryBody) return null
+    if (allFieldRefs.length === 0 && breakdownRows.length === 0) return null
+    return [`/api/services/${serviceId}/summary/query`, summaryQueryBody]
+  }, [template, serviceId, summaryQueryBody, allFieldRefs.length, breakdownRows.length])
 
-  const rawData = rawDataRes?.data ?? {}
+  const { data: summaryRes, isLoading: dataLoading } = useSWR(
+    summaryQueryKey,
+    summaryQueryFetcher,
+  )
 
-  /** 全フィールドが全期間 null → データ未取得状態 */
+  const rawData = summaryRes?.success ? (summaryRes.data?.metrics ?? {}) : {}
+  const breakdownByRow = summaryRes?.success ? (summaryRes.data?.breakdownByRow ?? {}) : {}
+
+  /** スカラー指標がすべて null で、内訳も空なら警告 */
   const allNullData = useMemo(() => {
-    if (!rawDataRes || dataLoading) return false
+    if (!summaryRes?.success || dataLoading) return false
     const vals = Object.values(rawData)
-    if (vals.length === 0) return false
-    return vals.every(fieldMap => Object.values(fieldMap).every(v => v === null))
-  }, [rawData, rawDataRes, dataLoading])
+    const scalarAllNull =
+      vals.length === 0 || vals.every(fieldMap => Object.values(fieldMap).every(v => v === null))
+    if (!scalarAllNull) return false
+    if (breakdownRows.length === 0) return true
+    let anyBreakdown = false
+    for (const br of breakdownRows) {
+      const byPeriod = breakdownByRow[br.rowId]
+      if (!byPeriod) continue
+      for (const cells of Object.values(byPeriod)) {
+        if (cells?.some((c) => c.value != null)) anyBreakdown = true
+      }
+    }
+    return !anyBreakdown
+  }, [rawData, summaryRes, dataLoading, breakdownRows, breakdownByRow])
 
   const timeHeaders = useMemo(() => {
     if (!template) return [] as string[]
@@ -902,6 +968,7 @@ export default function SummaryViewPage({
                       const srcCard = allCards.find(c => c.id === row.id)
                       const formula: FormulaNode | undefined = row.formula ?? srcCard?.formula
                       const isCustom = !!formula
+                      const isBreakdown = row.rowKind === 'breakdown' && row.breakdown
 
                       return (
                         <tr
@@ -911,16 +978,24 @@ export default function SummaryViewPage({
                           {/* 行ラベル */}
                           <td className="sticky left-0 bg-inherit px-4 py-3 z-10 border-r border-gray-100">
                             <div className="flex items-center gap-1.5">
-                              {isCustom && (
+                              {isBreakdown && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" title="内訳行" />
+                              )}
+                              {isCustom && !isBreakdown && (
                                 <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" title="カスタム指標" />
                               )}
                               <div className="flex-1 min-w-0">
                                 <div className="text-xs font-medium text-gray-800">{srcCard?.label ?? row.label}</div>
+                                {isBreakdown && row.breakdown && (
+                                  <div className="text-[9px] text-emerald-700 mt-0.5">
+                                    内訳 {row.breakdown.slices.length} 件（LINE 友だち属性・割合%）
+                                  </div>
+                                )}
                                 {formula ? (
                                   <div className="text-[9px] text-amber-500 font-mono mt-0.5 truncate">
                                     {formatFormula(formula, id => allCards.find(c => c.id === id)?.label ?? id)}
                                   </div>
-                                ) : srcCard && (
+                                ) : srcCard && !isBreakdown && (
                                   <div className="text-[9px] text-gray-400 font-mono mt-0.5">{srcCard.fieldRef}</div>
                                 )}
                               </div>
@@ -937,7 +1012,6 @@ export default function SummaryViewPage({
 
                           {/* データセル */}
                           {timeHeaders.map(h => {
-                            let value: number | null = null
                             if (dataLoading) {
                               return (
                                 <td key={h} className="px-3 py-3 text-center">
@@ -945,8 +1019,17 @@ export default function SummaryViewPage({
                                 </td>
                               )
                             }
+                            if (isBreakdown) {
+                              const slices = breakdownByRow[row.id]?.[h] ?? []
+                              return (
+                                <td key={h} className="px-2 py-2 text-center align-top">
+                                  <BreakdownMiniTable slices={slices} />
+                                </td>
+                              )
+                            }
+                            let value: number | null = null
                             if (formula) {
-                              value = evalFormula(formula, rawData, h)
+                              value = evalFormula(formula, rawData, h, timeHeaders)
                             } else {
                               value = rawData[row.id]?.[h] ?? null
                             }
@@ -1002,7 +1085,7 @@ export default function SummaryViewPage({
           {/* ── 個別グラフモード ──────────────────────────────────── */}
           {displayMode === 'chart' && (
             <ServiceSummaryChartView
-              rows={template.rows}
+              rows={template.rows as ChartRow[]}
               allCards={allCards}
               timeHeaders={timeHeaders}
               rawData={rawData}
@@ -1016,7 +1099,7 @@ export default function SummaryViewPage({
           {/* ── 複合グラフモード ──────────────────────────────────── */}
           {displayMode === 'combined' && (
             <ServiceSummaryCombinedChart
-              rows={template.rows}
+              rows={template.rows as ChartRow[]}
               allCards={allCards}
               timeHeaders={timeHeaders}
               rawData={rawData}
@@ -1029,9 +1112,18 @@ export default function SummaryViewPage({
       )}
 
       {/* 指標説明モーダル */}
-      {infoRowIndex !== null && infoCard && (
+      {infoRowIndex !== null && infoRow && (
         <MetricInfoModal
-          card={infoCard}
+          card={
+            infoCard ?? {
+              id: infoRow.id,
+              label: infoRow.label,
+              category: '内訳',
+              fieldRef: infoRow.breakdown
+                ? `line_oam_friends_attr（${infoRow.breakdown.slices.length} スライス）`
+                : infoRow.id,
+            }
+          }
           formula={infoFormula}
           allCards={allCards}
           onClose={() => setInfoRowIndex(null)}
