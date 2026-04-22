@@ -83,16 +83,15 @@
 | API名 | メトリクス名 | メトリクスの内容 | 備考 |
 |--------|-------------|------------------|------|
 | `GET /{media-id}/insights` | `views`, `reach` | 閲覧数・リーチ | **lifetime** ＋ **`story-insight-collector`** では **`ig_story_insight_fact`** にも同系列を **時刻丸めスナップショット** で保存。 |
-| 同上 | `taps_forward` | 次へタップ | 同上。 |
-| 同上 | `taps_back` | 前へタップ | 同上。 |
-| 同上 | `exits` | 離脱 | 同上。 |
 | 同上 | `replies` | DM 返信 | 同上。 |
+| ~~同上~~ | ~~`taps_forward` / `taps_back` / `exits`~~ | （旧） | **Graph API v22+** では `GET /{media-id}/insights` の **複数 metric クエリに含められない**（`#100`）。 |
 
 #### C-5. ストーリー `navigation`（breakdown）
 
 | API名 | メトリクス名 | メトリクスの内容 | 備考 |
 |--------|-------------|------------------|------|
-| `GET /{media-id}/insights?metric=navigation&breakdown=story_navigation_action_type&period=lifetime` | `navigation_{action}` | 例: `navigation_tap_forward` — 公式 `navigation` の内訳 | `action` は API の次元値を **小文字化**して `metric_code` に保存。従来の `taps_forward` 等と **併存**。 |
+| `GET /{media-id}/insights?metric=navigation&breakdown=story_navigation_action_type&period=lifetime` | `navigation_{action}` | 例: `navigation_tap_forward` — 公式 `navigation` の内訳 | `action` は API の次元値を **小文字化**して `metric_code` に保存。 |
+| 同上（アプリ側の複写） | `taps_forward`, `taps_back`, `exits` | 次へ／前へ／離脱 | breakdown の `tap_forward` / `tap_back` / `tap_exit` を **従来の `metric_code` にも upsert** し、一覧 UI や `mergeLatestStoryInsightsIntoPostList` との互換を維持。 |
 
 #### C-6. メディア `profile_activity`（breakdown）
 

@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { InstagramApiError, InstagramClient, isRateLimitExceeded } from '@/lib/instagram/client'
+import { legacyStoryMetricCodeFromNavigationDimension } from '@/lib/instagram/story-navigation-legacy-metric'
 import { resolveClientIdFromServiceJoin } from '@/lib/batch/resolve-service-client-id'
 import { decrypt } from '@/lib/utils/crypto'
 import { validateBatchRequest } from '@/lib/utils/batch-auth'
@@ -215,6 +216,24 @@ export async function POST(request: Request) {
                     error: navUpsertErr.message,
                   })
                   throw navUpsertErr
+                }
+                const legacyCode = legacyStoryMetricCodeFromNavigationDimension(action)
+                if (legacyCode != null) {
+                  const { error: legacyErr } = await admin.from('ig_story_insight_fact').upsert({
+                    media_id: story.id,
+                    metric_code: legacyCode,
+                    value: navVal,
+                    fetched_at: snapshotAtIso,
+                  }, { onConflict: 'media_id,metric_code,fetched_at' })
+                  if (legacyErr) {
+                    console.error('[story-insight-collector] navigation→legacy metric upsert failed', {
+                      account_id: account.id,
+                      media_id: story.id,
+                      metric_code: legacyCode,
+                      error: legacyErr.message,
+                    })
+                    throw legacyErr
+                  }
                 }
               }
             } else if (navRes != null && isRateLimitExceeded(navRes.rateUsage, 70)) {
