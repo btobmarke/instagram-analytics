@@ -289,6 +289,13 @@ function MetricInfoModal({
               {card.fieldRef}
             </code>
           </div>
+
+          {card.description && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">説明</p>
+              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{card.description}</p>
+            </div>
+          )}
         </div>
 
         {/* フッター */}
