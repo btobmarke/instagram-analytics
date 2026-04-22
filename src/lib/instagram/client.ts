@@ -259,7 +259,9 @@ export class InstagramClient {
    * @see https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/stories
    */
   async getStoriesList(params: { limit?: number; after?: string } = {}) {
-    const fields = 'id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,is_comment_enabled,shortcode,children{id,media_url,thumbnail_url}'
+    // ストーリーに is_comment_enabled を含めると (#10) Comments cannot be made on story media で 400 になる
+    const fields =
+      'id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,shortcode,children{id,media_url,thumbnail_url}'
     return this.fetch(
       `/${this.accountId}/stories`,
       {
