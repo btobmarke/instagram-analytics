@@ -4,17 +4,30 @@ import { decrypt } from '@/lib/utils/crypto'
 
 export type UpsertIgMediaRowFn = (m: Record<string, unknown>) => Promise<void>
 
+/** 公開中ストーリー一覧の同期結果（一覧取得失敗は failed に含め、ジョブの partial 判定に載る） */
+export type UpsertActiveStoriesPagesResult = {
+  processed: number
+  failed: number
+  listFetchFailed: boolean
+  listFetchErrorMessage: string | null
+  /** X-App-Usage 閾値超えでページングを打ち切った（取得済み分は processed に反映済みの場合あり） */
+  rateLimitStoppedEarly: boolean
+}
+
 /**
  * GET /{ig-user-id}/stories をページング取得し、ig_media に upsert する。
- * API 全体の失敗は throw せず processed/failed のみ返す（呼び出し側でログ）。
+ * 一覧 API が失敗した場合は failed を増やし listFetchFailed を立てる（握りつぶさない）。
  */
 export async function upsertActiveStoriesPages(
   igClient: InstagramClient,
   upsertRow: UpsertIgMediaRowFn,
   ctx: { accountId: string; logPrefix: string }
-): Promise<{ processed: number; failed: number }> {
+): Promise<UpsertActiveStoriesPagesResult> {
   let processed = 0
   let failed = 0
+  let listFetchFailed = false
+  let listFetchErrorMessage: string | null = null
+  let rateLimitStoppedEarly = false
 
   try {
     let storyAfter: string | undefined
@@ -22,7 +35,14 @@ export async function upsertActiveStoriesPages(
     while (storyPages < 5) {
       const { data: storyResp, paging: storyPaging, rateUsage } =
         await igClient.getStoriesList({ limit: 50, after: storyAfter })
-      if (isRateLimitExceeded(rateUsage, 70)) break
+      if (isRateLimitExceeded(rateUsage, 70)) {
+        rateLimitStoppedEarly = true
+        console.warn(`[${ctx.logPrefix}] stories list stopped (app usage high)`, {
+          account_id: ctx.accountId,
+          rate_usage: rateUsage,
+        })
+        break
+      }
 
       const storyList = (storyResp as { data?: unknown[] })?.data ?? []
 
@@ -42,13 +62,16 @@ export async function upsertActiveStoriesPages(
       storyPages++
     }
   } catch (storiesErr) {
-    console.warn(`[${ctx.logPrefix}] stories list fetch failed (non-fatal)`, {
+    listFetchFailed = true
+    listFetchErrorMessage = storiesErr instanceof Error ? storiesErr.message : String(storiesErr)
+    failed += 1
+    console.error(`[${ctx.logPrefix}] stories list fetch failed`, {
       account_id: ctx.accountId,
-      error: storiesErr instanceof Error ? storiesErr.message : String(storiesErr),
+      error: listFetchErrorMessage,
     })
   }
 
-  return { processed, failed }
+  return { processed, failed, listFetchFailed, listFetchErrorMessage, rateLimitStoppedEarly }
 }
 
 export type IgAccountForStorySync = {
@@ -71,11 +94,15 @@ export async function runInstagramStoryMediaSyncAllAccounts(
   skippedNoToken: number
   skippedNoClient: number
   accountsCount: number
+  storyListFetchFailures: number
+  storyRateLimitEarlyStops: number
 }> {
   let totalProcessed = 0
   let totalFailed = 0
   let skippedNoToken = 0
   let skippedNoClient = 0
+  let storyListFetchFailures = 0
+  let storyRateLimitEarlyStops = 0
 
   const { data: accounts } = await admin
     .from('ig_accounts')
@@ -147,6 +174,8 @@ export async function runInstagramStoryMediaSyncAllAccounts(
         accountId: account.id,
         logPrefix,
       })
+      if (st.listFetchFailed) storyListFetchFailures += 1
+      if (st.rateLimitStoppedEarly) storyRateLimitEarlyStops += 1
       totalProcessed += st.processed
       totalFailed += st.failed
     } catch (loopErr) {
@@ -161,5 +190,7 @@ export async function runInstagramStoryMediaSyncAllAccounts(
     skippedNoToken,
     skippedNoClient,
     accountsCount: list.length,
+    storyListFetchFailures,
+    storyRateLimitEarlyStops,
   }
 }
