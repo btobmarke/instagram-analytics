@@ -13,11 +13,19 @@ import {
   buildPostInsightChartRows,
   milestoneCumulativeSummary,
   INSIGHT_PHASE_OPTIONS,
+  INSIGHT_PHASE_OPTIONS_STORY,
   INSIGHT_MILESTONES,
+  INSIGHT_MILESTONES_STORY,
   type InsightPhaseId,
   type InsightValueMode,
   type MilestoneDiffRow,
 } from '@/lib/instagram/post-insight-chart'
+import {
+  defaultChartMetricsForPost,
+  isStoryMedia,
+  milestoneMetricsForPost,
+  overlayMetricChoicesForPost,
+} from '@/lib/instagram/post-display-mode'
 import { postMetaRows } from '@/lib/instagram/post-meta'
 import { ManualInsightExtraModal, ManualInsightExtraHistoryTable } from '@/components/posts/ManualInsightExtraModal'
 
@@ -36,6 +44,7 @@ type OverlayApiResponse = {
   overlayRows: Array<Record<string, string | number | null>>
   diffTables: Array<{ peerId: string; peerLabel: string; rows: MilestoneDiffRow[] }>
   posts: Array<{ id: string; label: string; posted_at: string }>
+  is_story?: boolean
 }
 
 interface PostDetailData {
@@ -83,10 +92,11 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
   const { id } = use(params)
   const searchParams = useSearchParams()
   const accountId = searchParams.get('account')
+  const returnTo = searchParams.get('returnTo')
 
   const [data, setData] = useState<PostDetailData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [selectedMetrics, setSelectedMetrics] = useState(['reach', 'likes', 'saved'])
+  const [selectedMetrics, setSelectedMetrics] = useState<string[]>(['reach', 'likes', 'saved'])
   const [insightPhase, setInsightPhase] = useState<InsightPhaseId>('0-72h')
   const [insightValueMode, setInsightValueMode] = useState<InsightValueMode>('cumulative')
   const [analyzing, setAnalyzing] = useState(false)
@@ -106,6 +116,14 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
         if (d && !Array.isArray(d.manual_insight_extra)) d.manual_insight_extra = []
         setData(d)
         setLoading(false)
+        if (d?.post) {
+          const story = isStoryMedia(d.post)
+          const defaults = defaultChartMetricsForPost(d.post).filter(m => m in (d.latest_insights ?? {}))
+          setSelectedMetrics(defaults.length > 0 ? defaults : defaultChartMetricsForPost(d.post))
+          setInsightPhase(story ? '0-24h' : '0-72h')
+          setOverlayMetric('reach')
+          setSelectedPeers([])
+        }
       })
   }, [id])
 
@@ -122,10 +140,11 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
       return
     }
     setOverlayLoading(true)
+    const story = data?.post ? isStoryMedia(data.post) : false
     const q = new URLSearchParams({
       peerIds: selectedPeers.join(','),
       metric: overlayMetric,
-      maxHours: '72',
+      maxHours: story ? '24' : '72',
     })
     fetch(`/api/posts/${id}/overlay?${q}`)
       .then(r => r.json())
@@ -135,12 +154,22 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
       })
       .catch(() => setOverlayData(null))
       .finally(() => setOverlayLoading(false))
-  }, [id, selectedPeers, overlayMetric])
+  }, [id, selectedPeers, overlayMetric, data?.post])
+
+  const isStory = Boolean(data?.post && isStoryMedia(data.post))
+  const phaseOptions = isStory ? INSIGHT_PHASE_OPTIONS_STORY : INSIGHT_PHASE_OPTIONS
+  const milestoneDefs = isStory ? INSIGHT_MILESTONES_STORY : INSIGHT_MILESTONES
+
+  useEffect(() => {
+    if (!data?.post || !isStoryMedia(data.post)) return
+    const allowed = new Set(INSIGHT_PHASE_OPTIONS_STORY.map(o => o.id))
+    if (!allowed.has(insightPhase)) setInsightPhase('0-24h')
+  }, [data?.post, insightPhase])
 
   const metricKeys = useMemo(() => {
     if (!data?.latest_insights) return []
     const latest_insights = data.latest_insights
-    const baseMetricOrder = [
+    const feedOrder = [
       'views',
       'reach',
       'likes',
@@ -157,8 +186,27 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
       'impressions',
       'video_views',
     ] as const
+    const storyOrder = [
+      'views',
+      'reach',
+      'taps_forward',
+      'taps_back',
+      'exits',
+      'replies',
+      'likes',
+      'comments',
+      'saved',
+      'shares',
+      'total_interactions',
+      'profile_visits',
+      'follows',
+      'impressions',
+      'video_views',
+    ] as const
+    const baseMetricOrder = isStoryMedia(data.post) ? storyOrder : feedOrder
+    const baseSet = new Set<string>(baseMetricOrder as unknown as string[])
     const extraInsightKeys = Object.keys(latest_insights).filter(k => {
-      if (baseMetricOrder.includes(k as (typeof baseMetricOrder)[number])) return false
+      if (baseSet.has(k)) return false
       if (k.startsWith('profile_activity_')) return true
       if (k.startsWith('navigation_')) return true
       return false
@@ -169,10 +217,10 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
     ]
   }, [data])
 
-  const milestoneMetrics = useMemo(
-    () => ['reach', 'likes', 'saved'].filter(m => metricKeys.includes(m)),
-    [metricKeys]
-  )
+  const milestoneMetrics = useMemo(() => {
+    if (!data?.post) return []
+    return milestoneMetricsForPost(data.post, metricKeys)
+  }, [data?.post, metricKeys])
 
   const milestoneSummary = useMemo(() => {
     if (!data) {
@@ -183,8 +231,13 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
         '7d': {},
       } as ReturnType<typeof milestoneCumulativeSummary>
     }
-    return milestoneCumulativeSummary(data.post.posted_at, data.time_series, milestoneMetrics)
-  }, [data, milestoneMetrics])
+    return milestoneCumulativeSummary(
+      data.post.posted_at,
+      data.time_series,
+      milestoneMetrics,
+      milestoneDefs
+    )
+  }, [data, milestoneMetrics, milestoneDefs])
 
   const chartData = useMemo(() => {
     if (!data) return []
@@ -238,10 +291,20 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
   const manualInsightRows = data.manual_insight_extra ?? []
   const latestManualInsight = manualInsightRows[0]
 
-  const egRate = latest_insights.reach && latest_insights.reach > 0 && latest_insights.total_interactions != null
-    ? ((latest_insights.total_interactions / latest_insights.reach) * 100).toFixed(2) : null
-  const saveRate = latest_insights.reach && latest_insights.reach > 0 && latest_insights.saved != null
-    ? ((latest_insights.saved / latest_insights.reach) * 100).toFixed(2) : null
+  const egRate =
+    !isStory &&
+    latest_insights.reach &&
+    latest_insights.reach > 0 &&
+    latest_insights.total_interactions != null
+      ? ((latest_insights.total_interactions / latest_insights.reach) * 100).toFixed(2)
+      : null
+  const saveRate =
+    !isStory &&
+    latest_insights.reach &&
+    latest_insights.reach > 0 &&
+    latest_insights.saved != null
+      ? ((latest_insights.saved / latest_insights.reach) * 100).toFixed(2)
+      : null
 
   const children = post.children_json as Array<{ media_url?: string; thumbnail_url?: string }> | null
 
@@ -249,7 +312,16 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
     <div className="max-w-6xl mx-auto px-4 sm:px-6">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-sm text-gray-500 mb-6">
-        <Link href={`/posts?account=${accountId}`} className="hover:text-purple-600">投稿一覧</Link>
+        <Link
+          href={
+            returnTo && returnTo.startsWith('/')
+              ? returnTo
+              : `/posts?account=${accountId ?? ''}${isStory ? '&mode=story' : '&mode=feed'}`
+          }
+          className="hover:text-purple-600"
+        >
+          投稿一覧
+        </Link>
         <span>/</span>
         <span className="text-gray-900 font-medium">投稿詳細</span>
       </nav>
@@ -314,48 +386,54 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
                   </div>
                 )
               })}
-              <div className="bg-purple-50 rounded-xl p-3">
-                <p className="text-xs text-purple-600">エンゲージメント率</p>
-                <p className="text-lg font-bold text-purple-700">{egRate ? `${egRate}%` : '—'}</p>
-              </div>
-              <div className="bg-pink-50 rounded-xl p-3">
-                <p className="text-xs text-pink-600">保存率</p>
-                <p className="text-lg font-bold text-pink-700">{saveRate ? `${saveRate}%` : '—'}</p>
-              </div>
+              {!isStory && (
+                <>
+                  <div className="bg-purple-50 rounded-xl p-3">
+                    <p className="text-xs text-purple-600">エンゲージメント率</p>
+                    <p className="text-lg font-bold text-purple-700">{egRate ? `${egRate}%` : '—'}</p>
+                  </div>
+                  <div className="bg-pink-50 rounded-xl p-3">
+                    <p className="text-xs text-pink-600">保存率</p>
+                    <p className="text-lg font-bold text-pink-700">{saveRate ? `${saveRate}%` : '—'}</p>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-gray-200 border-l-[3px] border-l-purple-500 shadow-sm overflow-hidden">
-            <div className="p-4 sm:p-5">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <h3 className="text-sm font-semibold text-gray-900">手入力インサイト</h3>
-                  <p className="text-sm text-gray-600 mt-1.5 leading-relaxed">
-                    Graph API に無い内訳（ビューのフォロワー比率、閲覧の場所、いいねしたユーザー名など）をこの投稿用に残します。保存のたびに履歴が1行増えます。
-                  </p>
-                  {manualInsightRows.length > 0 && latestManualInsight ? (
-                    <p className="text-xs text-gray-500 mt-2">
-                      登録 <span className="font-semibold text-gray-800">{manualInsightRows.length}</span> 件
-                      <span className="mx-1.5 text-gray-300">·</span>
-                      最新 {new Date(latestManualInsight.recorded_at).toLocaleString('ja-JP')}
+          {!isStory && (
+            <div className="bg-white rounded-2xl border border-gray-200 border-l-[3px] border-l-purple-500 shadow-sm overflow-hidden">
+              <div className="p-4 sm:p-5">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold text-gray-900">手入力インサイト</h3>
+                    <p className="text-sm text-gray-600 mt-1.5 leading-relaxed">
+                      Graph API に無い内訳（ビューのフォロワー比率、閲覧の場所、いいねしたユーザー名など）をこの投稿用に残します。保存のたびに履歴が1行増えます。
                     </p>
-                  ) : (
-                    <p className="text-xs text-gray-500 mt-2">まだ登録がありません。</p>
-                  )}
+                    {manualInsightRows.length > 0 && latestManualInsight ? (
+                      <p className="text-xs text-gray-500 mt-2">
+                        登録 <span className="font-semibold text-gray-800">{manualInsightRows.length}</span> 件
+                        <span className="mx-1.5 text-gray-300">·</span>
+                        最新 {new Date(latestManualInsight.recorded_at).toLocaleString('ja-JP')}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-gray-500 mt-2">まだ登録がありません。</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setManualModalOpen(true)}
+                    className="shrink-0 inline-flex items-center justify-center w-full sm:w-auto text-sm font-semibold px-4 py-2.5 rounded-xl bg-purple-600 text-white hover:bg-purple-700 shadow-sm"
+                  >
+                    内訳を追加
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setManualModalOpen(true)}
-                  className="shrink-0 inline-flex items-center justify-center w-full sm:w-auto text-sm font-semibold px-4 py-2.5 rounded-xl bg-purple-600 text-white hover:bg-purple-700 shadow-sm"
-                >
-                  内訳を追加
-                </button>
-              </div>
-              <div className="mt-4 pt-4 border-t border-gray-100">
-                <ManualInsightExtraHistoryTable rows={manualInsightRows} emphasizeLatest />
+                <div className="mt-4 pt-4 border-t border-gray-100">
+                  <ManualInsightExtraHistoryTable rows={manualInsightRows} emphasizeLatest />
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Right Column: Chart + AI */}
@@ -367,6 +445,11 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
                 <h3 className="text-sm font-semibold text-gray-700">指標の推移</h3>
                 <p className="text-xs text-gray-500 mt-1">
                   横軸は<strong>投稿公開からの経過</strong>です。区間で初速〜後半を切り替え、累積／増分で見方を変えられます。
+                  {isStory && (
+                    <span className="block mt-1 text-pink-700/90">
+                      ストーリーは公開から約24時間で API 上から消えるため、長期区間は表示していません。
+                    </span>
+                  )}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -393,8 +476,8 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
             {milestoneMetrics.length > 0 && (
               <div>
                 <p className="text-xs font-medium text-gray-600 mb-2">初速・到達スナップ（累積）</p>
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                  {INSIGHT_MILESTONES.map(ms => (
+                <div className={`grid gap-2 ${milestoneDefs.length <= 2 ? 'grid-cols-2' : 'grid-cols-2 lg:grid-cols-4'}`}>
+                  {milestoneDefs.map(ms => (
                     <div
                       key={ms.id}
                       className="rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-2.5"
@@ -418,7 +501,7 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
 
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap gap-1.5">
-                {INSIGHT_PHASE_OPTIONS.map(opt => (
+                {phaseOptions.map(opt => (
                   <button
                     key={opt.id}
                     type="button"
@@ -519,7 +602,9 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
             <div>
               <h3 className="text-sm font-semibold text-gray-700">類似投稿との曲線比較</h3>
               <p className="text-xs text-gray-500 mt-1">
-                同一アカウントの直近投稿から最大2件選び、<strong>公開からの経過（1h刻み・累積）</strong>で重ねます。差分表はマイルストーン時点の累積比較です。
+                同一アカウントの直近{isStory ? 'ストーリー' : '投稿（ストーリー除く）'}から最大2件選び、
+                <strong>公開からの経過（1h刻み・累積）</strong>で重ねます。差分表はマイルストーン時点の累積比較です。
+                {isStory && ' ストーリー同士のみ比較できます。'}
               </p>
             </div>
 
@@ -556,7 +641,7 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
             {selectedPeers.length > 0 && (
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-gray-500">オーバーレイ指標:</span>
-                {(['reach', 'likes', 'saved', 'comments'] as const).map(m => (
+                {overlayMetricChoicesForPost(post).map(m => (
                   <button
                     key={m}
                     type="button"

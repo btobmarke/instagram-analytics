@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, use, useCallback, useEffect } from 'react'
+import { Suspense, useState, use, useCallback, useEffect } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import type { IgMedia } from '@/types'
 import {
@@ -11,10 +11,28 @@ import {
   postListFancyCheckboxClass,
   usePostListColumnVisibility,
 } from '@/components/posts/post-list-column-visibility'
+import {
+  apiTypeParamForListMode,
+  postListModeFromQueryParam,
+  type PostListMode,
+} from '@/lib/instagram/post-display-mode'
 import { InstagramServiceSubnav } from '@/components/instagram/InstagramServiceSubnav'
 import { InstagramFollowerImportButtonModal } from '@/components/instagram/InstagramFollowerImportButtonModal'
 
 const SERVICE_POST_LIST_COL_STORAGE_KEY = 'ig_service_posts_list_columns_v3'
+const SERVICE_POST_LIST_COL_STORAGE_KEY_STORY = 'ig_service_posts_list_columns_story_v1'
+
+const SERVICE_STORY_LIST_COLUMN_IDS = new Set([
+  'type',
+  'views',
+  'reach',
+  'replies',
+  'exits',
+  'taps_forward',
+  'taps_back',
+  'postedAt',
+  'detail',
+])
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -45,13 +63,15 @@ interface ServiceDetail {
   type_config: { ig_account_ref_id?: string } | null
 }
 
-export default function ServicePostsPage({
+function ServicePostsPageInner({
   params,
 }: {
   params: Promise<{ projectId: string; serviceId: string }>
 }) {
   const { projectId, serviceId } = use(params)
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const modeFromUrl = postListModeFromQueryParam(null, searchParams.get('mode'))
 
   const { data: serviceData, mutate: mutateService } = useSWR<{ success: boolean; data: ServiceDetail }>(
     `/api/services/${serviceId}`,
@@ -65,26 +85,37 @@ export default function ServicePostsPage({
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
   const [loading, setLoading] = useState(false)
-  const [filterType, setFilterType] = useState('')
+  const [listMode, setListMode] = useState<PostListMode>(modeFromUrl)
+  useEffect(() => {
+    setListMode(modeFromUrl)
+  }, [modeFromUrl])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const limit = 20
-  const { visible, isOn, toggle } = usePostListColumnVisibility(SERVICE_POST_LIST_COL_STORAGE_KEY, SERVICE_POST_LIST_COLUMNS)
+  const listColumns =
+    listMode === 'story'
+      ? SERVICE_POST_LIST_COLUMNS.filter(c => SERVICE_STORY_LIST_COLUMN_IDS.has(c.id))
+      : SERVICE_POST_LIST_COLUMNS
+  const columnStorageKey =
+    listMode === 'story' ? SERVICE_POST_LIST_COL_STORAGE_KEY_STORY : SERVICE_POST_LIST_COL_STORAGE_KEY
+  const { visible, isOn, toggle } = usePostListColumnVisibility(columnStorageKey, listColumns)
 
   const fetchPosts = useCallback(async () => {
     if (!accountId) return
     setLoading(true)
     const params = new URLSearchParams({ account: accountId, limit: String(limit), offset: String(offset) })
-    if (filterType) params.set('type', filterType)
+    const apiType = apiTypeParamForListMode(listMode)
+    if (apiType) params.set('type', apiType)
+    if (listMode === 'feed') params.set('types', 'FEED,REELS,VIDEO')
     const res = await fetch(`/api/posts?${params}`)
     const json = await res.json()
     setPosts(json.data ?? [])
     setTotal(json.count ?? 0)
     setFollowersCount(typeof json.followers_count === 'number' ? json.followers_count : null)
     setLoading(false)
-  }, [accountId, offset, filterType])
+  }, [accountId, offset, listMode])
 
   useEffect(() => { fetchPosts() }, [fetchPosts])
-  useEffect(() => { setSelectedIds(new Set()) }, [offset, filterType])
+  useEffect(() => { setSelectedIds(new Set()) }, [offset, listMode])
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -141,7 +172,7 @@ export default function ServicePostsPage({
             <p className="text-sm text-gray-400">{service?.service_name}</p>
           </div>
         </div>
-        <InstagramFollowerImportButtonModal accountId={accountId} onImported={() => mutateService()} />
+        <InstagramFollowerImportButtonModal accountId={accountId} onImported={() => { void mutateService() }} />
       </div>
 
       <InstagramServiceSubnav projectId={projectId} serviceId={serviceId} active="posts" />
@@ -164,12 +195,26 @@ export default function ServicePostsPage({
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {['', 'FEED', 'REELS', 'STORY'].map(t => (
-            <button key={t}
-              onClick={() => { setFilterType(t); setOffset(0) }}
-              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition ${filterType === t ? 'bg-purple-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+          {(
+            [
+              { mode: 'feed' as const, label: 'フィード・リール' },
+              { mode: 'story' as const, label: 'ストーリー' },
+            ] as const
+          ).map(({ mode, label }) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => {
+                setOffset(0)
+                router.push(
+                  `/projects/${projectId}/services/${serviceId}/instagram/posts?mode=${mode}`
+                )
+              }}
+              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition ${
+                listMode === mode ? 'bg-purple-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}
             >
-              {t === '' ? 'すべて' : MEDIA_TYPE_LABELS[t]}
+              {label}
             </button>
           ))}
         </div>
@@ -214,7 +259,7 @@ export default function ServicePostsPage({
         <>
           <div className="min-w-0 bg-white rounded-2xl border border-gray-200 shadow-sm">
             <div className="p-4 pb-0">
-              <PostListColumnToggles columns={SERVICE_POST_LIST_COLUMNS} visible={visible} onToggle={toggle} />
+              <PostListColumnToggles columns={listColumns} visible={visible} onToggle={toggle} />
             </div>
             <div className="min-w-0 overflow-x-auto px-2 pb-2">
             <table className="w-full min-w-[960px] border-collapse">
@@ -271,6 +316,10 @@ export default function ServicePostsPage({
                   {isOn('shares') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>シェア</th>}
                   {isOn('shareRate') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>シェア率</th>}
                   {isOn('egRate') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>EG率</th>}
+                  {isOn('replies') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>返信</th>}
+                  {isOn('exits') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>離脱</th>}
+                  {isOn('taps_forward') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>次へ</th>}
+                  {isOn('taps_back') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>戻る</th>}
                   {isOn('postedAt') && <th className={`${thMetrics} text-left min-w-[5rem]`}>投稿日</th>}
                   {isOn('detail') && (
                     <th className={`${thMetrics} w-12 min-w-[3rem]`} scope="col">
@@ -290,6 +339,10 @@ export default function ServicePostsPage({
                   const likes = post.insights?.likes
                   const saved = post.insights?.saved
                   const shares = post.insights?.shares
+                  const replies = post.insights?.replies
+                  const exits = post.insights?.exits
+                  const tapsForward = post.insights?.taps_forward
+                  const tapsBack = post.insights?.taps_back
                   const totalInteractions = post.insights?.total_interactions
                   const egRate = reach && reach > 0 && totalInteractions != null
                     ? ((totalInteractions / reach) * 100).toFixed(1) : null
@@ -426,6 +479,26 @@ export default function ServicePostsPage({
                           ) : <span className="text-gray-400 text-sm">—</span>}
                         </td>
                       )}
+                      {isOn('replies') && (
+                        <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium tabular-nums align-top">
+                          {replies?.toLocaleString() ?? '—'}
+                        </td>
+                      )}
+                      {isOn('exits') && (
+                        <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium tabular-nums align-top">
+                          {exits?.toLocaleString() ?? '—'}
+                        </td>
+                      )}
+                      {isOn('taps_forward') && (
+                        <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium tabular-nums align-top">
+                          {tapsForward?.toLocaleString() ?? '—'}
+                        </td>
+                      )}
+                      {isOn('taps_back') && (
+                        <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium tabular-nums align-top">
+                          {tapsBack?.toLocaleString() ?? '—'}
+                        </td>
+                      )}
                       {isOn('postedAt') && (
                         <td className="px-4 py-4 text-sm text-gray-500 whitespace-nowrap align-top">
                           {new Date(post.posted_at).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })}
@@ -433,7 +506,10 @@ export default function ServicePostsPage({
                       )}
                       {isOn('detail') && (
                         <td className="px-4 py-4 align-top">
-                          <Link href={`/posts/${post.id}?account=${accountId}&returnTo=/projects/${projectId}/services/${serviceId}/instagram/posts`}
+                          <Link
+                            href={`/posts/${post.id}?account=${accountId}&returnTo=${encodeURIComponent(
+                              `/projects/${projectId}/services/${serviceId}/instagram/posts?mode=${listMode}`
+                            )}`}
                             className="text-gray-300 hover:text-purple-400 transition inline-flex" title="詳細">
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -466,5 +542,19 @@ export default function ServicePostsPage({
         </>
       )}
     </div>
+  )
+}
+
+export default function ServicePostsPage(props: { params: Promise<{ projectId: string; serviceId: string }> }) {
+  return (
+    <Suspense
+      fallback={
+        <div className="p-6 flex items-center justify-center min-h-[200px]">
+          <div className="w-8 h-8 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <ServicePostsPageInner {...props} />
+    </Suspense>
   )
 }

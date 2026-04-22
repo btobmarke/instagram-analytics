@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { buildTimeSeriesMapFromFactRows } from '@/lib/instagram/post-insight-chart'
-import { fetchAllIgMediaInsightFactRows } from '@/lib/instagram/post-insight-fact-query'
+import { fetchMergedInsightFactRowsForPostDetail } from '@/lib/instagram/post-insight-fact-query'
 import type { IgMediaManualInsightExtra } from '@/types'
 
 // GET /api/posts/[id] — 投稿詳細 + 時系列インサイト + 最新AI分析
@@ -22,18 +22,25 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if (postError) return NextResponse.json({ error: postError.message }, { status: 404 })
 
   // 時系列インサイト（range ページング: PostgREST の max_rows で単一 limit が打ち切られるのを避ける）
-  let insights: Awaited<ReturnType<typeof fetchAllIgMediaInsightFactRows>> = []
+  let insights: Awaited<ReturnType<typeof fetchMergedInsightFactRowsForPostDetail>> = []
   try {
-    insights = await fetchAllIgMediaInsightFactRows(supabase, id)
+    insights = await fetchMergedInsightFactRowsForPostDetail(supabase, post)
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'ig_media_insight_fact の取得に失敗しました'
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 
-  // 最新インサイト（metric_code ごとに時刻が最も新しい値）
-  const latestInsights: Record<string, number | null> = {}
+  // 最新インサイト（metric_code ごとに snapshot_at が最も新しい値）
+  const newestByMetric: Record<string, { value: number | null; snapshot_at: string }> = {}
   for (const row of insights ?? []) {
-    latestInsights[row.metric_code] = row.value
+    const prev = newestByMetric[row.metric_code]
+    if (!prev || row.snapshot_at > prev.snapshot_at) {
+      newestByMetric[row.metric_code] = { value: row.value, snapshot_at: row.snapshot_at }
+    }
+  }
+  const latestInsights: Record<string, number | null> = {}
+  for (const [code, row] of Object.entries(newestByMetric)) {
+    latestInsights[code] = row.value
   }
 
   const timeSeriesMap = buildTimeSeriesMapFromFactRows(insights ?? [])

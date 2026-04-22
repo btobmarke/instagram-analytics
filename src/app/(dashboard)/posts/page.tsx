@@ -14,8 +14,26 @@ import {
   postListFancyCheckboxClass,
   usePostListColumnVisibility,
 } from '@/components/posts/post-list-column-visibility'
+import {
+  apiTypeParamForListMode,
+  postListModeFromQueryParam,
+  type PostListMode,
+} from '@/lib/instagram/post-display-mode'
 
 const POST_LIST_COL_STORAGE_KEY = 'ig_dashboard_posts_list_columns_v2'
+const POST_LIST_COL_STORAGE_KEY_STORY = 'ig_dashboard_posts_list_columns_story_v1'
+
+const STORY_LIST_COLUMN_IDS = new Set([
+  'type',
+  'views',
+  'reach',
+  'replies',
+  'exits',
+  'taps_forward',
+  'taps_back',
+  'postedAt',
+  'detail',
+])
 
 interface PostWithInsights extends IgMedia {
   insights: Record<string, number | null>
@@ -41,7 +59,16 @@ function PostsContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const accountId = searchParams.get('account')
-  const filterType = searchParams.get('type') ?? ''
+  const listMode: PostListMode = postListModeFromQueryParam(
+    searchParams.get('type'),
+    searchParams.get('mode')
+  )
+  const listColumns =
+    listMode === 'story'
+      ? DASHBOARD_POST_LIST_COLUMNS.filter(c => STORY_LIST_COLUMN_IDS.has(c.id))
+      : DASHBOARD_POST_LIST_COLUMNS
+  const columnStorageKey =
+    listMode === 'story' ? POST_LIST_COL_STORAGE_KEY_STORY : POST_LIST_COL_STORAGE_KEY
 
   const [posts, setPosts] = useState<PostWithInsights[]>([])
   const [followersCount, setFollowersCount] = useState<number | null>(null)
@@ -51,7 +78,7 @@ function PostsContent() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [manualModal, setManualModal] = useState<{ id: string; permalink: string | null } | null>(null)
   const limit = 20
-  const { visible, isOn, toggle } = usePostListColumnVisibility(POST_LIST_COL_STORAGE_KEY, DASHBOARD_POST_LIST_COLUMNS)
+  const { visible, isOn, toggle } = usePostListColumnVisibility(columnStorageKey, listColumns)
 
   const fetchPosts = useCallback(async () => {
     if (!accountId) return
@@ -61,17 +88,21 @@ function PostsContent() {
       limit: String(limit),
       offset: String(offset),
     })
-    if (filterType) params.set('type', filterType)
+    const apiType = apiTypeParamForListMode(listMode)
+    if (apiType) params.set('type', apiType)
+    if (listMode === 'feed') {
+      params.set('types', 'FEED,REELS,VIDEO')
+    }
     const res = await fetch(`/api/posts?${params}`)
     const json = await res.json()
     setPosts(json.data ?? [])
     setTotal(json.count ?? 0)
     setFollowersCount(typeof json.followers_count === 'number' ? json.followers_count : null)
     setLoading(false)
-  }, [accountId, offset, filterType])
+  }, [accountId, offset, listMode])
 
   useEffect(() => { fetchPosts() }, [fetchPosts])
-  useEffect(() => { setSelectedIds(new Set()) }, [offset, filterType])
+  useEffect(() => { setSelectedIds(new Set()) }, [offset, listMode])
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -126,18 +157,28 @@ function PostsContent() {
             </Link>
           </p>
         </div>
-        <div className="flex gap-2">
-          {['', 'FEED', 'REELS', 'STORY'].map((t) => (
-            <button key={t}
+        <div className="flex gap-2 flex-wrap items-center">
+          {(
+            [
+              { mode: 'feed' as const, label: 'フィード・リール' },
+              { mode: 'story' as const, label: 'ストーリー' },
+            ] as const
+          ).map(({ mode, label }) => (
+            <button
+              key={mode}
+              type="button"
               onClick={() => {
                 const p = new URLSearchParams(searchParams.toString())
-                if (t) p.set('type', t); else p.delete('type')
+                p.delete('type')
+                p.set('mode', mode)
                 router.push(`/posts?${p}`)
                 setOffset(0)
               }}
-              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition ${filterType === t ? 'bg-purple-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition ${
+                listMode === mode ? 'bg-purple-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}
             >
-              {t === '' ? 'すべて' : MEDIA_TYPE_LABELS[t]}
+              {label}
             </button>
           ))}
         </div>
@@ -156,7 +197,7 @@ function PostsContent() {
         <>
           <div className="min-w-0 bg-white rounded-2xl border border-gray-200 shadow-sm">
             <div className="p-4 pb-0">
-              <PostListColumnToggles columns={DASHBOARD_POST_LIST_COLUMNS} visible={visible} onToggle={toggle} />
+              <PostListColumnToggles columns={listColumns} visible={visible} onToggle={toggle} />
             </div>
             <div className="min-w-0 overflow-x-auto px-2 pb-2">
             <table className="w-full min-w-[960px] border-collapse">
@@ -181,6 +222,10 @@ function PostsContent() {
                   {isOn('shares') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>シェア</th>}
                   {isOn('shareRate') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>シェア率</th>}
                   {isOn('egRate') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>EG率</th>}
+                  {isOn('replies') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>返信</th>}
+                  {isOn('exits') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>離脱</th>}
+                  {isOn('taps_forward') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>次へ</th>}
+                  {isOn('taps_back') && <th className={`${thMetrics} text-right tabular-nums min-w-[4.5rem]`}>戻る</th>}
                   {isOn('postedAt') && <th className={`${thMetrics} text-left min-w-[5rem]`}>投稿日</th>}
                   {isOn('manual') && <th className={`${thMetrics} text-center px-2 min-w-[4.5rem]`}>手入力</th>}
                   {isOn('detail') && (
@@ -197,6 +242,10 @@ function PostsContent() {
                   const likes = post.insights?.likes
                   const saved = post.insights?.saved
                   const shares = post.insights?.shares
+                  const replies = post.insights?.replies
+                  const exits = post.insights?.exits
+                  const tapsForward = post.insights?.taps_forward
+                  const tapsBack = post.insights?.taps_back
                   const totalInteractions = post.insights?.total_interactions
                   const egRate = reach && reach > 0 && totalInteractions != null
                     ? ((totalInteractions / reach) * 100).toFixed(1) : null
@@ -312,6 +361,26 @@ function PostsContent() {
                           ) : <span className="text-gray-400 text-sm">—</span>}
                         </td>
                       )}
+                      {isOn('replies') && (
+                        <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium tabular-nums align-top">
+                          {replies?.toLocaleString() ?? '—'}
+                        </td>
+                      )}
+                      {isOn('exits') && (
+                        <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium tabular-nums align-top">
+                          {exits?.toLocaleString() ?? '—'}
+                        </td>
+                      )}
+                      {isOn('taps_forward') && (
+                        <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium tabular-nums align-top">
+                          {tapsForward?.toLocaleString() ?? '—'}
+                        </td>
+                      )}
+                      {isOn('taps_back') && (
+                        <td className="px-4 py-4 text-right text-sm text-gray-700 font-medium tabular-nums align-top">
+                          {tapsBack?.toLocaleString() ?? '—'}
+                        </td>
+                      )}
                       {isOn('postedAt') && (
                         <td className="px-4 py-4 text-sm text-gray-500 whitespace-nowrap align-top">
                           {new Date(post.posted_at).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })}
@@ -330,8 +399,12 @@ function PostsContent() {
                       )}
                       {isOn('detail') && (
                         <td className="px-4 py-4 align-top">
-                          <Link href={`/posts/${post.id}?account=${accountId}`}
-                            className="text-sm font-medium text-purple-600 hover:text-purple-700 whitespace-nowrap">
+                          <Link
+                            href={`/posts/${post.id}?account=${accountId}&returnTo=${encodeURIComponent(
+                              `/posts?account=${accountId}&mode=${listMode}`
+                            )}`}
+                            className="text-sm font-medium text-purple-600 hover:text-purple-700 whitespace-nowrap"
+                          >
                             詳細 →
                           </Link>
                         </td>

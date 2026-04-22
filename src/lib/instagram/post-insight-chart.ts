@@ -71,6 +71,13 @@ export const INSIGHT_PHASE_OPTIONS: { id: InsightPhaseId; label: string; descrip
   { id: 'all', label: 'すべて', description: '取得分の全域' },
 ]
 
+/** ストーリー（24h 寿命）向け: 長期フェーズは省く */
+export const INSIGHT_PHASE_OPTIONS_STORY: { id: InsightPhaseId; label: string; description: string }[] = [
+  { id: '0-6h', label: '0〜6h', description: '直後の初速' },
+  { id: '0-24h', label: '0〜24h', description: '公開から24時間以内' },
+  { id: 'all', label: 'すべて', description: '取得分の全域' },
+]
+
 const MS_H = 3600000
 const MS_D = 86400000
 
@@ -101,17 +108,14 @@ export function metricSeriesAsc(
   metric: string
 ): InsightPoint[] {
   const rows = timeSeries[metric] ?? []
-  const seen = new Set<number>()
-  const out: InsightPoint[] = []
+  /** 同一時刻の複数行は後勝ち（ストーリー hourly と media 系のマージで重複し得る） */
+  const byT = new Map<number, InsightPoint>()
   for (const r of rows) {
     const t = new Date(r.snapshot_at).getTime()
     if (Number.isNaN(t)) continue
-    if (seen.has(t)) continue
-    seen.add(t)
-    out.push({ t, snapshot_at: r.snapshot_at, value: r.value })
+    byT.set(t, { t, snapshot_at: r.snapshot_at, value: r.value })
   }
-  out.sort((a, b) => a.t - b.t)
-  return out
+  return Array.from(byT.values()).sort((a, b) => a.t - b.t)
 }
 
 /** 時刻 deadline の直前（含む）のスナップショット値 */
@@ -235,11 +239,18 @@ export const INSIGHT_MILESTONES: { id: MilestoneId; label: string; ms: number }[
   { id: '7d', label: '公開後7日', ms: 7 * MS_D },
 ]
 
+/** ストーリー向け（公開から24時間以内が主） */
+export const INSIGHT_MILESTONES_STORY: { id: MilestoneId; label: string; ms: number }[] = [
+  { id: '6h', label: '公開後6h', ms: 6 * MS_H },
+  { id: '24h', label: '公開後24h', ms: 24 * MS_H },
+]
+
 /** 各マイルストーン時点の累積値（その時刻以前の最新スナップ） */
 export function milestoneCumulativeSummary(
   postedAtIso: string,
   timeSeries: Record<string, Array<{ snapshot_at: string; value: number | null }>>,
-  metricCodes: string[]
+  metricCodes: string[],
+  milestones: { id: MilestoneId; label: string; ms: number }[] = INSIGHT_MILESTONES
 ): Record<MilestoneId, Record<string, number | null>> {
   const postedMs = new Date(postedAtIso).getTime()
   const out: Record<MilestoneId, Record<string, number | null>> = {
@@ -249,13 +260,13 @@ export function milestoneCumulativeSummary(
     '7d': {},
   }
   if (Number.isNaN(postedMs)) {
-    for (const ms of INSIGHT_MILESTONES) {
+    for (const ms of milestones) {
       for (const m of metricCodes) out[ms.id][m] = null
     }
     return out
   }
 
-  for (const ms of INSIGHT_MILESTONES) {
+  for (const ms of milestones) {
     const deadline = postedMs + ms.ms
     for (const m of metricCodes) {
       const series = metricSeriesAsc(timeSeries, m)
@@ -323,12 +334,13 @@ export type MilestoneDiffRow = {
 export function buildMilestoneDiffTable(
   main: OverlaySeriesPost,
   peer: OverlaySeriesPost,
-  metrics: string[]
+  metrics: string[],
+  milestones: { id: MilestoneId; label: string; ms: number }[] = INSIGHT_MILESTONES
 ): MilestoneDiffRow[] {
-  const mainMs = milestoneCumulativeSummary(main.postedAtIso, main.timeSeries, metrics)
-  const peerMs = milestoneCumulativeSummary(peer.postedAtIso, peer.timeSeries, metrics)
+  const mainMs = milestoneCumulativeSummary(main.postedAtIso, main.timeSeries, metrics, milestones)
+  const peerMs = milestoneCumulativeSummary(peer.postedAtIso, peer.timeSeries, metrics, milestones)
   const out: MilestoneDiffRow[] = []
-  for (const ms of INSIGHT_MILESTONES) {
+  for (const ms of milestones) {
     for (const m of metrics) {
       const mv = mainMs[ms.id][m] ?? null
       const pv = peerMs[ms.id][m] ?? null
