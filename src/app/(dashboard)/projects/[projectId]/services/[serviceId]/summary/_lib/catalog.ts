@@ -269,6 +269,59 @@ const SALES_ROLLUP: [string, string, string][] = [
   ['rest_break_slot_count', '休憩枠数', '休憩としてマークされた時間帯行の件数。'],
 ]
 
+// ── Google 広告 ───────────────────────────────────────────────────
+/** アカウント全体（全キャンペーン合算）の日次 */
+const GADS_CAMPAIGN: [string, string, string][] = [
+  ['impressions', '表示回数', '広告が表示された延べ回数（キャンペーン日次の合算）。'],
+  ['clicks', 'クリック数', '広告がクリックされた延べ回数（合算）。'],
+  ['cost_micros', '費用（マイクロ単位）', '広告費。表示はマイクロ通貨単位（百万分の一）。カスタム指標で通貨に換算する場合は ÷1,000,000 を利用。'],
+  ['conversions', 'コンバージョン数', 'コンバージョンアクションに基づく件数の合算。'],
+  ['conversion_value_micros', 'コンバージョン値（マイクロ）', 'コンバージョン価値の合計（マイクロ通貨単位）。'],
+  ['ctr', 'CTR', 'クリック率。期間内の合算クリック ÷ 合算表示（0〜1、サマリ表示はそのまま小数）。'],
+  ['average_cpc_micros', '平均CPC（マイクロ）', '期間内の合算費用 ÷ 合算クリック（1クリックあたりの平均コスト、マイクロ単位）。'],
+]
+/** 特定キャンペーンに絞るときは campaign_id を差し替え（Google Ads のキャンペーン ID 文字列） */
+const GADS_CAMPAIGN_SLICED: [string, string, string][] = [
+  [
+    'impressions@@campaign_id=YOUR_CAMPAIGN_ID',
+    '表示回数（キャンペーン指定）',
+    'テンプレでは YOUR_CAMPAIGN_ID を実 ID に置き換え。該当キャンペーンの日次のみ合算。',
+  ],
+]
+const GADS_ADGROUP: [string, string, string][] = [
+  [
+    'impressions@@ad_group_id=YOUR_AD_GROUP_ID',
+    '表示回数（広告グループ指定）',
+    'YOUR_AD_GROUP_ID を広告グループ ID に置き換え。該当グループの日次のみ合算。',
+  ],
+  ['clicks@@ad_group_id=YOUR_AD_GROUP_ID', 'クリック数（広告グループ指定）', '同上。'],
+  ['cost_micros@@ad_group_id=YOUR_AD_GROUP_ID', '費用（広告グループ・マイクロ）', '同上。'],
+]
+const GADS_KEYWORD: [string, string, string][] = [
+  [
+    'impressions@@keyword_id=YOUR_KEYWORD_ID',
+    '表示回数（キーワード指定）',
+    'キーワード収集が ON のサービスで保存された行のみ。YOUR_KEYWORD_ID を実 ID に置き換え。',
+  ],
+  ['quality_score@@keyword_id=YOUR_KEYWORD_ID', '品質スコア（キーワード）', '同一キーワード・同一日内に複数行がある場合は算術平均。'],
+]
+
+/**
+ * `project_metrics_daily` の日次 UPSERT（project-metrics-aggregate）および
+ * `GET /api/projects/.../unified-summary` のリアルタイム取得で使う指標一覧。
+ *
+ * Google 広告のみ、`YOUR_*` プレースホルダ付きのスライス指標を除外する。
+ * （バッチ・横断 API が全カード ID で fetch すると空フィルタのクエリが増えるため）
+ */
+export function getMetricCatalogForProjectAggregate(serviceType: string): MetricCard[] {
+  if (serviceType === 'google_ads') {
+    return GADS_CAMPAIGN.map(([f, l, d]) =>
+      card('google_ads_campaign_daily', f, l, 'キャンペーン（アカウント合算）', d),
+    )
+  }
+  return getMetricCatalog(serviceType)
+}
+
 export function getMetricCatalog(serviceType: string): MetricCard[] {
   switch (serviceType) {
     case 'instagram': return [
@@ -300,6 +353,12 @@ export function getMetricCatalog(serviceType: string): MetricCard[] {
     ]
     case 'sales': return [
       ...SALES_ROLLUP.map(([f, l, d]) => card('sales_rollup', f, l, '売上（日次集計）', d)),
+    ]
+    case 'google_ads': return [
+      ...GADS_CAMPAIGN.map(([f, l, d]) => card('google_ads_campaign_daily', f, l, 'キャンペーン（アカウント合算）', d)),
+      ...GADS_CAMPAIGN_SLICED.map(([f, l, d]) => card('google_ads_campaign_daily', f, l, 'キャンペーン（個別）', d)),
+      ...GADS_ADGROUP.map(([f, l, d]) => card('google_ads_adgroup_daily', f, l, '広告グループ', d)),
+      ...GADS_KEYWORD.map(([f, l, d]) => card('google_ads_keyword_daily', f, l, 'キーワード', d)),
     ]
     default: return []
   }

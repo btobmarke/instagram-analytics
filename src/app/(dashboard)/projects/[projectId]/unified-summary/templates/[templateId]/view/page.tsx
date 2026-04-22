@@ -12,14 +12,40 @@ import { SERVICE_TYPE_INFO, TIME_UNIT_LABELS } from '../../../_lib/types'
 import { resolveIGLabel } from '../../../../services/[serviceId]/summary/_lib/catalog'
 import { getTemplate } from '../../../_lib/store'
 import { generateJstDayPeriodLabels, generateJstDayPeriods, generateCustomRangePeriod } from '@/lib/summary/jst-periods'
+import type { FormulaNode } from '@/app/(dashboard)/projects/[projectId]/services/[serviceId]/summary/_lib/types'
+import { evalServiceSummaryFormula } from '@/lib/summary/eval-service-formula'
+import { collectUnifiedTemplateFieldRefs } from '../../../_lib/collect-template-field-refs'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
+
+async function unifiedSummaryQueryFetcher([url, body]: [string, Record<string, unknown>]) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return res.json() as Promise<{
+    success: boolean
+    data?: {
+      periods: string[]
+      services: Array<{
+        id: string
+        name: string
+        serviceType: string
+        metrics: Record<string, { label: string; category: string; values: Record<string, number | null> }>
+      }>
+    }
+  }>
+}
 
 // ── 数値フォーマット ───────────────────────────────────────────────────────────
 
 function formatCell(value: number | null | undefined, metricRef: string): string {
   if (value == null) return '—'
-  if (metricRef.includes('rate') || metricRef.includes('ctr')) {
+  if (metricRef.includes('.ctr')) {
+    return `${(value * 100).toLocaleString('ja-JP', { maximumFractionDigits: 2 })}%`
+  }
+  if (metricRef.includes('rate')) {
     return `${(value * 100).toFixed(1)}%`
   }
   if (metricRef.includes('seconds')) {
@@ -27,7 +53,11 @@ function formatCell(value: number | null | undefined, metricRef: string): string
     const secs = Math.round(value % 60)
     return mins > 0 ? `${mins}分${secs}秒` : `${secs}秒`
   }
-  if (metricRef.includes('cost_micros') || metricRef.includes('cpc_micros')) {
+  if (
+    metricRef.includes('cost_micros') ||
+    metricRef.includes('conversion_value_micros') ||
+    metricRef.includes('cpc_micros')
+  ) {
     return `¥${Math.round(value / 1_000_000).toLocaleString()}`
   }
   if (Number.isInteger(value)) return value.toLocaleString('ja-JP')
@@ -99,60 +129,7 @@ function generateTimeHeaders(unit: TimeUnit, count: number, rangeStart?: string 
   return headers
 }
 
-// ── カスタム指標フォーミュラ評価（個別 view と同じロジック） ──────────────────
-
-interface FormulaStep { operator: '+' | '-' | '*' | '/'; operandId: string }
-interface FormulaNode {
-  baseOperandId: string
-  steps: FormulaStep[]
-  thresholdMode?: 'none' | 'gte' | 'lte'
-  thresholdValue?: number | null
-}
-
-function evalFormula(
-  formula: FormulaNode,
-  rawData: Record<string, Record<string, number | null>>,
-  label: string,
-): number | null {
-  let sawNumeric = false
-  const get = (id: string): number | null => {
-    const v = rawData[id]?.[label]
-    if (v != null) sawNumeric = true
-    return v ?? null
-  }
-  const pm = (v: number | null) => v ?? 0
-  let result: number | null = get(formula.baseOperandId)
-  for (const step of formula.steps) {
-    const op = get(step.operandId)
-    switch (step.operator) {
-      case '+': result = pm(result) + pm(op); break
-      case '-': result = pm(result) - pm(op); break
-      case '*': if (result == null || op == null) return null; result *= op; break
-      case '/': if (result == null || op == null || op === 0) return null; result /= op; break
-    }
-  }
-  if (!sawNumeric) return null
-  const rounded = Math.round((result ?? 0) * 100) / 100
-  const tm = formula.thresholdMode ?? 'none'
-  const tv = formula.thresholdValue
-  if (tm === 'gte' && tv != null && rounded < tv) return null
-  if (tm === 'lte' && tv != null && rounded > tv) return null
-  return rounded
-}
-
-// ── データ API パラメータ ─────────────────────────────────────────────────────
-
-function buildDataUrl(projectId: string, tmpl: ProjectSummaryTemplate): string {
-  const params = new URLSearchParams({
-    timeUnit: tmpl.timeUnit,
-    count:    String(tmpl.count),
-  })
-  if (tmpl.timeUnit === 'custom_range' && tmpl.rangeStart && tmpl.rangeEnd) {
-    params.set('rangeStart', tmpl.rangeStart)
-    params.set('rangeEnd',   tmpl.rangeEnd)
-  }
-  return `/api/projects/${projectId}/unified-summary?${params}`
-}
+const evalFormula = evalServiceSummaryFormula
 
 // ── カスタム指標ライブラリ型 ──────────────────────────────────────────────────
 
@@ -504,9 +481,14 @@ export default function UnifiedTemplateViewPage({
       ),
     ).then(results => {
       const map: Record<string, LibraryMetric[]> = {}
+      for (const sid of uniqueServiceIds) map[sid] = []
       for (const { serviceId, data } of results) map[serviceId] = data
       setCustomMetricsByService(map)
-    }).catch(console.error)
+    }).catch(() => {
+      const map: Record<string, LibraryMetric[]> = {}
+      for (const sid of uniqueServiceIds) map[sid] = []
+      setCustomMetricsByService(map)
+    })
   }, [tmpl])
 
   // serviceId → metricId → FormulaNode
@@ -520,6 +502,13 @@ export default function UnifiedTemplateViewPage({
     return map
   }, [customMetricsByService])
 
+  /** カスタム指標 API の初回取得完了（各行の serviceId で配列が揃うまでクエリしない） */
+  const customMetricsReady = useMemo(() => {
+    if (!tmpl || tmpl.rows.length === 0) return true
+    const ids = [...new Set(tmpl.rows.map((r) => r.serviceId))]
+    return ids.every((sid) => Array.isArray(customMetricsByService[sid]))
+  }, [tmpl, customMetricsByService])
+
   // ── プロジェクト名 ─────────────────────────────────────────────
   const { data: projectData } = useSWR<{ success: boolean; data: { project_name: string } }>(
     `/api/projects/${projectId}`,
@@ -527,7 +516,7 @@ export default function UnifiedTemplateViewPage({
   )
   const projectName = projectData?.data?.project_name ?? ''
 
-  // ── サマリーデータ取得 ─────────────────────────────────────────
+  // ── サマリーデータ取得（テンプレに必要な fieldRef のみ）──────────────────
   interface UnifiedService {
     id: string
     name: string
@@ -535,10 +524,34 @@ export default function UnifiedTemplateViewPage({
     metrics: Record<string, { label: string; category: string; values: Record<string, number | null> }>
   }
 
-  const dataUrl = tmpl ? buildDataUrl(projectId, tmpl) : null
-  const { data: summaryData, isLoading } = useSWR<{ success: boolean; data: { periods: string[]; services: UnifiedService[] } }>(
-    dataUrl,
-    fetcher,
+  const summaryQueryBody = useMemo(() => {
+    if (!tmpl || tmpl.rows.length === 0) return null
+    if (!customMetricsReady) return null
+    if (tmpl.timeUnit === 'custom_range') {
+      if (!tmpl.rangeStart || !tmpl.rangeEnd || tmpl.rangeStart > tmpl.rangeEnd) return null
+    }
+    const serviceBlocks = collectUnifiedTemplateFieldRefs(tmpl.rows, customMetricMap)
+    if (serviceBlocks.length === 0) return null
+    const body: Record<string, unknown> = {
+      timeUnit: tmpl.timeUnit,
+      count: tmpl.count,
+      services: serviceBlocks,
+    }
+    if (tmpl.timeUnit === 'custom_range' && tmpl.rangeStart && tmpl.rangeEnd) {
+      body.rangeStart = tmpl.rangeStart
+      body.rangeEnd = tmpl.rangeEnd
+    }
+    return body
+  }, [tmpl, customMetricMap, customMetricsReady])
+
+  const summaryQueryKey = useMemo((): [string, Record<string, unknown>] | null => {
+    if (!tmpl || !summaryQueryBody) return null
+    return [`/api/projects/${projectId}/unified-summary/query`, summaryQueryBody]
+  }, [projectId, tmpl, summaryQueryBody])
+
+  const { data: summaryData, isLoading } = useSWR(
+    summaryQueryKey,
+    unifiedSummaryQueryFetcher,
   )
 
   const timeHeaders = useMemo(
