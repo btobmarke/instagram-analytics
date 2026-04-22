@@ -7,8 +7,8 @@ import useSWR from 'swr'
 import type { IgMedia } from '@/types'
 import {
   PostListColumnToggles,
-  SERVICE_POST_LIST_COLUMNS,
   postListFancyCheckboxClass,
+  serviceInstagramPostListColumns,
   usePostListColumnVisibility,
 } from '@/components/posts/post-list-column-visibility'
 import {
@@ -19,20 +19,8 @@ import {
 import { InstagramServiceSubnav } from '@/components/instagram/InstagramServiceSubnav'
 import { InstagramFollowerImportButtonModal } from '@/components/instagram/InstagramFollowerImportButtonModal'
 
-const SERVICE_POST_LIST_COL_STORAGE_KEY = 'ig_service_posts_list_columns_v3'
-const SERVICE_POST_LIST_COL_STORAGE_KEY_STORY = 'ig_service_posts_list_columns_story_v1'
-
-const SERVICE_STORY_LIST_COLUMN_IDS = new Set([
-  'type',
-  'views',
-  'reach',
-  'replies',
-  'exits',
-  'taps_forward',
-  'taps_back',
-  'postedAt',
-  'detail',
-])
+const SERVICE_POST_LIST_COL_STORAGE_KEY = 'ig_service_posts_list_columns_v4_feed'
+const SERVICE_POST_LIST_COL_STORAGE_KEY_STORY = 'ig_service_posts_list_columns_v4_story'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -91,10 +79,7 @@ function ServicePostsPageInner({
   }, [modeFromUrl])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const limit = 20
-  const listColumns =
-    listMode === 'story'
-      ? SERVICE_POST_LIST_COLUMNS.filter(c => SERVICE_STORY_LIST_COLUMN_IDS.has(c.id))
-      : SERVICE_POST_LIST_COLUMNS
+  const listColumns = serviceInstagramPostListColumns(listMode)
   const columnStorageKey =
     listMode === 'story' ? SERVICE_POST_LIST_COL_STORAGE_KEY_STORY : SERVICE_POST_LIST_COL_STORAGE_KEY
   const { visible, isOn, toggle } = usePostListColumnVisibility(columnStorageKey, listColumns)

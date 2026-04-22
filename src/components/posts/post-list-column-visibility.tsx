@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import type { PostListMode } from '@/lib/instagram/post-display-mode'
 
 /** 一覧テーブル内の指標ブロックの表示順（左固定のチェック・投稿の右から） */
 export const DASHBOARD_POST_LIST_COLUMNS = [
@@ -22,7 +23,8 @@ export const DASHBOARD_POST_LIST_COLUMNS = [
   { id: 'detail', label: '詳細' },
 ] as const
 
-export const SERVICE_POST_LIST_COLUMNS = [
+/** サービス詳細 Instagram 投稿一覧: フィード・リール（ストーリー専用指標は含めない） */
+export const SERVICE_INSTAGRAM_FEED_POST_LIST_COLUMNS = [
   { id: 'type', label: '種別' },
   { id: 'views', label: '表示' },
   { id: 'viewsFollowerPct', label: 'ビュー·フォロワー率' },
@@ -36,6 +38,14 @@ export const SERVICE_POST_LIST_COLUMNS = [
   { id: 'shares', label: 'シェア' },
   { id: 'shareRate', label: 'シェア率' },
   { id: 'egRate', label: 'EG率' },
+  { id: 'postedAt', label: '投稿日' },
+  { id: 'detail', label: '詳細' },
+] as const
+
+/** サービス詳細 Instagram 投稿一覧: ストーリー（フィード専用の種別・EG 等は含めない） */
+export const SERVICE_INSTAGRAM_STORY_POST_LIST_COLUMNS = [
+  { id: 'views', label: '表示' },
+  { id: 'reach', label: 'リーチ' },
   { id: 'replies', label: '返信' },
   { id: 'exits', label: '離脱' },
   { id: 'taps_forward', label: '次へ' },
@@ -43,6 +53,12 @@ export const SERVICE_POST_LIST_COLUMNS = [
   { id: 'postedAt', label: '投稿日' },
   { id: 'detail', label: '詳細' },
 ] as const
+
+export function serviceInstagramPostListColumns(
+  mode: PostListMode
+): readonly { id: string; label: string }[] {
+  return mode === 'story' ? SERVICE_INSTAGRAM_STORY_POST_LIST_COLUMNS : SERVICE_INSTAGRAM_FEED_POST_LIST_COLUMNS
+}
 
 /** テーブル行・列トグル用のチェックボックス見た目 */
 export const postListFancyCheckboxClass =
@@ -53,7 +69,10 @@ export const postListFancyCheckboxSmClass =
   'size-[15px] shrink-0 cursor-pointer rounded-[5px] border-2 border-gray-300 bg-white accent-purple-600 transition-colors hover:border-purple-400 hover:bg-purple-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/50 focus-visible:ring-offset-1 focus-visible:ring-offset-white'
 
 export type DashboardPostListColumnId = (typeof DASHBOARD_POST_LIST_COLUMNS)[number]['id']
-export type ServicePostListColumnId = (typeof SERVICE_POST_LIST_COLUMNS)[number]['id']
+export type ServiceInstagramFeedPostListColumnId =
+  (typeof SERVICE_INSTAGRAM_FEED_POST_LIST_COLUMNS)[number]['id']
+export type ServiceInstagramStoryPostListColumnId =
+  (typeof SERVICE_INSTAGRAM_STORY_POST_LIST_COLUMNS)[number]['id']
 
 /** 初期表示: シェア率・ビュー内訳列はオフ、その他はオン */
 export function defaultPostListColumnVisibility(cols: readonly { id: string }[]): Record<string, boolean> {
