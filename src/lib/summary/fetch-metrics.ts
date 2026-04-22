@@ -597,6 +597,48 @@ export async function fetchGbpReviews(
 }
 
 /**
+ * gbp_review_star_counts_daily（レビュー投稿日 JST × 星別件数バッチ集計）
+ */
+export async function fetchGbpReviewStarCountsDaily(
+  supabase: SupabaseServerClient,
+  serviceId: string,
+  fields: string[],
+  periods: Period[],
+): Promise<Record<string, Record<string, number | null>>> {
+  const result: Record<string, Record<string, number | null>> = {}
+
+  const { data: siteRow } = await supabase
+    .from('gbp_sites')
+    .select('id')
+    .eq('service_id', serviceId)
+    .single()
+  if (!siteRow) return result
+
+  const siteId = siteRow.id
+  const rangeStart = periods[0].start.toISOString().slice(0, 10)
+  const rangeEnd = periods[periods.length - 1].end.toISOString().slice(0, 10)
+  const selectCols = ['date', ...fields].join(',')
+
+  const { data: rawRows } = await supabase
+    .from('gbp_review_star_counts_daily')
+    .select(selectCols)
+    .eq('gbp_site_id', siteId)
+    .gte('date', rangeStart)
+    .lte('date', rangeEnd)
+  const rows = (rawRows ?? []) as unknown as Record<string, unknown>[]
+
+  for (const field of fields) {
+    const accum = emptyAccum(periods)
+    for (const row of rows) {
+      const label = bucketDate(new Date(row.date as string), periods)
+      addValue(accum, label, row[field] as number)
+    }
+    result[`gbp_review_star_counts_daily.${field}`] = finalizeAccum(accum, 'sum')
+  }
+  return result
+}
+
+/**
  * gbp_search_keyword_monthly
  * field 例: impressions@@search_keyword=pizza@@year=2025@@month=3
  * 暦月の期間バケットが完全一致するか、単一期間 custom_range がその月と重なる場合に値を入れる。
@@ -1216,6 +1258,9 @@ export async function fetchMetricsByRefs(
         break
       case 'gbp_reviews':
         queries.push(fetchGbpReviews(supabase, serviceId, fields, periods))
+        break
+      case 'gbp_review_star_counts_daily':
+        queries.push(fetchGbpReviewStarCountsDaily(supabase, serviceId, fields, periods))
         break
       case 'gbp_search_keyword_monthly':
         queries.push(fetchGbpSearchKeywordMonthly(supabase, serviceId, fields, periods))
