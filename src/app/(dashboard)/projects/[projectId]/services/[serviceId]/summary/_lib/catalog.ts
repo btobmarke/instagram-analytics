@@ -126,6 +126,16 @@ const GBP_REVIEW: [string, string, string][] = [
   ['reply_update_time', '返信日時',  'ビジネスオーナーが返信した日時。'],
 ]
 
+/** バッチ集計: 投稿日（JST）× 星の件数。stars_none = 星未指定・NULL・想定外 */
+const GBP_REVIEW_STAR_COUNTS: [string, string, string][] = [
+  ['stars_1',    '☆1の件数（日次）', 'その日に投稿されたクチコミのうち星1の件数。'],
+  ['stars_2',    '☆2の件数（日次）', 'その日に投稿されたクチコミのうち星2の件数。'],
+  ['stars_3',    '☆3の件数（日次）', 'その日に投稿されたクチコミのうち星3の件数。'],
+  ['stars_4',    '☆4の件数（日次）', 'その日に投稿されたクチコミのうち星4の件数。'],
+  ['stars_5',    '☆5の件数（日次）', 'その日に投稿されたクチコミのうち星5の件数。'],
+  ['stars_none', '星なしの件数（日次）', 'STAR_RATING_UNSPECIFIED・NULL・想定外の星表記の件数。'],
+]
+
 // ── LINE ──────────────────────────────────────────────────────────
 const LINE_FRIENDS: [string, string, string][] = [
   ['contacts',       '友だち数',           'LINEアカウントを友だちとして追加しているアカウントの累計数。'],
@@ -272,6 +282,7 @@ export function getMetricCatalog(serviceType: string): MetricCard[] {
       ...GBP_PERF  .map(([f,l,d]) => card('gbp_performance_daily',     f, l, 'パフォーマンス', d)),
       ...GBP_SEARCH_KW.map(([f,l,d]) => card('gbp_search_keyword_monthly', f, l, '検索キーワード（月次）', d)),
       ...GBP_REVIEW.map(([f,l,d]) => card('gbp_reviews',               f, l, 'クチコミ',       d)),
+      ...GBP_REVIEW_STAR_COUNTS.map(([f,l,d]) => card('gbp_review_star_counts_daily', f, l, 'クチコミ（星別・日次）', d)),
     ]
     case 'line': return [
       ...LINE_FRIENDS .map(([f,l,d]) => card('line_oam_friends_daily',   f, l, '友だち数',         d)),

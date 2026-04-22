@@ -597,6 +597,48 @@ export async function fetchGbpReviews(
 }
 
 /**
+ * gbp_review_star_counts_daily（レビュー投稿日 JST × 星別件数バッチ集計）
+ */
+export async function fetchGbpReviewStarCountsDaily(
+  supabase: SupabaseServerClient,
+  serviceId: string,
+  fields: string[],
+  periods: Period[],
+): Promise<Record<string, Record<string, number | null>>> {
+  const result: Record<string, Record<string, number | null>> = {}
+
+  const { data: siteRow } = await supabase
+    .from('gbp_sites')
+    .select('id')
+    .eq('service_id', serviceId)
+    .single()
+  if (!siteRow) return result
+
+  const siteId = siteRow.id
+  const rangeStart = periods[0].start.toISOString().slice(0, 10)
+  const rangeEnd = periods[periods.length - 1].end.toISOString().slice(0, 10)
+  const selectCols = ['date', ...fields].join(',')
+
+  const { data: rawRows } = await supabase
+    .from('gbp_review_star_counts_daily')
+    .select(selectCols)
+    .eq('gbp_site_id', siteId)
+    .gte('date', rangeStart)
+    .lte('date', rangeEnd)
+  const rows = (rawRows ?? []) as unknown as Record<string, unknown>[]
+
+  for (const field of fields) {
+    const accum = emptyAccum(periods)
+    for (const row of rows) {
+      const label = bucketDate(new Date(row.date as string), periods)
+      addValue(accum, label, row[field] as number)
+    }
+    result[`gbp_review_star_counts_daily.${field}`] = finalizeAccum(accum, 'sum')
+  }
+  return result
+}
+
+/**
  * gbp_search_keyword_monthly
  * field 例: impressions@@search_keyword=pizza@@year=2025@@month=3
  * 暦月の期間バケットが完全一致するか、単一期間 custom_range がその月と重なる場合に値を入れる。
@@ -699,11 +741,51 @@ export async function fetchGbpSearchKeywordMonthly(
   return result
 }
 
+/** line_oam_friends_attr の field 指定: percentage@@gender=male@@age=20〜24歳 のようにスライス可 */
+export function parseLineOamFriendsAttrField(rawField: string): {
+  refKey: string
+  column: 'percentage' | 'gender' | 'age'
+  genderFilter: string | null
+  ageFilter: string | null
+} {
+  const parts = rawField.split('@@').map((s) => s.trim()).filter(Boolean)
+  let column: 'percentage' | 'gender' | 'age' = 'percentage'
+  const kv: Record<string, string> = {}
+  for (const p of parts) {
+    if (!p.includes('=')) {
+      if (p === 'percentage' || p === 'gender' || p === 'age') column = p
+      continue
+    }
+    const idx = p.indexOf('=')
+    const k = p.slice(0, idx).trim()
+    const v = p.slice(idx + 1).trim()
+    if (k) kv[k] = v
+  }
+  const genderFilter = kv.gender ?? kv.g ?? null
+  const ageFilter = kv.age ?? kv.a ?? null
+  return { refKey: rawField, column, genderFilter, ageFilter }
+}
+
+function rowMatchesAttrSlice(
+  row: Record<string, unknown>,
+  genderFilter: string | null,
+  ageFilter: string | null,
+): boolean {
+  if (genderFilter != null && genderFilter !== '') {
+    const g = row.gender != null ? String(row.gender).trim().toLowerCase() : ''
+    if (g !== genderFilter.trim().toLowerCase()) return false
+  }
+  if (ageFilter != null && ageFilter !== '') {
+    if (String(row.age ?? '').trim() !== ageFilter.trim()) return false
+  }
+  return true
+}
+
 /**
  * line_oam_friends_attr
  * date DATE, service_id FK
- * gender / age はカテゴリ文字列なので non-null カウント
- * percentage は AVG_FIELDS に含まれるため avg
+ * - 従来: gender / age は行カウント、percentage は期間内平均
+ * - percentage@@gender=…@@age=… でスライス指定（該当行の percentage のみ集計）
  */
 export async function fetchLineAttr(
   supabase: SupabaseServerClient,
@@ -714,8 +796,9 @@ export async function fetchLineAttr(
   const result: Record<string, Record<string, number | null>> = {}
 
   const rangeStart = periods[0].start.toISOString().slice(0, 10)
-  const rangeEnd   = periods[periods.length - 1].end.toISOString().slice(0, 10)
-  const selectCols = ['date', ...fields].join(',')
+  const rangeEnd = periods[periods.length - 1].end.toISOString().slice(0, 10)
+
+  const selectCols = ['date', 'gender', 'age', 'percentage'].join(',')
 
   const { data: rawRows } = await supabase
     .from('line_oam_friends_attr')
@@ -726,19 +809,167 @@ export async function fetchLineAttr(
   const rows = (rawRows ?? []) as unknown as Record<string, unknown>[]
 
   for (const field of fields) {
+    const spec = parseLineOamFriendsAttrField(field)
     const accum = emptyAccum(periods)
     for (const row of rows) {
+      if (!rowMatchesAttrSlice(row, spec.genderFilter, spec.ageFilter)) continue
       const label = bucketDate(new Date(row.date as string), periods)
-      if (field === 'percentage') {
-        addValue(accum, label, row[field] as number)
-      } else {
-        // gender / age: non-null なら 1 としてカウント
-        addValue(accum, label, row[field] != null ? 1 : null)
+      if (spec.column === 'percentage') {
+        addValue(accum, label, row.percentage as number)
+      } else if (spec.column === 'gender' || spec.column === 'age') {
+        addValue(accum, label, row[spec.column] != null ? 1 : null)
       }
     }
-    result[`line_oam_friends_attr.${field}`] = finalizeAccum(accum, AVG_FIELDS.has(field) ? 'avg' : 'sum')
+    const mode = spec.column === 'percentage' ? 'avg' : 'sum'
+    result[`line_oam_friends_attr.${spec.refKey}`] = finalizeAccum(accum, mode)
   }
   return result
+}
+
+export type LineOamFriendsAttrBreakdownSlice = { label: string; gender?: string | null; age?: string | null }
+
+/**
+ * サマリ内訳行用: 各期間ラベル × スライスの percentage（該当行が無いとき null）
+ */
+/**
+ * 各期間ラベル × スライスの percentage（該当行が無いとき null）
+ * 戻り値: periodLabel → スライス行
+ */
+export async function fetchLineOamFriendsAttrBreakdown(
+  supabase: SupabaseServerClient,
+  serviceId: string,
+  slices: LineOamFriendsAttrBreakdownSlice[],
+  periods: Period[],
+): Promise<Record<string, Array<{ label: string; value: number | null }>>> {
+  const out: Record<string, Array<{ label: string; value: number | null }>> = {}
+  if (slices.length === 0) return out
+
+  const rangeStart = periods[0].start.toISOString().slice(0, 10)
+  const rangeEnd = periods[periods.length - 1].end.toISOString().slice(0, 10)
+
+  const { data: rawRows } = await supabase
+    .from('line_oam_friends_attr')
+    .select('date,gender,age,percentage')
+    .eq('service_id', serviceId)
+    .gte('date', rangeStart)
+    .lte('date', rangeEnd)
+  const rows = (rawRows ?? []) as unknown as Record<string, unknown>[]
+
+  for (const period of periods) {
+    const sliceVals: Array<{ label: string; value: number | null }> = []
+    for (const sl of slices) {
+      const matching = rows.filter((row) => {
+        const d = new Date(row.date as string)
+        if (d < period.start || d >= period.end) return false
+        return rowMatchesAttrSlice(row, sl.gender ?? null, sl.age ?? null)
+      })
+      if (matching.length === 0) {
+        sliceVals.push({ label: sl.label, value: null })
+        continue
+      }
+      let sum = 0
+      let n = 0
+      for (const r of matching) {
+        const p = r.percentage
+        if (p != null && typeof p === 'number') {
+          sum += p
+          n++
+        }
+      }
+      sliceVals.push({ label: sl.label, value: n > 0 ? Math.round((sum / n) * 100) / 100 : null })
+    }
+    out[period.label] = sliceVals
+  }
+  return out
+}
+
+/** テンプレの複数内訳行をまとめて取得（行 ID ごと） */
+export async function fetchLineOamFriendsAttrBreakdownsByRow(
+  supabase: SupabaseServerClient,
+  serviceId: string,
+  configs: { rowId: string; slices: LineOamFriendsAttrBreakdownSlice[] }[],
+  periods: Period[],
+): Promise<Record<string, Record<string, Array<{ label: string; value: number | null }>>>> {
+  const merged: Record<string, Record<string, Array<{ label: string; value: number | null }>>> = {}
+  await Promise.all(
+    configs.map(async ({ rowId, slices }) => {
+      merged[rowId] = await fetchLineOamFriendsAttrBreakdown(supabase, serviceId, slices, periods)
+    }),
+  )
+  return merged
+}
+
+export type IgAccountInsightBreakdownSlice = {
+  label: string
+  dimension_code: string
+  dimension_value: string
+}
+
+/**
+ * Instagram アカウント lifetime インサイトの内訳（最新 value_date の値を各期間列に複製）
+ */
+export async function fetchIgAccountInsightBreakdown(
+  supabase: SupabaseServerClient,
+  serviceId: string,
+  metricCode: string,
+  slices: IgAccountInsightBreakdownSlice[],
+  periods: Period[],
+): Promise<Record<string, Array<{ label: string; value: number | null }>>> {
+  const out: Record<string, Array<{ label: string; value: number | null }>> = {}
+  if (slices.length === 0) return out
+
+  const { data: igRow } = await supabase
+    .from('ig_accounts')
+    .select('id')
+    .eq('service_id', serviceId)
+    .maybeSingle()
+  if (!igRow) {
+    for (const p of periods) {
+      out[p.label] = slices.map((s) => ({ label: s.label, value: null }))
+    }
+    return out
+  }
+  const accountId = igRow.id as string
+
+  const sliceVals: Array<{ label: string; value: number | null }> = []
+  for (const sl of slices) {
+    const { data: row } = await supabase
+      .from('ig_account_insight_fact')
+      .select('value')
+      .eq('account_id', accountId)
+      .eq('metric_code', metricCode)
+      .eq('period_code', 'lifetime')
+      .eq('dimension_code', sl.dimension_code)
+      .eq('dimension_value', sl.dimension_value)
+      .order('value_date', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const v = row?.value
+    sliceVals.push({
+      label: sl.label,
+      value: v != null && typeof v === 'number' && Number.isFinite(v) ? v : null,
+    })
+  }
+
+  for (const p of periods) {
+    out[p.label] = sliceVals.map((s) => ({ ...s }))
+  }
+  return out
+}
+
+export async function fetchIgAccountInsightBreakdownsByRow(
+  supabase: SupabaseServerClient,
+  serviceId: string,
+  configs: { rowId: string; metricCode: string; slices: IgAccountInsightBreakdownSlice[] }[],
+  periods: Period[],
+): Promise<Record<string, Record<string, Array<{ label: string; value: number | null }>>>> {
+  const merged: Record<string, Record<string, Array<{ label: string; value: number | null }>>> = {}
+  await Promise.all(
+    configs.map(async ({ rowId, metricCode, slices }) => {
+      merged[rowId] = await fetchIgAccountInsightBreakdown(supabase, serviceId, metricCode, slices, periods)
+    }),
+  )
+  return merged
 }
 
 /**
@@ -1100,6 +1331,9 @@ export async function fetchMetricsByRefs(
         break
       case 'gbp_reviews':
         queries.push(fetchGbpReviews(supabase, serviceId, fields, periods))
+        break
+      case 'gbp_review_star_counts_daily':
+        queries.push(fetchGbpReviewStarCountsDaily(supabase, serviceId, fields, periods))
         break
       case 'gbp_search_keyword_monthly':
         queries.push(fetchGbpSearchKeywordMonthly(supabase, serviceId, fields, periods))

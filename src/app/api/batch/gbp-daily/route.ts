@@ -11,6 +11,7 @@ import {
   listLocations,
 } from '@/lib/gbp/api'
 import { METRIC_TO_COLUMN } from '@/lib/gbp/constants'
+import { syncGbpReviewStarCountsDaily } from '@/lib/gbp/sync-review-star-counts-daily'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 
 // JSTで「今日」の日付文字列を返す
@@ -304,6 +305,17 @@ async function runBatch(_request: NextRequest) {
             if (reviewErr) {
               console.error(`[gbp-daily] site=${siteId} reviews upsert error:`, reviewErr)
               errors.push({ clientId: cred.client_id, siteId, error: `reviews: ${reviewErr.message}` })
+            }
+          }
+
+          // クチコミ星別・日次集計（gbp_reviews 全件から再計算。星なし = UNSPECIFIED / NULL / 想定外）
+          if (accountName) {
+            try {
+              await syncGbpReviewStarCountsDaily(admin, siteId)
+            } catch (starErr) {
+              const msg = starErr instanceof Error ? starErr.message : String(starErr)
+              console.error(`[gbp-daily] site=${siteId} review_star_counts_daily sync error:`, msg)
+              errors.push({ clientId: cred.client_id, siteId, error: `review_star_counts: ${msg}` })
             }
           }
 
