@@ -94,6 +94,9 @@ const SERVICE_DEFAULT_METRICS: Record<string, string[]> = {
     'google_ads_campaign_daily.impressions',
     'google_ads_campaign_daily.clicks',
     'google_ads_campaign_daily.cost_micros',
+    'google_ads_campaign_daily.conversions',
+    'google_ads_campaign_daily.ctr',
+    'google_ads_campaign_daily.conversion_value_micros',
   ],
 }
 

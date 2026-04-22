@@ -296,6 +296,22 @@ const GADS_KEYWORD: [string, string, string][] = [
   ['quality_score@@keyword_id=YOUR_KEYWORD_ID', '品質スコア（キーワード）', '同一キーワード・同一日内に複数行がある場合は算術平均。'],
 ]
 
+/**
+ * `project_metrics_daily` の日次 UPSERT（project-metrics-aggregate）および
+ * `GET /api/projects/.../unified-summary` のリアルタイム取得で使う指標一覧。
+ *
+ * Google 広告のみ、`YOUR_*` プレースホルダ付きのスライス指標を除外する。
+ * （バッチ・横断 API が全カード ID で fetch すると空フィルタのクエリが増えるため）
+ */
+export function getMetricCatalogForProjectAggregate(serviceType: string): MetricCard[] {
+  if (serviceType === 'google_ads') {
+    return GADS_CAMPAIGN.map(([f, l, d]) =>
+      card('google_ads_campaign_daily', f, l, 'キャンペーン（アカウント合算）', d),
+    )
+  }
+  return getMetricCatalog(serviceType)
+}
+
 export function getMetricCatalog(serviceType: string): MetricCard[] {
   switch (serviceType) {
     case 'instagram': return [
