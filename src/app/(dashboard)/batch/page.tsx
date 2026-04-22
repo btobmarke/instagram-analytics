@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import type { BatchJobLog } from '@/types'
 
 interface BatchSchedule {
@@ -57,6 +57,12 @@ const JOB_META: Record<string, JobMeta> = {
     category: 'Instagram',
     frequency: '毎時',
   },
+  hourly_story_insight_collector: {
+    label: 'ストーリーインサイト収集',
+    description: '公開から24時間以内のストーリーについて、インプレッション・リーチ・タップ・返信などを取得',
+    category: 'Instagram',
+    frequency: '毎時',
+  },
   hourly_media_insight_collector: {
     label: 'インサイト収集',
     description: '投稿ごとのリーチ・いいね・保存・コメント数を取得',
@@ -104,6 +110,12 @@ const JOB_META: Record<string, JobMeta> = {
     description: 'LPのセッション・ユーザー・HOT率等を集計してサマリーテーブルを更新',
     category: 'LP / MA',
     frequency: '毎時',
+  },
+  lp_session_cleanup: {
+    label: 'LP セッションクリーンアップ',
+    description: 'タイムアウトした未終了セッションを強制終了し、集計の欠損を防ぐ',
+    category: 'LP / MA',
+    frequency: '30分毎',
   },
   ga4_collector: {
     label: 'データ収集',
@@ -160,6 +172,7 @@ const BATCH_ENDPOINTS: Record<string, string> = {
   project_metrics_aggregate: '/api/batch/project-metrics-aggregate',
   daily_media_collector:          '/api/batch/media-collector',
   hourly_story_media_collector:   '/api/batch/story-media-collector',
+  hourly_story_insight_collector: '/api/batch/story-insight-collector',
   hourly_media_insight_collector: '/api/batch/insight-collector',
   // 注: 現状の実装では account insights は insight-collector 内で収集しているため同一エンドポイントに紐づける
   hourly_account_insight_collector: '/api/batch/insight-collector',
@@ -167,6 +180,7 @@ const BATCH_ENDPOINTS: Record<string, string> = {
   weekly_ai_analysis:             '/api/batch/ai-analysis',
   instagram_velocity_retro:       '/api/batch/instagram-velocity-retro',
   lp_aggregate:                   '/api/batch/lp-aggregate',
+  lp_session_cleanup:             '/api/batch/lp-session-cleanup',
   ga4_collector:                  '/api/batch/ga4-collector',
   clarity_collector:              '/api/batch/clarity-collector',
   gbp_daily:                      '/api/batch/gbp-daily',
@@ -177,8 +191,8 @@ const BATCH_ENDPOINTS: Record<string, string> = {
 }
 
 const BATCH_GROUPS: { category: Category; jobs: string[] }[] = [
-  { category: 'Instagram', jobs: ['daily_media_collector', 'hourly_story_media_collector', 'hourly_media_insight_collector', 'hourly_account_insight_collector', 'kpi_calc_batch', 'weekly_ai_analysis', 'instagram_velocity_retro'] },
-  { category: 'LP / MA',   jobs: ['lp_aggregate'] },
+  { category: 'Instagram', jobs: ['daily_media_collector', 'hourly_story_media_collector', 'hourly_story_insight_collector', 'hourly_media_insight_collector', 'hourly_account_insight_collector', 'kpi_calc_batch', 'weekly_ai_analysis', 'instagram_velocity_retro', 'monthly_ai_analysis'] },
+  { category: 'LP / MA',   jobs: ['lp_aggregate', 'lp_session_cleanup'] },
   { category: 'GA4',       jobs: ['ga4_collector'] },
   { category: 'Clarity',   jobs: ['clarity_collector'] },
   { category: 'GBP',       jobs: ['gbp_daily'] },
@@ -186,6 +200,76 @@ const BATCH_GROUPS: { category: Category; jobs: string[] }[] = [
   { category: 'Google 広告', jobs: ['google_ads_daily'] },
   { category: '外部データ',  jobs: ['weather_sync', 'external_data'] },
 ]
+
+/** スケジュール表・デフォルト並びの媒体優先順（BATCH_GROUPS と一致） */
+const CATEGORY_SORT_ORDER: Category[] = [
+  'Instagram',
+  'LP / MA',
+  'GA4',
+  'Clarity',
+  'GBP',
+  'LINE OAM',
+  'Google 広告',
+  '外部データ',
+  'システム',
+]
+
+/** システム系（BATCH_GROUPS に含まない手動実行のみ等）の表示順 */
+const SYSTEM_JOB_ORDER: string[] = ['daily_token_refresh', 'project_metrics_aggregate']
+
+function categorySortIndex(cat: Category | undefined): number {
+  const c = cat ?? 'システム'
+  const i = CATEGORY_SORT_ORDER.indexOf(c)
+  return i === -1 ? 999 : i
+}
+
+function jobOrderWithinCategory(jobName: string, category: Category): number {
+  if (category === 'システム') {
+    const i = SYSTEM_JOB_ORDER.indexOf(jobName)
+    if (i !== -1) return i
+  }
+  const group = BATCH_GROUPS.find((g) => g.category === category)
+  if (!group) return 8000
+  const j = group.jobs.indexOf(jobName)
+  return j === -1 ? 7000 + jobName.charCodeAt(0) : j
+}
+
+/** Cron 5フィールドの「その日の代表時刻」（UTC）。時が * で分が数値のときは当日 0:分 を代表とする。 */
+function cronRepresentativeMinutesUtc(cronExpr: string): number {
+  const parts = cronExpr.trim().split(/\s+/)
+  if (parts.length < 2) return 24 * 60
+  const minS = parts[0] ?? '0'
+  const hourS = parts[1] ?? '0'
+  const mOk = /^\d{1,2}$/.test(minS)
+  const hOk = /^\d{1,2}$/.test(hourS)
+  const m = mOk ? Math.min(59, parseInt(minS, 10)) : 0
+  const h = hOk ? Math.min(23, parseInt(hourS, 10)) : 0
+  if (hOk && mOk) return h * 60 + m
+  if (!hOk && mOk) return m
+  if (hOk && !mOk) return h * 60
+  return 24 * 60
+}
+
+function compareSchedulesByCategory(a: BatchSchedule, b: BatchSchedule): number {
+  const ca = (JOB_META[a.job_name]?.category ?? 'システム') as Category
+  const cb = (JOB_META[b.job_name]?.category ?? 'システム') as Category
+  const ia = categorySortIndex(ca)
+  const ib = categorySortIndex(cb)
+  if (ia !== ib) return ia - ib
+  const ja = jobOrderWithinCategory(a.job_name, ca)
+  const jb = jobOrderWithinCategory(b.job_name, cb)
+  if (ja !== jb) return ja - jb
+  return a.job_name.localeCompare(b.job_name, 'ja')
+}
+
+function compareSchedulesByCron(a: BatchSchedule, b: BatchSchedule): number {
+  const ta = cronRepresentativeMinutesUtc(a.cron_expr)
+  const tb = cronRepresentativeMinutesUtc(b.cron_expr)
+  if (ta !== tb) return ta - tb
+  return compareSchedulesByCategory(a, b)
+}
+
+type ScheduleSortMode = 'category' | 'cron'
 
 // -----------------------------------------------------------------------
 // カテゴリバッジ
@@ -251,6 +335,7 @@ interface RebuildResult {
 export default function BatchPage() {
   const [logs, setLogs] = useState<BatchJobLog[]>([])
   const [schedules, setSchedules] = useState<BatchSchedule[]>([])
+  const [scheduleSortMode, setScheduleSortMode] = useState<ScheduleSortMode>('category')
   const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState<string | null>(null)
   const [cronSecret, setCronSecret] = useState('')
@@ -420,6 +505,12 @@ export default function BatchPage() {
     ? logs
     : logs.filter(l => JOB_META[l.job_name]?.category === logFilter)
 
+  const sortedSchedules = useMemo(() => {
+    const copy = [...schedules]
+    copy.sort(scheduleSortMode === 'cron' ? compareSchedulesByCron : compareSchedulesByCategory)
+    return copy
+  }, [schedules, scheduleSortMode])
+
   return (
     <div className="max-w-5xl mx-auto space-y-6 p-6">
       <div className="flex items-center justify-between">
@@ -454,39 +545,44 @@ export default function BatchPage() {
             className="w-72 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
           />
         </div>
-        <div className="space-y-4">
+        <div className="space-y-6">
           {BATCH_GROUPS.map(group => {
             const catStyle = CATEGORY_STYLE[group.category]
             return (
-              <div key={group.category} className="flex items-start gap-4">
-                <div className="w-24 pt-1 flex-shrink-0">
-                  <CategoryBadge category={group.category} />
-                </div>
-                <div className="flex flex-wrap gap-2">
+              <div key={group.category} className="space-y-3">
+                <CategoryBadge category={group.category} />
+                <div className="flex flex-col gap-0 border border-gray-100 rounded-xl overflow-hidden divide-y divide-gray-100">
                   {group.jobs.map(jobName => {
                     const endpoint = BATCH_ENDPOINTS[jobName]
                     const meta = JOB_META[jobName]
                     if (!endpoint || !meta) return null
                     const isRunning = running === jobName
                     return (
-                      <button
+                      <div
                         key={jobName}
-                        onClick={() => handleManualRun(endpoint, jobName)}
-                        disabled={isRunning || !cronSecret}
-                        title={meta.description}
-                        className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-xl hover:bg-gray-50 transition disabled:opacity-50"
+                        className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3 bg-gray-50/50"
                       >
-                        {isRunning ? (
-                          <div className={`w-3.5 h-3.5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin`} />
-                        ) : (
-                          <svg className={`w-3.5 h-3.5 ${catStyle.text}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                              d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                        )}
-                        {meta.label}
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => handleManualRun(endpoint, jobName)}
+                          disabled={isRunning || !cronSecret}
+                          className="inline-flex shrink-0 items-center justify-start gap-2 min-h-[2.5rem] px-4 py-2 w-full sm:w-52 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-xl hover:bg-gray-50 transition disabled:opacity-50 text-left"
+                        >
+                          {isRunning ? (
+                            <div className="w-3.5 h-3.5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin shrink-0" />
+                          ) : (
+                            <svg className={`w-3.5 h-3.5 shrink-0 ${catStyle.text}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                          )}
+                          <span className="leading-snug">{meta.label}</span>
+                        </button>
+                        <p className="text-sm text-gray-500 leading-relaxed flex-1 min-w-0">
+                          {meta.description}
+                        </p>
+                      </div>
                     )
                   })}
                 </div>
@@ -594,8 +690,36 @@ export default function BatchPage() {
       {/* ---------------------------------------------------------------- */}
       {schedules.length > 0 && (
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100">
+          <div className="px-6 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-gray-700">スケジュール設定</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-gray-400">並び替え</span>
+              <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50/80">
+                <button
+                  type="button"
+                  onClick={() => setScheduleSortMode('category')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition ${
+                    scheduleSortMode === 'category'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  媒体順
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScheduleSortMode('cron')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition ${
+                    scheduleSortMode === 'cron'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  時間順
+                </button>
+              </div>
+              <span className="text-[10px] text-gray-400 hidden sm:inline">Cron 時刻・UTC</span>
+            </div>
           </div>
           <table className="w-full">
             <thead>
@@ -608,7 +732,7 @@ export default function BatchPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {schedules.map(s => {
+              {sortedSchedules.map(s => {
                 const meta = JOB_META[s.job_name]
                 return (
                   <tr key={s.id} className="hover:bg-gray-50">

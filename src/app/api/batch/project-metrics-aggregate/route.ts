@@ -21,7 +21,7 @@ import {
   fetchMetricsByRefs,
   buildPeriods,
 } from '@/lib/summary/fetch-metrics'
-import { getMetricCatalog } from '@/app/(dashboard)/projects/[projectId]/services/[serviceId]/summary/_lib/catalog'
+import { getMetricCatalogForProjectAggregate } from '@/app/(dashboard)/projects/[projectId]/services/[serviceId]/summary/_lib/catalog'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 
 /** JST の昨日 YYYY-MM-DD */
@@ -109,7 +109,7 @@ async function runBatch(request: NextRequest) {
     // サービスごとに処理（エラーが出ても他は続行）
     for (const svc of services) {
       try {
-        const catalog = getMetricCatalog(svc.service_type)
+        const catalog = getMetricCatalogForProjectAggregate(svc.service_type)
         if (catalog.length === 0) continue  // カタログのないサービスはスキップ
 
         const fieldRefs = catalog.map(c => c.id)

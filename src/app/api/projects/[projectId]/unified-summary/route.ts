@@ -22,7 +22,7 @@ import {
   fetchMetricsByRefs,
 } from '@/lib/summary/fetch-metrics'
 import type { TimeUnit, Period } from '@/lib/summary/fetch-metrics'
-import { getMetricCatalog } from '@/app/(dashboard)/projects/[projectId]/services/[serviceId]/summary/_lib/catalog'
+import { getMetricCatalogForProjectAggregate } from '@/app/(dashboard)/projects/[projectId]/services/[serviceId]/summary/_lib/catalog'
 
 // ── 型 ──────────────────────────────────────────────────────────────────────
 
@@ -254,7 +254,7 @@ export async function GET(
       ]
       if (svcPeriods.length === 0) return
 
-      const catalog = getMetricCatalog(svc.service_type)
+      const catalog = getMetricCatalogForProjectAggregate(svc.service_type)
       if (catalog.length === 0) return
 
       const fieldRefs = catalog.map(c => c.id)
@@ -270,7 +270,7 @@ export async function GET(
   // ── 結果マージ ─────────────────────────────────────────────────────────
 
   const serviceResults: ServiceResult[] = services.map(svc => {
-    const catalog = getMetricCatalog(svc.service_type)
+    const catalog = getMetricCatalogForProjectAggregate(svc.service_type)
     if (catalog.length === 0) {
       return { id: svc.id, name: svc.service_name, serviceType: svc.service_type, metrics: {} }
     }
