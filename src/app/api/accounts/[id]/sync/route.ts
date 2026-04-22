@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { InstagramClient, InstagramApiError } from '@/lib/instagram/client'
+import { resolveClientIdFromServiceJoin } from '@/lib/batch/resolve-service-client-id'
 import { decrypt } from '@/lib/utils/crypto'
 
 const API_BASE_URLS_INSTAGRAM = 'https://graph.instagram.com'
@@ -56,7 +57,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     .eq('id', account.service_id)
     .single()
 
-  const clientId = (svcRow?.projects as { client_id: string } | null)?.client_id
+  const clientId = resolveClientIdFromServiceJoin(svcRow)
   if (!clientId) {
     return NextResponse.json({ error: 'クライアントの解決に失敗しました' }, { status: 500 })
   }
