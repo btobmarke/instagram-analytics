@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { InstagramClient, isRateLimitExceeded } from '@/lib/instagram/client'
+import { resolveClientIdFromServiceJoin } from '@/lib/batch/resolve-service-client-id'
 import { decrypt } from '@/lib/utils/crypto'
 
 export type UpsertIgMediaRowFn = (m: Record<string, unknown>) => Promise<void>
@@ -93,7 +94,7 @@ export async function runInstagramStoryMediaSyncAllAccounts(
         .eq('id', account.service_id!)
         .single()
 
-      const clientId = (svcRow?.projects as { client_id: string } | null)?.client_id
+      const clientId = resolveClientIdFromServiceJoin(svcRow)
       if (!clientId) {
         skippedNoClient++
         console.warn(`[${logPrefix}] skip account (cannot resolve client)`, {

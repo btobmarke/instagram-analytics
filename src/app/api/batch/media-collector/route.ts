@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { InstagramApiError, InstagramClient, isRateLimitExceeded } from '@/lib/instagram/client'
+import { resolveClientIdFromServiceJoin } from '@/lib/batch/resolve-service-client-id'
 import { decrypt } from '@/lib/utils/crypto'
 import { validateBatchRequest } from '@/lib/utils/batch-auth'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
           .eq('id', account.service_id!)
           .single()
 
-        const clientId = (svcRow?.projects as { client_id: string } | null)?.client_id
+        const clientId = resolveClientIdFromServiceJoin(svcRow)
         if (!clientId) {
           skippedNoClient++
           console.warn('[media-collector] skip account (cannot resolve client)', {

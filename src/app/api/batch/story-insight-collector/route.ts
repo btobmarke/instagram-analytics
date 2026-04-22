@@ -3,9 +3,20 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { InstagramApiError, InstagramClient, isRateLimitExceeded } from '@/lib/instagram/client'
+import { resolveClientIdFromServiceJoin } from '@/lib/batch/resolve-service-client-id'
 import { decrypt } from '@/lib/utils/crypto'
 import { validateBatchRequest } from '@/lib/utils/batch-auth'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
+
+/** `ig_story_insight_fact.value` は BIGINT。非有限・範囲外は null */
+function toStoryInsightBigintValue(v: unknown): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null
+  const n = Math.round(v)
+  const MAX = 9223372036854775807
+  const MIN = -9223372036854775808
+  if (n > MAX || n < MIN) return null
+  return n
+}
 
 function logStoryInsightError(ctx: Record<string, unknown>, err: unknown) {
   if (err instanceof InstagramApiError) {
@@ -73,7 +84,7 @@ export async function POST(request: Request) {
           .eq('id', account.service_id!)
           .single()
 
-        const clientId = (svcRow?.projects as { client_id: string } | null)?.client_id
+        const clientId = resolveClientIdFromServiceJoin(svcRow)
         if (!clientId) {
           console.warn('[story-insight-collector] skip account (cannot resolve client)', {
             account_id: account.id,
@@ -139,57 +150,77 @@ export async function POST(request: Request) {
             })?.data ?? []
 
             for (const insight of insights) {
-              const value =
+              const raw =
                 insight.values?.[0]?.value ??
                 insight.value ??
                 (typeof insight.total_value?.value === 'number' ? insight.total_value.value : null)
+              const value = toStoryInsightBigintValue(raw)
 
-              await admin.from('ig_story_insight_fact').upsert({
+              const { error: upsertErr } = await admin.from('ig_story_insight_fact').upsert({
                 media_id: story.id,
                 metric_code: insight.name,
                 value,
                 fetched_at: snapshotAtIso,
               }, { onConflict: 'media_id,metric_code,fetched_at' })
+              if (upsertErr) {
+                console.error('[story-insight-collector] ig_story_insight_fact upsert failed', {
+                  account_id: account.id,
+                  media_id: story.id,
+                  metric_code: insight.name,
+                  error: upsertErr.message,
+                })
+                throw upsertErr
+              }
             }
 
+            type NavFetchResult = Awaited<ReturnType<InstagramClient['getMediaStoryNavigationInsights']>>
+            let navRes: NavFetchResult | null = null
             try {
-              const { data: navData, rateUsage: navRate } = await igClient.getMediaStoryNavigationInsights(
-                story.platform_media_id,
-              )
-              if (isRateLimitExceeded(navRate, 70)) {
-                console.warn('[story-insight-collector] rate usage high after story navigation fetch', {
-                  account_id: account.id,
-                  rate_usage: navRate,
-                })
-              } else {
-                type NavInsight = {
-                  name: string
-                  total_value?: {
-                    breakdowns?: Array<{
-                      results?: Array<{ dimension_values?: string[]; value?: number }>
-                    }>
-                  }
-                }
-                const navArr = (navData as { data: NavInsight[] })?.data ?? []
-                const nav = navArr.find(n => n.name === 'navigation')
-                const results = nav?.total_value?.breakdowns?.flatMap(b => b.results ?? []) ?? []
-                for (const r of results) {
-                  const action = (r.dimension_values?.[0] ?? '').toLowerCase()
-                  if (!action) continue
-                  await admin.from('ig_story_insight_fact').upsert({
-                    media_id: story.id,
-                    metric_code: `navigation_${action}`,
-                    value: typeof r.value === 'number' ? r.value : null,
-                    fetched_at: snapshotAtIso,
-                  }, { onConflict: 'media_id,metric_code,fetched_at' })
-                }
-              }
-            } catch (navErr) {
-              console.warn('[story-insight-collector] story navigation insights failed (non-fatal)', {
+              navRes = await igClient.getMediaStoryNavigationInsights(story.platform_media_id)
+            } catch (navFetchErr) {
+              console.warn('[story-insight-collector] story navigation insights fetch failed (non-fatal)', {
                 account_id: account.id,
                 media_id: story.id,
                 platform_media_id: story.platform_media_id,
-                error: navErr instanceof Error ? navErr.message : String(navErr),
+                error: navFetchErr instanceof Error ? navFetchErr.message : String(navFetchErr),
+              })
+            }
+            if (navRes != null && !isRateLimitExceeded(navRes.rateUsage, 70)) {
+              type NavInsight = {
+                name: string
+                total_value?: {
+                  breakdowns?: Array<{
+                    results?: Array<{ dimension_values?: string[]; value?: number }>
+                  }>
+                }
+              }
+              const navArr = (navRes.data as { data: NavInsight[] })?.data ?? []
+              const nav = navArr.find(n => n.name === 'navigation')
+              const results = nav?.total_value?.breakdowns?.flatMap(b => b.results ?? []) ?? []
+              for (const r of results) {
+                const action = (r.dimension_values?.[0] ?? '').toLowerCase()
+                if (!action) continue
+                const navVal = toStoryInsightBigintValue(r.value)
+                const { error: navUpsertErr } = await admin.from('ig_story_insight_fact').upsert({
+                  media_id: story.id,
+                  metric_code: `navigation_${action}`,
+                  value: navVal,
+                  fetched_at: snapshotAtIso,
+                }, { onConflict: 'media_id,metric_code,fetched_at' })
+                if (navUpsertErr) {
+                  console.error('[story-insight-collector] navigation upsert failed', {
+                    account_id: account.id,
+                    media_id: story.id,
+                    metric_code: `navigation_${action}`,
+                    error: navUpsertErr.message,
+                  })
+                  throw navUpsertErr
+                }
+              }
+            } else if (navRes != null && isRateLimitExceeded(navRes.rateUsage, 70)) {
+              console.warn('[story-insight-collector] rate usage high after story navigation fetch', {
+                account_id: account.id,
+                rate_usage: navRes.rateUsage,
               })
             }
 
