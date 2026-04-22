@@ -105,10 +105,12 @@ export function isColumnVisible(
 
 export function usePostListColumnVisibility(storageKey: string, columns: readonly { id: string; label: string }[]) {
   const [visible, setVisible] = useState<Record<string, boolean>>(() => defaultPostListColumnVisibility(columns))
+  /** 親が毎レンダー `filter` した新配列を渡すと参照だけ変わり無限ループするため、列 ID 列で依存する */
+  const columnsKey = columns.map(c => c.id).join('|')
 
   useEffect(() => {
     setVisible(loadMerged(storageKey, columns))
-  }, [storageKey, columns])
+  }, [storageKey, columnsKey])
 
   const toggle = useCallback((id: string, checked: boolean) => {
     setVisible(prev => {
