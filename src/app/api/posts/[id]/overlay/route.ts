@@ -6,10 +6,18 @@ import {
   groupInsightFactsByMedia,
   buildOverlayCumulativeHourlyRows,
   buildMilestoneDiffTable,
+  INSIGHT_MILESTONES,
+  INSIGHT_MILESTONES_STORY,
   type OverlaySeriesPost,
 } from '@/lib/instagram/post-insight-chart'
-
-const OVERLAY_METRICS = ['reach', 'likes', 'saved', 'comments', 'impressions', 'views'] as const
+import {
+  OVERLAY_METRICS_FEED,
+  OVERLAY_METRICS_STORY,
+  isStoryMedia,
+  overlayDiffMetricsForPost,
+} from '@/lib/instagram/post-display-mode'
+import { fetchMergedInsightFactRowsForOverlay } from '@/lib/instagram/post-insight-fact-query'
+import type { IgMedia } from '@/types'
 
 function shortLabel(post: { id: string; posted_at: string; caption: string | null }): string {
   const d = new Date(post.posted_at)
@@ -36,13 +44,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: 'peerIds が必要です（最大2件）' }, { status: 400 })
   }
 
-  const metric = searchParams.get('metric') ?? 'reach'
-  if (!OVERLAY_METRICS.includes(metric as (typeof OVERLAY_METRICS)[number])) {
-    return NextResponse.json({ error: 'metric が不正です' }, { status: 400 })
-  }
-
-  const maxHours = Math.min(168, Math.max(6, Number(searchParams.get('maxHours') ?? 72) || 72))
-
   const allIds = [mainId, ...peerIds]
   const { data: posts, error: postsErr } = await supabase
     .from('ig_media')
@@ -68,25 +69,48 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: '同一アカウントの投稿のみ比較できます' }, { status: 400 })
   }
 
-  const metricsForDiff = ['reach', 'likes', 'saved'].filter(m =>
-    ['reach', 'likes', 'saved', 'comments', 'impressions', 'views'].includes(m)
-  )
+  const mainPost = byId.get(mainId)! as IgMedia
+  const peerPosts = peerIds.map(pid => byId.get(pid)!) as IgMedia[]
 
-  const { data: facts, error: factErr } = await supabase
-    .from('ig_media_insight_fact')
-    .select('media_id, metric_code, snapshot_at, value')
-    .in('media_id', allIds)
-    .in('metric_code', [...new Set([metric, ...metricsForDiff])])
-    .order('snapshot_at', { ascending: true })
-    .limit(12000)
-
-  if (factErr) {
-    return NextResponse.json({ error: factErr.message }, { status: 500 })
+  const mainStory = isStoryMedia(mainPost)
+  if (!peerPosts.every(p => isStoryMedia(p) === mainStory)) {
+    return NextResponse.json(
+      { error: '比較は同じ種別（ストーリー同士、またはフィード／リール同士）のみ可能です' },
+      { status: 400 }
+    )
   }
 
-  const grouped = groupInsightFactsByMedia(facts ?? [])
+  const allowedMetrics = mainStory ? OVERLAY_METRICS_STORY : OVERLAY_METRICS_FEED
+  const metric = searchParams.get('metric') ?? (mainStory ? 'reach' : 'reach')
+  if (!allowedMetrics.includes(metric as never)) {
+    return NextResponse.json({ error: 'metric が不正です' }, { status: 400 })
+  }
 
-  const mainPost = byId.get(mainId)!
+  const defaultMax = mainStory ? 24 : 72
+  const maxHours = Math.min(mainStory ? 24 : 168, Math.max(6, Number(searchParams.get('maxHours') ?? defaultMax) || defaultMax))
+
+  const metricsForDiff = overlayDiffMetricsForPost(mainPost).filter(m =>
+    allowedMetrics.includes(m as never)
+  )
+
+  const postList = [mainPost, ...peerPosts]
+  const codes = [...new Set([metric, ...metricsForDiff])]
+
+  let grouped: Record<string, Record<string, Array<{ snapshot_at: string; value: number | null }>>>
+  try {
+    const mergedByMedia = await fetchMergedInsightFactRowsForOverlay(supabase, postList, codes)
+    const flat: Array<{ media_id: string; metric_code: string; snapshot_at: string; value: number | null }> = []
+    for (const [mid, rows] of Object.entries(mergedByMedia)) {
+      for (const r of rows) {
+        flat.push({ media_id: mid, metric_code: r.metric_code, snapshot_at: r.snapshot_at, value: r.value })
+      }
+    }
+    grouped = groupInsightFactsByMedia(flat)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'インサイトの取得に失敗しました'
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
+
   const overlayPosts: OverlaySeriesPost[] = [
     {
       id: mainId,
@@ -107,13 +131,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   const overlayRows = buildOverlayCumulativeHourlyRows(overlayPosts, metric, maxHours)
 
+  const milestones = mainStory ? INSIGHT_MILESTONES_STORY : INSIGHT_MILESTONES
   const mainSeries = overlayPosts[0]
   const diffTables = peerIds.map(pid => {
     const peer = overlayPosts.find(o => o.id === pid)!
     return {
       peerId: pid,
       peerLabel: peer.label,
-      rows: buildMilestoneDiffTable(mainSeries, peer, metricsForDiff),
+      rows: buildMilestoneDiffTable(mainSeries, peer, metricsForDiff, milestones),
     }
   })
 
@@ -123,5 +148,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     overlayRows,
     diffTables,
     posts: overlayPosts.map(p => ({ id: p.id, label: p.label, posted_at: p.postedAtIso })),
+    is_story: mainStory,
   })
 }
