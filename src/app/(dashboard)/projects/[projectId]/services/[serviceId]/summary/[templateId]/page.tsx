@@ -130,26 +130,35 @@ function FieldSelect({ value, onChange, grouped }: { value: string; onChange: (v
   )
 }
 
-// ── 演算子ボタン ───────────────────────────────────────────────
+// ── 演算子ボタン（1カラム縦並び）────────────────────────────────
 function OperatorSelect({ value, onChange }: { value: FormulaStep['operator']; onChange: (op: FormulaStep['operator']) => void }) {
+  const btnBase =
+    'w-full min-h-[2.25rem] px-2 rounded-lg text-sm font-bold border-2 transition flex items-center justify-center'
   const binary = (Object.keys(OPERATOR_SYMBOLS) as FormulaBinaryOperator[]).map(op => (
-    <button key={op} type="button" onClick={() => onChange(op)} className={`w-9 h-9 rounded-lg text-sm font-bold border-2 transition ${value === op ? 'border-amber-400 bg-amber-50 text-amber-700' : 'border-gray-200 bg-white text-gray-400 hover:border-gray-300'}`}>
+    <button
+      key={op}
+      type="button"
+      onClick={() => onChange(op)}
+      className={`${btnBase} ${value === op ? 'border-amber-400 bg-amber-50 text-amber-700' : 'border-gray-200 bg-white text-gray-400 hover:border-gray-300'}`}
+    >
       {OPERATOR_SYMBOLS[op]}
     </button>
   ))
   return (
-    <div className="flex flex-wrap items-center gap-1">
-      {binary}
-      {( ['min', 'max', 'coalesce'] as const satisfies readonly FormulaNAryOperator[]).map(op => (
-        <button
-          key={op}
-          type="button"
-          onClick={() => onChange(op)}
-          className={`px-2 h-9 rounded-lg text-[10px] font-bold border-2 transition whitespace-nowrap ${value === op ? 'border-amber-400 bg-amber-50 text-amber-700' : 'border-gray-200 bg-white text-gray-400 hover:border-gray-300'}`}
-        >
-          {NARY_OPERATOR_LABELS[op]}
-        </button>
-      ))}
+    <div className="flex flex-col gap-1.5 w-full">
+      <div className="flex flex-col gap-1.5">{binary}</div>
+      <div className="flex flex-col gap-1.5">
+        {( ['min', 'max', 'coalesce'] as const satisfies readonly FormulaNAryOperator[]).map(op => (
+          <button
+            key={op}
+            type="button"
+            onClick={() => onChange(op)}
+            className={`${btnBase} text-xs ${value === op ? 'border-amber-400 bg-amber-50 text-amber-700' : 'border-gray-200 bg-white text-gray-400 hover:border-gray-300'}`}
+          >
+            {NARY_OPERATOR_LABELS[op]}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
@@ -180,40 +189,47 @@ function OperandValueRow({
   showTimeOp: boolean
 }) {
   return (
-    <div className="space-y-1 mb-2">
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[10px] text-gray-500 w-16 flex-shrink-0">{label}</span>
-        <label className="flex items-center gap-1 text-[10px] text-gray-600">
-          <input type="checkbox" checked={isConst} onChange={e => onChangeIsConst(e.target.checked)} />
+    <div className="space-y-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-medium text-gray-600">{label}</span>
+        <label className="flex items-center gap-1.5 text-[10px] text-gray-600 shrink-0">
+          <input type="checkbox" checked={isConst} onChange={e => onChangeIsConst(e.target.checked)} className="rounded border-gray-300" />
           定数
         </label>
-        {showTimeOp && !isConst && (
-          <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-            <span className="text-[9px] text-gray-500 leading-tight">同じ指標を、表の<strong>横（列）</strong>のどこで読むか</span>
-            <select
-              value={timeOp}
-              onChange={e => onTimeOp(e.target.value as FormulaOperandTimeOp)}
-              className="text-[10px] px-2 py-1.5 border border-gray-200 rounded-lg bg-white w-full max-w-full sm:max-w-[280px]"
-            >
-              {(Object.keys(TIME_OP_LABELS) as FormulaOperandTimeOp[]).map(k => (
-                <option key={k} value={k}>{TIME_OP_LABELS[k]}</option>
-              ))}
-            </select>
-          </div>
+      </div>
+      {showTimeOp && !isConst && (
+        <div className="flex flex-col gap-1">
+          <span className="text-[9px] text-gray-500 leading-snug">
+            同じ指標を、表の<strong>横（列）</strong>のどこで読むか
+          </span>
+          <select
+            value={timeOp}
+            onChange={e => onTimeOp(e.target.value as FormulaOperandTimeOp)}
+            className="w-full text-xs px-2.5 py-2 border border-gray-200 rounded-lg bg-white"
+          >
+            {(Object.keys(TIME_OP_LABELS) as FormulaOperandTimeOp[]).map(k => (
+              <option key={k} value={k}>{TIME_OP_LABELS[k]}</option>
+            ))}
+          </select>
+        </div>
+      )}
+      <div className="flex flex-col gap-1">
+        <span className="text-[9px] text-gray-500">
+          {isConst ? '数値' : 'フィールド（指標）'}
+        </span>
+        {isConst ? (
+          <input
+            type="number"
+            step="any"
+            value={value}
+            onChange={e => onChangeValue(e.target.value)}
+            placeholder="例: 100"
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
+          />
+        ) : (
+          <FieldSelect value={value} onChange={onChangeValue} grouped={grouped} />
         )}
       </div>
-      {isConst ? (
-        <input
-          type="number"
-          step="any"
-          value={value}
-          onChange={e => onChangeValue(e.target.value)}
-          placeholder="数値"
-          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
-        />
-      ) : (
-        <FieldSelect value={value} onChange={onChangeValue} grouped={grouped} />
-      )}
     </div>
   )
 }
@@ -321,17 +337,19 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
             <p className="text-[10px] text-gray-500 mb-2 leading-relaxed">
               サマリ表の<strong>1マス</strong>ごとに計算します。「左の列」は表で<strong>すぐ左となりの列</strong>のことです（カレンダーの前日とは限りません）。
             </p>
-            <OperandValueRow
-              label="A"
-              value={baseOperandId}
-              isConst={baseOperandIsConst}
-              onChangeValue={setBaseOperandId}
-              onChangeIsConst={(v) => { setBaseOperandIsConst(v); if (v) setBaseTimeOp('none') }}
-              grouped={grouped}
-              timeOp={baseTimeOp}
-              onTimeOp={setBaseTimeOp}
-              showTimeOp={!baseOperandIsConst}
-            />
+            <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-3">
+              <OperandValueRow
+                label="起点（A）"
+                value={baseOperandId}
+                isConst={baseOperandIsConst}
+                onChangeValue={setBaseOperandId}
+                onChangeIsConst={(v) => { setBaseOperandIsConst(v); if (v) setBaseTimeOp('none') }}
+                grouped={grouped}
+                timeOp={baseTimeOp}
+                onTimeOp={setBaseTimeOp}
+                showTimeOp={!baseOperandIsConst}
+              />
+            </div>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">ステップ 2 以降（演算）</label>
@@ -339,10 +357,28 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
               上から順に適用します。<strong>＋</strong>と<strong>−</strong>だけは欠損を 0 とみなして計算します（詳しくは下の注記）。
             </p>
             {steps.map((step, idx) => (
-              <div key={idx} className="mb-3 pb-3 border-b border-gray-100 last:border-0">
-                <div className="flex items-start gap-2">
-                  <div className="flex-shrink-0 pt-1">
-                    <OperatorSelect value={step.operator} onChange={op => {
+              <div
+                key={idx}
+                className="rounded-lg border border-gray-200 bg-gray-50/50 p-3 mb-3 space-y-3 last:mb-0"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-semibold text-gray-600">ステップ {idx + 2}</span>
+                  {steps.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeStep(idx)}
+                      className="text-[10px] text-gray-400 hover:text-red-500 px-2 py-1 rounded border border-transparent hover:border-red-200 transition"
+                      title="この段を削除"
+                    >
+                      削除
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[9px] text-gray-500">演算</span>
+                  <OperatorSelect
+                    value={step.operator}
+                    onChange={op => {
                       if (isNAryOp(op)) {
                         updateStep(idx, {
                           operator: op,
@@ -353,78 +389,73 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
                       } else {
                         updateStep(idx, { operator: op, extraOperandIds: undefined, extraOperandsAreConst: undefined })
                       }
-                    }} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    {isNAryOp(step.operator) ? (
-                      <div className="space-y-2">
-                        <OperandValueRow
-                          label="引数1"
-                          value={step.operandId}
-                          isConst={Boolean(step.operandIsConst)}
-                          onChangeValue={v => updateStep(idx, { operandId: v })}
-                          onChangeIsConst={v => updateStep(idx, { operandIsConst: v || undefined, operandTimeOp: v ? 'none' : step.operandTimeOp })}
-                          grouped={grouped}
-                          timeOp={step.operandTimeOp ?? 'none'}
-                          onTimeOp={v => updateStep(idx, { operandTimeOp: v })}
-                          showTimeOp={!step.operandIsConst}
-                        />
-                        {(step.extraOperandIds ?? []).map((ex, j) => (
-                          <OperandValueRow
-                            key={j}
-                            label={`引数${j + 2}`}
-                            value={ex}
-                            isConst={Boolean(step.extraOperandsAreConst?.[j])}
-                            onChangeValue={v => {
-                              const next = [...(step.extraOperandIds ?? [])]
-                              next[j] = v
-                              updateStep(idx, { extraOperandIds: next })
-                            }}
-                            onChangeIsConst={v => {
-                              const nextF = [...(step.extraOperandsAreConst ?? [])]
-                              while (nextF.length <= j) nextF.push(false)
-                              nextF[j] = v
-                              updateStep(idx, { extraOperandsAreConst: nextF })
-                            }}
-                            grouped={grouped}
-                            timeOp="none"
-                            onTimeOp={() => {}}
-                            showTimeOp={false}
-                          />
-                        ))}
-                        <button
-                          type="button"
-                          className="text-[10px] text-amber-600 hover:underline"
-                          onClick={() => {
-                            const next = [...(step.extraOperandIds ?? []), '']
-                            const nextF = [...(step.extraOperandsAreConst ?? [])]
-                            nextF.push(false)
-                            updateStep(idx, { extraOperandIds: next, extraOperandsAreConst: nextF })
-                          }}
-                        >
-                          + 引数を追加（3項以上の min / max / coalesce）
-                        </button>
-                      </div>
-                    ) : (
-                      <OperandValueRow
-                        label="項"
-                        value={step.operandId}
-                        isConst={Boolean(step.operandIsConst)}
-                        onChangeValue={v => updateStep(idx, { operandId: v })}
-                        onChangeIsConst={v => updateStep(idx, { operandIsConst: v || undefined, operandTimeOp: v ? 'none' : step.operandTimeOp })}
-                        grouped={grouped}
-                        timeOp={step.operandTimeOp ?? 'none'}
-                        onTimeOp={v => updateStep(idx, { operandTimeOp: v })}
-                        showTimeOp={!step.operandIsConst}
-                      />
-                    )}
-                  </div>
-                  {steps.length > 1 && (
-                    <button type="button" onClick={() => removeStep(idx)} className="w-7 h-7 rounded-lg border border-gray-200 text-gray-400 hover:text-red-500 flex-shrink-0" title="この段を削除">
-                      <svg className="w-3.5 h-3.5 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
-                  )}
+                    }}
+                  />
                 </div>
+                {isNAryOp(step.operator) ? (
+                  <div className="space-y-3 pt-1 border-t border-gray-200/80">
+                    <OperandValueRow
+                      label="引数 1"
+                      value={step.operandId}
+                      isConst={Boolean(step.operandIsConst)}
+                      onChangeValue={v => updateStep(idx, { operandId: v })}
+                      onChangeIsConst={v => updateStep(idx, { operandIsConst: v || undefined, operandTimeOp: v ? 'none' : step.operandTimeOp })}
+                      grouped={grouped}
+                      timeOp={step.operandTimeOp ?? 'none'}
+                      onTimeOp={v => updateStep(idx, { operandTimeOp: v })}
+                      showTimeOp={!step.operandIsConst}
+                    />
+                    {(step.extraOperandIds ?? []).map((ex, j) => (
+                      <OperandValueRow
+                        key={j}
+                        label={`引数 ${j + 2}`}
+                        value={ex}
+                        isConst={Boolean(step.extraOperandsAreConst?.[j])}
+                        onChangeValue={v => {
+                          const next = [...(step.extraOperandIds ?? [])]
+                          next[j] = v
+                          updateStep(idx, { extraOperandIds: next })
+                        }}
+                        onChangeIsConst={v => {
+                          const nextF = [...(step.extraOperandsAreConst ?? [])]
+                          while (nextF.length <= j) nextF.push(false)
+                          nextF[j] = v
+                          updateStep(idx, { extraOperandsAreConst: nextF })
+                        }}
+                        grouped={grouped}
+                        timeOp="none"
+                        onTimeOp={() => {}}
+                        showTimeOp={false}
+                      />
+                    ))}
+                    <button
+                      type="button"
+                      className="w-full text-left text-[10px] text-amber-600 hover:text-amber-700 py-1"
+                      onClick={() => {
+                        const next = [...(step.extraOperandIds ?? []), '']
+                        const nextF = [...(step.extraOperandsAreConst ?? [])]
+                        nextF.push(false)
+                        updateStep(idx, { extraOperandIds: next, extraOperandsAreConst: nextF })
+                      }}
+                    >
+                      + 引数を追加（3項以上の min / max / coalesce）
+                    </button>
+                  </div>
+                ) : (
+                  <div className="pt-1 border-t border-gray-200/80">
+                    <OperandValueRow
+                      label="右辺の値"
+                      value={step.operandId}
+                      isConst={Boolean(step.operandIsConst)}
+                      onChangeValue={v => updateStep(idx, { operandId: v })}
+                      onChangeIsConst={v => updateStep(idx, { operandIsConst: v || undefined, operandTimeOp: v ? 'none' : step.operandTimeOp })}
+                      grouped={grouped}
+                      timeOp={step.operandTimeOp ?? 'none'}
+                      onTimeOp={v => updateStep(idx, { operandTimeOp: v })}
+                      showTimeOp={!step.operandIsConst}
+                    />
+                  </div>
+                )}
               </div>
             ))}
             <button type="button" onClick={addStep} className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-amber-600 hover:text-amber-700 hover:bg-amber-50 rounded-lg transition mt-1">
