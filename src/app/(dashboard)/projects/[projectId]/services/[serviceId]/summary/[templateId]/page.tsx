@@ -130,42 +130,40 @@ function FieldSelect({ value, onChange, grouped }: { value: string; onChange: (v
   )
 }
 
-// ── 演算子ボタン（四則は横並び、その下に min/max/coalesce を縦）────
+// ── 演算子ボタン（四則＋ min/max/coalesce を横一列）────────────────
 function OperatorSelect({ value, onChange }: { value: FormulaStep['operator']; onChange: (op: FormulaStep['operator']) => void }) {
-  const binaryBtn =
-    'min-h-[2.25rem] flex-1 min-w-0 rounded-lg text-sm font-bold border-2 transition flex items-center justify-center'
+  const sel =
+    'border-amber-400 bg-amber-50 text-amber-700 shadow-sm'
+  const idle =
+    'border-gray-200 bg-white text-gray-500 hover:border-amber-200 hover:text-amber-700'
   const binary = (Object.keys(OPERATOR_SYMBOLS) as FormulaBinaryOperator[]).map(op => (
     <button
       key={op}
       type="button"
       onClick={() => onChange(op)}
-      className={`${binaryBtn} ${value === op ? 'border-amber-400 bg-amber-50 text-amber-700 shadow-sm' : 'border-gray-200 bg-white text-gray-500 hover:border-amber-200 hover:text-amber-700'}`}
+      className={`shrink-0 w-9 min-h-[2.25rem] rounded-lg text-sm font-bold border-2 transition flex items-center justify-center ${value === op ? sel : idle}`}
     >
       {OPERATOR_SYMBOLS[op]}
     </button>
   ))
-  const naryBtn =
-    'w-full min-h-[2.25rem] px-2 rounded-lg text-xs font-bold border-2 transition flex items-center justify-center'
+  const nary = ( ['min', 'max', 'coalesce'] as const satisfies readonly FormulaNAryOperator[]).map(op => (
+    <button
+      key={op}
+      type="button"
+      onClick={() => onChange(op)}
+      className={`shrink-0 min-h-[2.25rem] px-2 rounded-lg text-[10px] font-bold border-2 transition flex items-center justify-center whitespace-nowrap ${value === op ? sel : idle}`}
+    >
+      {NARY_OPERATOR_LABELS[op]}
+    </button>
+  ))
   return (
-    <div className="flex flex-col gap-2 w-full">
-      <div>
-        <p className="text-[9px] text-gray-500 mb-1">四則演算</p>
-        <div className="flex gap-1.5">{binary}</div>
-      </div>
-      <div>
-        <p className="text-[9px] text-gray-500 mb-1">複数値をまとめる</p>
-        <div className="flex flex-col gap-1.5">
-          {( ['min', 'max', 'coalesce'] as const satisfies readonly FormulaNAryOperator[]).map(op => (
-            <button
-              key={op}
-              type="button"
-              onClick={() => onChange(op)}
-              className={`${naryBtn} ${value === op ? 'border-amber-400 bg-amber-50 text-amber-700 shadow-sm' : 'border-gray-200 bg-white text-gray-500 hover:border-amber-200 hover:text-amber-700'}`}
-            >
-              {NARY_OPERATOR_LABELS[op]}
-            </button>
-          ))}
-        </div>
+    <div className="w-full min-w-0">
+      <p className="text-[9px] text-gray-500 mb-1">
+        ＋、−、×、÷、最小、最大、先頭の有効値（狭い画面では横スクロール）
+      </p>
+      <div className="flex flex-nowrap items-stretch gap-1 overflow-x-auto pb-0.5 -mx-0.5 px-0.5">
+        {binary}
+        {nary}
       </div>
     </div>
   )
