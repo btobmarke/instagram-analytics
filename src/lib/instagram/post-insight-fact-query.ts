@@ -86,6 +86,81 @@ export async function fetchAllIgStoryInsightFactRows(
   return out
 }
 
+/** 一覧のストーリー行で `ig_story_insight_fact` を優先マージするメトリクス */
+export const STORY_LIST_MERGE_METRIC_CODES = [
+  'views',
+  'reach',
+  'replies',
+  'exits',
+  'taps_forward',
+  'taps_back',
+] as const
+
+function numFromDb(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  }
+  if (typeof v === 'bigint') return Number(v)
+  return null
+}
+
+/**
+ * 投稿一覧用: `media_product_type=STORY` の行について、`ig_story_insight_fact` の
+ * 各 metric_code ごとの最新値（fetched_at 最大）を `insights` に上書きマージする。
+ * hourly_story_insight_collector の値が `ig_media_insight_fact` より新しい場合に備える。
+ */
+export async function mergeLatestStoryInsightsIntoPostList(
+  supabase: SupabaseClient,
+  posts: Array<{
+    id: string
+    media_product_type?: string | null
+    media_type?: string
+    insights?: Record<string, number | null>
+  }>
+): Promise<void> {
+  const storyIds = posts.filter(p => isStoryMedia(p as IgMedia)).map(p => p.id)
+  if (storyIds.length === 0) return
+
+  const codes = [...STORY_LIST_MERGE_METRIC_CODES]
+  const { data, error } = await supabase
+    .from('ig_story_insight_fact')
+    .select('media_id, metric_code, value, fetched_at')
+    .in('media_id', storyIds)
+    .in('metric_code', codes)
+    .order('fetched_at', { ascending: false })
+    .limit(25_000)
+
+  if (error || !data?.length) return
+
+  const rows = [...data].sort((a, b) =>
+    String((b as { fetched_at?: string }).fetched_at ?? '').localeCompare(
+      String((a as { fetched_at?: string }).fetched_at ?? '')
+    )
+  )
+
+  const newest = new Map<string, Map<string, number | null>>()
+  for (const row of rows) {
+    const mid = row.media_id as string
+    const code = row.metric_code as string
+    if (!newest.has(mid)) newest.set(mid, new Map())
+    const m = newest.get(mid)!
+    if (m.has(code)) continue
+    m.set(code, numFromDb(row.value))
+  }
+
+  for (const p of posts) {
+    if (!isStoryMedia(p as IgMedia)) continue
+    const per = newest.get(p.id)
+    if (!per) continue
+    if (!p.insights) p.insights = {}
+    for (const [code, val] of per) {
+      p.insights[code] = val
+    }
+  }
+}
+
 export function storyRowToMediaShape(r: IgStoryInsightFactRow): IgMediaInsightFactRow {
   const v = r.value
   return {

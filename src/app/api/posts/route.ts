@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { mergeLatestStoryInsightsIntoPostList } from '@/lib/instagram/post-insight-fact-query'
 
 function numOrNull(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return v
@@ -182,7 +183,13 @@ export async function GET(request: Request) {
     const { data: plain, count: c2, error: e2 } = await plainQuery
 
     if (e2) return NextResponse.json({ error: e2.message }, { status: 500 })
-    const plainList = (plain ?? []) as Array<Record<string, unknown> & { id: string }>
+    const plainList = (plain ?? []) as Array<
+      Record<string, unknown> & { id: string; insights?: Record<string, number | null> }
+    >
+    for (const p of plainList) {
+      if (!p.insights) p.insights = {}
+    }
+    await mergeLatestStoryInsightsIntoPostList(supabase, plainList)
     const { data, followers_count } = await appendHomeRateFields(supabase, accountId, plainList)
     return NextResponse.json({ data, count: c2, offset, limit, followers_count })
   }
@@ -205,7 +212,10 @@ export async function GET(request: Request) {
     return { ...rest, insights: latest }
   })
 
-  const list = (enriched ?? []) as Array<Record<string, unknown> & { id: string }>
+  const list = (enriched ?? []) as Array<
+    Record<string, unknown> & { id: string; insights?: Record<string, number | null> }
+  >
+  await mergeLatestStoryInsightsIntoPostList(supabase, list)
   const { data, followers_count } = await appendHomeRateFields(supabase, accountId, list)
 
   return NextResponse.json({ data, count, offset, limit, followers_count })
