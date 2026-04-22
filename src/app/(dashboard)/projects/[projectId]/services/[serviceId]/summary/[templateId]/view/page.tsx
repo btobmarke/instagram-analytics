@@ -21,8 +21,15 @@ const SERVICE_THEME: Record<string, { accent: string; bg: string; border: string
   gbp:       { accent: 'text-teal-600',   bg: 'bg-teal-50',   border: 'border-teal-200',   badge: 'bg-teal-100 text-teal-700' },
   line:      { accent: 'text-green-600',  bg: 'bg-green-50',  border: 'border-green-200',  badge: 'bg-green-100 text-green-700' },
   lp:        { accent: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-200', badge: 'bg-purple-100 text-purple-700' },
+  google_ads: { accent: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-200', badge: 'bg-blue-100 text-blue-700' },
 }
-const SERVICE_LABEL: Record<string, string> = { instagram: 'Instagram', gbp: 'GBP', line: 'LINE OAM', lp: 'LP' }
+const SERVICE_LABEL: Record<string, string> = {
+  instagram: 'Instagram',
+  gbp: 'GBP',
+  line: 'LINE OAM',
+  lp: 'LP',
+  google_ads: 'Google 広告',
+}
 
 const TIME_COL_COUNT = 8
 
@@ -110,9 +117,17 @@ function evalFormula(
   return rounded
 }
 
-/** 数値を読みやすい形式にフォーマット */
-function formatCell(value: number | null): string {
+/** 数値を読みやすい形式にフォーマット（rowId: マイクロ単位・CTR の表示調整用） */
+function formatCell(value: number | null, rowId?: string): string {
   if (value === null) return '—'
+  const id = rowId ?? ''
+  if (id.includes('.ctr')) {
+    return `${(value * 100).toLocaleString('ja-JP', { maximumFractionDigits: 2 })}%`
+  }
+  if (id.includes('cost_micros') || id.includes('conversion_value_micros') || id.includes('cpc_micros')) {
+    const yen = value / 1_000_000
+    return `¥${yen.toLocaleString('ja-JP', { maximumFractionDigits: 0 })}`
+  }
   if (Number.isInteger(value)) return value.toLocaleString('ja-JP')
   return value.toLocaleString('ja-JP', { maximumFractionDigits: 2 })
 }
@@ -137,6 +152,9 @@ function tableDisplayName(tableId: string): string {
     lp_page_views:           'LP ページビュー',
     lp_event_logs:           'LP イベントログ',
     lp_users:                'LP ユーザー',
+    google_ads_campaign_daily: 'Google 広告（キャンペーン日次）',
+    google_ads_adgroup_daily: 'Google 広告（広告グループ日次）',
+    google_ads_keyword_daily: 'Google 広告（キーワード日次）',
   }
   return map[tableId] ?? tableId
 }
@@ -329,7 +347,7 @@ function ServiceSummaryChartView({
   dataLoading: boolean
   themeAccent: string
   evalFormula: (f: FormulaNode, d: Record<string, Record<string, number | null>>, label: string) => number | null
-  formatCell: (v: number | null) => string
+  formatCell: (v: number | null, rowId?: string) => string
 }) {
   if (dataLoading) {
     return (
@@ -380,7 +398,7 @@ function ServiceSummaryChartView({
               </span>
               {vals.length > 0 && (
                 <span className="ml-auto text-xs font-mono text-gray-500 flex-shrink-0">
-                  最新: {fmtCell(vals[vals.length - 1])}
+                  最新: {fmtCell(vals[vals.length - 1], row.id)}
                 </span>
               )}
             </div>
@@ -403,10 +421,10 @@ function ServiceSummaryChartView({
                     tickLine={false}
                     axisLine={false}
                     width={50}
-                    tickFormatter={(v: number) => fmtCell(v)}
+                    tickFormatter={(v: number) => fmtCell(v, row.id)}
                   />
                   <Tooltip
-                    formatter={(v) => [fmtCell(v as number | null), displayLabel]}
+                    formatter={(v) => [fmtCell(v as number | null, row.id), displayLabel]}
                     labelStyle={{ fontSize: 10 }}
                     contentStyle={{ fontSize: 10, borderRadius: 8, border: '1px solid #e5e7eb' }}
                   />
@@ -450,7 +468,7 @@ function ServiceSummaryCombinedChart({
   rawData: Record<string, Record<string, number | null>>
   dataLoading: boolean
   evalFormula: (f: FormulaNode, d: Record<string, Record<string, number | null>>, label: string) => number | null
-  formatCell: (v: number | null) => string
+  formatCell: (v: number | null, rowId?: string) => string
 }) {
   const [selected, setSelected] = useState<Set<number>>(
     () => new Set(rows.map((_, i) => i)),
@@ -957,7 +975,7 @@ export default function SummaryViewPage({
                                   value !== null ? 'text-gray-800' : 'text-gray-300'
                                 }`}
                               >
-                                {formatCell(value)}
+                                {formatCell(value, row.id)}
                               </td>
                             )
                           })}
@@ -991,7 +1009,7 @@ export default function SummaryViewPage({
                 <div className="px-4 py-3 bg-amber-50 border-t border-amber-200">
                   <p className="text-xs text-amber-800 font-medium">⚠️ データが取得できていません</p>
                   <p className="text-[11px] text-amber-700 mt-0.5">
-                    バッチが実行されていないか、このサービスのデータソース（GBP・Instagram等）がまだ同期されていない可能性があります。
+                    バッチが実行されていないか、このサービスのデータソース（Instagram・GBP・LINE・Google 広告など）がまだ同期されていない可能性があります。
                     バッチを手動実行するか、しばらく待ってから再度確認してください。
                   </p>
                 </div>

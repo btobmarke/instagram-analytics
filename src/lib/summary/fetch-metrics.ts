@@ -497,6 +497,231 @@ export async function fetchIgMediaInsightByProduct(
   return result
 }
 
+const GOOGLE_ADS_SUM_METRICS = new Set([
+  'impressions',
+  'clicks',
+  'cost_micros',
+  'conversions',
+  'conversion_value_micros',
+])
+const GOOGLE_ADS_DERIVED_METRICS = new Set(['ctr', 'average_cpc_micros'])
+const GOOGLE_ADS_KEYWORD_ONLY = new Set(['quality_score'])
+
+export type GoogleAdsDailyTable =
+  | 'google_ads_campaign_daily'
+  | 'google_ads_adgroup_daily'
+  | 'google_ads_keyword_daily'
+
+/**
+ * Google 広告日次（キャンペーン／広告グループ／キーワード）を service_id で集計。
+ * field 例: impressions | impressions@@campaign_id=123 | clicks@@ad_group_id=456 | cost_micros@@keyword_id=789
+ * ctr / average_cpc_micros は期間内の合算クリック・インプレ・費用から算出する。
+ */
+export function parseGoogleAdsDailyField(
+  raw: string,
+  logicalTable: GoogleAdsDailyTable = 'google_ads_campaign_daily',
+): {
+  refKey: string
+  dbTable: GoogleAdsDailyTable
+  metric: string
+  campaignId?: string
+  adGroupId?: string
+  keywordId?: string
+} | null {
+  const parts = raw.split('@@').map(s => s.trim()).filter(Boolean)
+  const kv: Record<string, string> = {}
+  for (const p of parts) {
+    if (!p.includes('=')) continue
+    const idx = p.indexOf('=')
+    const k = p.slice(0, idx).trim()
+    const v = p.slice(idx + 1).trim()
+    if (k) kv[k] = v
+  }
+  const metric = (parts[0] && !parts[0].includes('=') ? parts[0] : '').trim()
+  if (!metric) return null
+
+  const keywordId = kv.keyword_id ?? kv.kw_id ?? ''
+  const adGroupId = kv.ad_group_id ?? kv.adgroup_id ?? ''
+  const campaignId = kv.campaign_id ?? ''
+
+  let dbTable: GoogleAdsDailyTable
+  if (keywordId) dbTable = 'google_ads_keyword_daily'
+  else if (adGroupId) dbTable = 'google_ads_adgroup_daily'
+  else dbTable = logicalTable
+
+  if (GOOGLE_ADS_KEYWORD_ONLY.has(metric) && dbTable !== 'google_ads_keyword_daily') return null
+  if (
+    !GOOGLE_ADS_SUM_METRICS.has(metric) &&
+    !GOOGLE_ADS_DERIVED_METRICS.has(metric) &&
+    !GOOGLE_ADS_KEYWORD_ONLY.has(metric)
+  ) {
+    return null
+  }
+
+  return {
+    refKey: raw,
+    dbTable,
+    metric,
+    campaignId: campaignId || undefined,
+    adGroupId: adGroupId || undefined,
+    keywordId: keywordId || undefined,
+  }
+}
+
+type GoogleAdsRoll = {
+  impressions: number
+  clicks: number
+  cost_micros: number
+  conversions: number
+  conversion_value_micros: number
+  qualitySum: number
+  qualityCnt: number
+}
+
+function emptyGoogleAdsRoll(): GoogleAdsRoll {
+  return {
+    impressions: 0,
+    clicks: 0,
+    cost_micros: 0,
+    conversions: 0,
+    conversion_value_micros: 0,
+    qualitySum: 0,
+    qualityCnt: 0,
+  }
+}
+
+function refKeyForGoogleAdsSpec(
+  logicalTable: GoogleAdsDailyTable,
+  spec: NonNullable<ReturnType<typeof parseGoogleAdsDailyField>>,
+): string {
+  return `${logicalTable}.${spec.refKey}`
+}
+
+export async function fetchGoogleAdsDailyAggregate(
+  supabase: SupabaseServerClient,
+  serviceId: string,
+  entries: Array<{ logicalTable: GoogleAdsDailyTable; field: string }>,
+  periods: Period[],
+): Promise<Record<string, Record<string, number | null>>> {
+  const result: Record<string, Record<string, number | null>> = {}
+  const nullRow = () => Object.fromEntries(periods.map((p) => [p.label, null] as const))
+
+  const specs = entries
+    .map(({ logicalTable, field }) => {
+      const s = parseGoogleAdsDailyField(field, logicalTable)
+      return s ? { logicalTable, spec: s } : null
+    })
+    .filter((x): x is { logicalTable: GoogleAdsDailyTable; spec: NonNullable<ReturnType<typeof parseGoogleAdsDailyField>> } => x != null)
+
+  for (const { logicalTable, field } of entries) {
+    result[`${logicalTable}.${field}`] = nullRow()
+  }
+  if (specs.length === 0) return result
+
+  type GroupSpec = NonNullable<ReturnType<typeof parseGoogleAdsDailyField>>
+  const groupKey = (s: GroupSpec) =>
+    `${s.dbTable}\0${s.campaignId ?? ''}\0${s.adGroupId ?? ''}\0${s.keywordId ?? ''}`
+
+  const uniqueGroups = new Map<string, GroupSpec>()
+  for (const { spec: s } of specs) {
+    const k = groupKey(s)
+    if (!uniqueGroups.has(k)) uniqueGroups.set(k, s)
+  }
+
+  const rangeStart = periods[0].start.toISOString().slice(0, 10)
+  const rangeEnd = periods[periods.length - 1].end.toISOString().slice(0, 10)
+
+  const rollsByGroup = new Map<string, Map<string, GoogleAdsRoll>>()
+
+  for (const spec of uniqueGroups.values()) {
+    const gk = groupKey(spec)
+    const selectCols =
+      spec.dbTable === 'google_ads_keyword_daily'
+        ? 'date, impressions, clicks, cost_micros, conversions, conversion_value_micros, quality_score'
+        : 'date, impressions, clicks, cost_micros, conversions, conversion_value_micros'
+
+    let q = supabase
+      .from(spec.dbTable)
+      .select(selectCols)
+      .eq('service_id', serviceId)
+      .gte('date', rangeStart)
+      .lte('date', rangeEnd)
+    if (spec.campaignId) q = q.eq('campaign_id', spec.campaignId)
+    if (spec.adGroupId) q = q.eq('ad_group_id', spec.adGroupId)
+    if (spec.keywordId) q = q.eq('keyword_id', spec.keywordId)
+
+    const { data: rawRows, error } = await q
+    if (error) {
+      console.error('[fetch-metrics] google_ads daily query failed', { serviceId, table: spec.dbTable, error })
+      rollsByGroup.set(gk, new Map())
+      continue
+    }
+
+    const byLabel = new Map<string, GoogleAdsRoll>()
+    for (const row of rawRows ?? []) {
+      const label = bucketDate(new Date(`${String(row.date).slice(0, 10)}T12:00:00+09:00`), periods)
+      if (!label) continue
+      let roll = byLabel.get(label)
+      if (!roll) {
+        roll = emptyGoogleAdsRoll()
+        byLabel.set(label, roll)
+      }
+      roll.impressions += Number(row.impressions ?? 0)
+      roll.clicks += Number(row.clicks ?? 0)
+      roll.cost_micros += Number(row.cost_micros ?? 0)
+      roll.conversions += Number(row.conversions ?? 0)
+      roll.conversion_value_micros += Number(row.conversion_value_micros ?? 0)
+      if (spec.dbTable === 'google_ads_keyword_daily' && 'quality_score' in row) {
+        const qs = (row as { quality_score?: unknown }).quality_score
+        if (qs != null && Number.isFinite(Number(qs))) {
+          roll.qualitySum += Number(qs)
+          roll.qualityCnt += 1
+        }
+      }
+    }
+    rollsByGroup.set(gk, byLabel)
+  }
+
+  const metricValue = (metric: string, roll: GoogleAdsRoll): number | null => {
+    const { impressions: imp, clicks: clk, cost_micros: cost, conversions: conv, conversion_value_micros: cv } =
+      roll
+    switch (metric) {
+      case 'impressions':
+        return imp
+      case 'clicks':
+        return clk
+      case 'cost_micros':
+        return cost
+      case 'conversions':
+        return conv
+      case 'conversion_value_micros':
+        return cv
+      case 'ctr':
+        return imp > 0 ? Math.round((clk / imp) * 1_000_000) / 1_000_000 : null
+      case 'average_cpc_micros':
+        return clk > 0 ? Math.round(cost / clk) : null
+      case 'quality_score':
+        return roll.qualityCnt > 0 ? Math.round((roll.qualitySum / roll.qualityCnt) * 100) / 100 : null
+      default:
+        return null
+    }
+  }
+
+  for (const { logicalTable, spec } of specs) {
+    const gk = groupKey(spec)
+    const byLabel = rollsByGroup.get(gk) ?? new Map()
+    const ref = refKeyForGoogleAdsSpec(logicalTable, spec)
+    const out = nullRow()
+    for (const p of periods) {
+      const roll = byLabel.get(p.label)
+      out[p.label] = roll ? metricValue(spec.metric, roll) : null
+    }
+    result[ref] = out
+  }
+
+  return result
+}
+
 /**
  * gbp_performance_daily
  * 直接カラム、date DATE
@@ -1090,8 +1315,24 @@ export async function fetchMetricsByRefs(
 
   const queries: Promise<Record<string, Record<string, number | null>>>[] = []
 
+  const googleAdsTables: GoogleAdsDailyTable[] = [
+    'google_ads_campaign_daily',
+    'google_ads_adgroup_daily',
+    'google_ads_keyword_daily',
+  ]
+  const googleAdsEntries = googleAdsTables.flatMap((logicalTable) =>
+    (byTable[logicalTable] ?? []).map((field) => ({ logicalTable, field })),
+  )
+  if (googleAdsEntries.length > 0) {
+    queries.push(fetchGoogleAdsDailyAggregate(supabase, serviceId, googleAdsEntries, periods))
+  }
+
   for (const [table, fields] of Object.entries(byTable)) {
     switch (table) {
+      case 'google_ads_campaign_daily':
+      case 'google_ads_adgroup_daily':
+      case 'google_ads_keyword_daily':
+        break
       case 'ig_account_insight_fact':
         queries.push(fetchIgAccountInsight(supabase, serviceId, fields, periods))
         break

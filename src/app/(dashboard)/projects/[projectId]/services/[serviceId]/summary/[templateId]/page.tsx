@@ -463,6 +463,7 @@ export default function TemplateEditorPage({
     gbp:       { bg: 'bg-teal-50',   border: 'border-teal-200' },
     line:      { bg: 'bg-green-50',  border: 'border-green-200' },
     lp:        { bg: 'bg-purple-50', border: 'border-purple-200' },
+    google_ads: { bg: 'bg-blue-50', border: 'border-blue-200' },
   }
   const theme = themeColor[serviceType] ?? { bg: 'bg-purple-50', border: 'border-purple-200' }
 
@@ -693,7 +694,12 @@ export default function TemplateEditorPage({
           catalog={catalog}
           customCards={customCards}
           editTarget={editingCustomCard}
-          showThresholdControls={serviceType === 'line'}
+          showThresholdControls={
+            serviceType === 'gbp' ||
+            serviceType === 'line' ||
+            serviceType === 'instagram' ||
+            serviceType === 'google_ads'
+          }
           onSave={handleSaveCustomCard}
           onClose={() => { setShowFormulaModal(false); setEditingCustomCard(null) }}
         />
