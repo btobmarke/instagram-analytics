@@ -21,6 +21,8 @@ export async function POST(request: Request) {
   let totalFailed = 0
   let skippedNoToken = 0
   let skippedNoClient = 0
+  let storyListFetchFailures = 0
+  let storyRateLimitEarlyStops = 0
   let lastErrorMessage: string | null = null
   let tokenInvalid = false
 
@@ -134,6 +136,8 @@ export async function POST(request: Request) {
           accountId: account.id,
           logPrefix: 'media-collector',
         })
+        if (st.listFetchFailed) storyListFetchFailures += 1
+        if (st.rateLimitStoppedEarly) storyRateLimitEarlyStops += 1
         totalProcessed += st.processed
         totalFailed += st.failed
       } catch (loopErr) {
@@ -164,6 +168,8 @@ export async function POST(request: Request) {
       failed: totalFailed,
       skipped_no_token: skippedNoToken,
       skipped_no_client: skippedNoClient,
+      story_list_fetch_failures: storyListFetchFailures,
+      story_rate_limit_early_stops: storyRateLimitEarlyStops,
       token_invalid: tokenInvalid,
       duration_ms: duration,
       status: totalFailed === 0 ? 'success' : 'partial',
@@ -178,6 +184,11 @@ export async function POST(request: Request) {
           `対象: アカウント数 ${(accounts ?? []).length} 件`,
           `クライアント解決不可でスキップ: ${skippedNoClient} 件`,
           `トークン未設定でスキップ: ${skippedNoToken} 件`,
+          ...(storyListFetchFailures > 0 || storyRateLimitEarlyStops > 0
+            ? [
+                `ストーリー一覧: 取得失敗 ${storyListFetchFailures} アカウント / レート制限打切り ${storyRateLimitEarlyStops} アカウント`,
+              ]
+            : []),
         ],
       })
     } else {
@@ -197,6 +208,8 @@ export async function POST(request: Request) {
       accounts: (accounts ?? []).length,
       skipped_no_token: skippedNoToken,
       skipped_no_client: skippedNoClient,
+      story_list_fetch_failures: storyListFetchFailures,
+      story_rate_limit_early_stops: storyRateLimitEarlyStops,
       ...(tokenInvalid ? { token_invalid: true as const } : {}),
       ...(lastErrorMessage ? { last_error: lastErrorMessage } : {}),
       ...(tokenInvalid

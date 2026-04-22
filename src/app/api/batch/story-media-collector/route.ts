@@ -33,14 +33,21 @@ export async function POST(request: Request) {
       skippedNoToken,
       skippedNoClient,
       accountsCount,
+      storyListFetchFailures,
+      storyRateLimitEarlyStops,
     } = await runInstagramStoryMediaSyncAllAccounts(admin, 'story-media-collector')
 
     const duration = Date.now() - startedAt.getTime()
+    const summaryLine =
+      totalFailed > 0
+        ? `ストーリー一覧取得失敗アカウント: ${storyListFetchFailures} 件 / レート制限で打切り: ${storyRateLimitEarlyStops} 件`
+        : null
     if (jobLog) {
       await admin.from('batch_job_logs').update({
         status: totalFailed === 0 ? 'success' : 'partial',
         records_processed: totalProcessed,
         records_failed: totalFailed,
+        error_message: summaryLine,
         finished_at: new Date().toISOString(),
         duration_ms: duration,
       }).eq('id', jobLog.id)
@@ -53,6 +60,8 @@ export async function POST(request: Request) {
       skipped_no_token: skippedNoToken,
       skipped_no_client: skippedNoClient,
       accounts: accountsCount,
+      story_list_fetch_failures: storyListFetchFailures,
+      story_rate_limit_early_stops: storyRateLimitEarlyStops,
       duration_ms: duration,
     })
 
@@ -65,6 +74,9 @@ export async function POST(request: Request) {
           `対象アカウント数: ${accountsCount} 件`,
           `クライアント解決不可でスキップ: ${skippedNoClient} 件`,
           `トークン未設定でスキップ: ${skippedNoToken} 件`,
+          ...(storyRateLimitEarlyStops > 0
+            ? [`レート制限（X-App-Usage）でストーリー一覧の打切り: ${storyRateLimitEarlyStops} アカウント`]
+            : []),
         ],
       })
     } else {
@@ -72,7 +84,13 @@ export async function POST(request: Request) {
         jobName: 'hourly_story_media_collector',
         processed: totalProcessed,
         errorCount: totalFailed,
-        errors: [{ error: `${totalFailed} 件の処理で失敗しました` }],
+        errors: [
+          {
+            error:
+              summaryLine ??
+              `${totalFailed} 件の処理で失敗しました（一覧取得失敗はアカウント単位でカウント）`,
+          },
+        ],
         executedAt: startedAt,
       })
     }
@@ -84,6 +102,8 @@ export async function POST(request: Request) {
       accounts: accountsCount,
       skipped_no_token: skippedNoToken,
       skipped_no_client: skippedNoClient,
+      story_list_fetch_failures: storyListFetchFailures,
+      story_rate_limit_early_stops: storyRateLimitEarlyStops,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
