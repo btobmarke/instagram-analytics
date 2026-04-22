@@ -127,12 +127,30 @@ export interface BreakdownSliceSpec {
   age?: string | null
 }
 
-/** 内訳行の設定（テンプレ保存・編集 UI 共用） */
-export type SummaryBreakdownConfig = {
-  table: 'line_oam_friends_attr'
-  valueField: 'percentage'
-  slices: BreakdownSliceSpec[]
+/** Instagram アカウントインサイト（lifetime）の内訳スライス */
+export interface IgAccountInsightBreakdownSlice {
+  label: string
+  /** ig_account_insight_fact.dimension_code（例: gender, country） */
+  dimension_code: string
+  /** ig_account_insight_fact.dimension_value（例: FEMALE, US） */
+  dimension_value: string
 }
+
+/** 内訳行の設定（テンプレ保存・編集 UI 共用） */
+export type SummaryBreakdownConfig =
+  | {
+      table: 'line_oam_friends_attr'
+      valueField: 'percentage'
+      slices: BreakdownSliceSpec[]
+    }
+  | {
+      table: 'ig_account_insight_fact'
+      /** 例: follower_demographics, engaged_audience_demographics */
+      metricCode: string
+      period: 'lifetime'
+      valueField: 'value'
+      slices: IgAccountInsightBreakdownSlice[]
+    }
 
 export interface StoredTemplateRow {
   id: string

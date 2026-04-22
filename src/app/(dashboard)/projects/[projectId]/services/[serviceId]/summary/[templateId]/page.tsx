@@ -21,6 +21,10 @@ import { getMetricCatalog } from '../_lib/catalog'
 import { getTemplate, updateTemplate } from '../_lib/store'
 import { generateJstDayPeriodLabels, generateCustomRangePeriod } from '@/lib/summary/jst-periods'
 import { DEFAULT_LINE_FRIENDS_ATTR_SLICES } from '@/lib/summary/line-friends-attr-default-slices'
+import {
+  DEFAULT_INSTAGRAM_FOLLOWER_DEMO_SLICES,
+  DEFAULT_INSTAGRAM_ENGAGED_DEMO_SLICES,
+} from '@/lib/summary/instagram-breakdown-default-slices'
 import { buildFormulaPlainLanguageSummary } from '@/lib/summary/formula-humanize'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
@@ -862,6 +866,56 @@ export default function TemplateEditorPage({
                   内訳行を追加
                 </button>
               )}
+              {serviceType === 'instagram' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = `breakdown.ig.follower.${Date.now()}`
+                      setRows(prev => [...prev, {
+                        id,
+                        label: 'フォロワー層（内訳・lifetime）',
+                        rowKind: 'breakdown',
+                        breakdown: {
+                          table: 'ig_account_insight_fact',
+                          metricCode: 'follower_demographics',
+                          period: 'lifetime',
+                          valueField: 'value',
+                          slices: [...DEFAULT_INSTAGRAM_FOLLOWER_DEMO_SLICES],
+                        },
+                        cells: Object.fromEntries(timeHeaders.map(h => [h, ''])),
+                      }])
+                      setIsDirty(true)
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-lg bg-pink-600 text-white hover:bg-pink-700 transition shadow-sm whitespace-nowrap"
+                  >
+                    内訳（フォロワー層）
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = `breakdown.ig.engaged.${Date.now()}`
+                      setRows(prev => [...prev, {
+                        id,
+                        label: 'エンゲージ層（内訳・lifetime）',
+                        rowKind: 'breakdown',
+                        breakdown: {
+                          table: 'ig_account_insight_fact',
+                          metricCode: 'engaged_audience_demographics',
+                          period: 'lifetime',
+                          valueField: 'value',
+                          slices: [...DEFAULT_INSTAGRAM_ENGAGED_DEMO_SLICES],
+                        },
+                        cells: Object.fromEntries(timeHeaders.map(h => [h, ''])),
+                      }])
+                      setIsDirty(true)
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium rounded-lg bg-fuchsia-600 text-white hover:bg-fuchsia-700 transition shadow-sm whitespace-nowrap"
+                  >
+                    内訳（エンゲージ層）
+                  </button>
+                </>
+              )}
             </div>
             {/* カテゴリタブ */}
             <div className="flex gap-1 overflow-x-auto pb-1">
@@ -959,7 +1013,11 @@ export default function TemplateEditorPage({
                           <div className="flex items-center gap-2 flex-wrap">
                             <div className="text-xs font-medium text-gray-800">{row.label}</div>
                             {isBd && (
-                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">内訳</span>
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                                row.breakdown?.table === 'ig_account_insight_fact'
+                                  ? 'bg-pink-100 text-pink-800'
+                                  : 'bg-emerald-100 text-emerald-800'
+                              }`}>内訳</span>
                             )}
                           </div>
                           {srcCard?.formula && <div className="text-[9px] text-amber-500 font-mono mt-0.5">{formatFormula(srcCard.formula, id => allCards.find(c => c.id === id)?.label ?? id)}</div>}
@@ -1008,7 +1066,7 @@ export default function TemplateEditorPage({
           catalog={catalog}
           customCards={customCards}
           editTarget={editingCustomCard}
-          showThresholdControls={serviceType === 'gbp' || serviceType === 'line'}
+          showThresholdControls={serviceType === 'gbp' || serviceType === 'line' || serviceType === 'instagram'}
           onSave={handleSaveCustomCard}
           onClose={() => { setShowFormulaModal(false); setEditingCustomCard(null) }}
         />

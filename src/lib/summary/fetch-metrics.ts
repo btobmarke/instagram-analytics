@@ -899,6 +899,79 @@ export async function fetchLineOamFriendsAttrBreakdownsByRow(
   return merged
 }
 
+export type IgAccountInsightBreakdownSlice = {
+  label: string
+  dimension_code: string
+  dimension_value: string
+}
+
+/**
+ * Instagram アカウント lifetime インサイトの内訳（最新 value_date の値を各期間列に複製）
+ */
+export async function fetchIgAccountInsightBreakdown(
+  supabase: SupabaseServerClient,
+  serviceId: string,
+  metricCode: string,
+  slices: IgAccountInsightBreakdownSlice[],
+  periods: Period[],
+): Promise<Record<string, Array<{ label: string; value: number | null }>>> {
+  const out: Record<string, Array<{ label: string; value: number | null }>> = {}
+  if (slices.length === 0) return out
+
+  const { data: igRow } = await supabase
+    .from('ig_accounts')
+    .select('id')
+    .eq('service_id', serviceId)
+    .maybeSingle()
+  if (!igRow) {
+    for (const p of periods) {
+      out[p.label] = slices.map((s) => ({ label: s.label, value: null }))
+    }
+    return out
+  }
+  const accountId = igRow.id as string
+
+  const sliceVals: Array<{ label: string; value: number | null }> = []
+  for (const sl of slices) {
+    const { data: row } = await supabase
+      .from('ig_account_insight_fact')
+      .select('value')
+      .eq('account_id', accountId)
+      .eq('metric_code', metricCode)
+      .eq('period_code', 'lifetime')
+      .eq('dimension_code', sl.dimension_code)
+      .eq('dimension_value', sl.dimension_value)
+      .order('value_date', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const v = row?.value
+    sliceVals.push({
+      label: sl.label,
+      value: v != null && typeof v === 'number' && Number.isFinite(v) ? v : null,
+    })
+  }
+
+  for (const p of periods) {
+    out[p.label] = sliceVals.map((s) => ({ ...s }))
+  }
+  return out
+}
+
+export async function fetchIgAccountInsightBreakdownsByRow(
+  supabase: SupabaseServerClient,
+  serviceId: string,
+  configs: { rowId: string; metricCode: string; slices: IgAccountInsightBreakdownSlice[] }[],
+  periods: Period[],
+): Promise<Record<string, Record<string, Array<{ label: string; value: number | null }>>>> {
+  const merged: Record<string, Record<string, Array<{ label: string; value: number | null }>>> = {}
+  await Promise.all(
+    configs.map(async ({ rowId, metricCode, slices }) => {
+      merged[rowId] = await fetchIgAccountInsightBreakdown(supabase, serviceId, metricCode, slices, periods)
+    }),
+  )
+  return merged
+}
+
 /**
  * line_oam_friends_daily
  * 直接カラム、date DATE, service_id FK

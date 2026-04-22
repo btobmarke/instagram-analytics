@@ -94,10 +94,20 @@ function formatPctCell(value: number | null): string {
   return `${value.toLocaleString('ja-JP', { maximumFractionDigits: 2 })}%`
 }
 
+function formatBreakdownValue(value: number | null, mode: 'percent' | 'integer'): string {
+  if (value === null) return '—'
+  if (mode === 'percent') return formatPctCell(value)
+  if (Number.isInteger(value)) return value.toLocaleString('ja-JP')
+  return value.toLocaleString('ja-JP', { maximumFractionDigits: 2 })
+}
+
 function BreakdownMiniTable({
   slices,
+  valueMode = 'percent',
 }: {
   slices: { label: string; value: number | null }[]
+  /** LINE 属性は %、Instagram lifetime は人数など整数表示 */
+  valueMode?: 'percent' | 'integer'
 }) {
   if (slices.length === 0) {
     return <span className="text-gray-300 text-xs">—</span>
@@ -112,7 +122,7 @@ function BreakdownMiniTable({
                 {s.label}
               </td>
               <td className="py-0.5 text-gray-800 font-mono text-right whitespace-nowrap">
-                {formatPctCell(s.value)}
+                {formatBreakdownValue(s.value, valueMode)}
               </td>
             </tr>
           ))}
@@ -365,7 +375,7 @@ function ServiceSummaryChartView({
           return (
             <div key={`chart-${rowIdx}-${row.id}`} className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
               <p className="text-xs text-gray-500">{allCards.find(c => c.id === row.id)?.label ?? row.label}</p>
-              <p className="text-[11px] text-gray-400 mt-2">内訳行は表モードで表示します。</p>
+              <p className="text-[11px] text-gray-400 mt-2">内訳行は表モードで表示します（グラフには出しません）。</p>
             </div>
           )
         }
@@ -679,13 +689,13 @@ export default function SummaryViewPage({
   }, [template, serviceType, libraryCards])
 
   const breakdownRows = useMemo(() => {
-    if (!template) return [] as { rowId: string; slices: NonNullable<StoredTemplateRow['breakdown']>['slices'] }[]
+    if (!template) return [] as Array<{
+      rowId: string
+      breakdown: NonNullable<StoredTemplateRow['breakdown']>
+    }>
     return template.rows
-      .filter((r) => r.rowKind === 'breakdown' && r.breakdown?.table === 'line_oam_friends_attr')
-      .map((r) => ({
-        rowId: r.id,
-        slices: r.breakdown!.slices,
-      }))
+      .filter((r) => r.rowKind === 'breakdown' && r.breakdown)
+      .map((r) => ({ rowId: r.id, breakdown: r.breakdown! }))
   }, [template])
 
   const summaryQueryBody = useMemo(() => {
@@ -703,11 +713,18 @@ export default function SummaryViewPage({
       body.rangeEnd = template.rangeEnd
     }
     if (breakdownRows.length > 0) {
-      body.breakdowns = breakdownRows.map((b) => ({
-        rowId: b.rowId,
-        table: 'line_oam_friends_attr' as const,
-        slices: b.slices,
-      }))
+      body.breakdowns = breakdownRows.map(({ rowId, breakdown }) => {
+        if (breakdown.table === 'line_oam_friends_attr') {
+          return { rowId, table: 'line_oam_friends_attr' as const, slices: breakdown.slices }
+        }
+        return {
+          rowId,
+          table: 'ig_account_insight_fact' as const,
+          metricCode: breakdown.metricCode,
+          period: 'lifetime' as const,
+          slices: breakdown.slices,
+        }
+      })
     }
     return body
   }, [template, allFieldRefs, breakdownRows])
@@ -989,7 +1006,10 @@ export default function SummaryViewPage({
                                 <div className="text-xs font-medium text-gray-800">{srcCard?.label ?? row.label}</div>
                                 {isBreakdown && row.breakdown && (
                                   <div className="text-[9px] text-emerald-700 mt-0.5">
-                                    内訳 {row.breakdown.slices.length} 件（LINE 友だち属性・割合%）
+                                    内訳 {row.breakdown.slices.length} 件
+                                    {row.breakdown.table === 'line_oam_friends_attr'
+                                      ? '（LINE 友だち属性・%）'
+                                      : `（IG ${row.breakdown.metricCode}・lifetime）`}
                                   </div>
                                 )}
                                 {formula ? (
@@ -1022,9 +1042,10 @@ export default function SummaryViewPage({
                             }
                             if (isBreakdown) {
                               const slices = breakdownByRow[row.id]?.[h] ?? []
+                              const igBd = row.breakdown?.table === 'ig_account_insight_fact'
                               return (
                                 <td key={h} className="px-2 py-2 text-center align-top">
-                                  <BreakdownMiniTable slices={slices} />
+                                  <BreakdownMiniTable slices={slices} valueMode={igBd ? 'integer' : 'percent'} />
                                 </td>
                               )
                             }
@@ -1121,7 +1142,9 @@ export default function SummaryViewPage({
               label: infoRow.label,
               category: '内訳',
               fieldRef: infoRow.breakdown
-                ? `line_oam_friends_attr（${infoRow.breakdown.slices.length} スライス）`
+                ? infoRow.breakdown.table === 'line_oam_friends_attr'
+                  ? `line_oam_friends_attr（${infoRow.breakdown.slices.length} スライス）`
+                  : `ig_account_insight_fact / ${infoRow.breakdown.metricCode}（${infoRow.breakdown.slices.length} スライス）`
                 : infoRow.id,
             }
           }
