@@ -78,10 +78,29 @@ function loadMerged(storageKey: string, cols: readonly { id: string }[]): Record
     const raw = localStorage.getItem(storageKey)
     if (!raw) return base
     const parsed = JSON.parse(raw) as Record<string, boolean>
-    return { ...base, ...parsed }
+    const merged = { ...base }
+    for (const c of cols) {
+      if (Object.prototype.hasOwnProperty.call(parsed, c.id)) {
+        merged[c.id] = parsed[c.id]
+      }
+    }
+    return merged
   } catch {
     return base
   }
+}
+
+/** 現在の列セットに含まれる列だけ表示。`visible` にキーが無いときは列の既定（オフ列は false） */
+export function isColumnVisible(
+  visible: Record<string, boolean>,
+  columns: readonly { id: string }[],
+  id: string
+): boolean {
+  if (!columns.some(c => c.id === id)) return false
+  if (Object.prototype.hasOwnProperty.call(visible, id)) {
+    return visible[id] !== false
+  }
+  return defaultPostListColumnVisibility(columns)[id] !== false
 }
 
 export function usePostListColumnVisibility(storageKey: string, columns: readonly { id: string; label: string }[]) {
@@ -103,7 +122,10 @@ export function usePostListColumnVisibility(storageKey: string, columns: readonl
     })
   }, [storageKey])
 
-  const isOn = useCallback((id: string) => visible[id] !== false, [visible])
+  const isOn = useCallback(
+    (id: string) => isColumnVisible(visible, columns, id),
+    [visible, columns]
+  )
 
   return { visible, isOn, toggle }
 }
@@ -129,7 +151,7 @@ export function PostListColumnToggles({
             <input
               type="checkbox"
               className={postListFancyCheckboxSmClass}
-              checked={visible[c.id] !== false}
+              checked={isColumnVisible(visible, columns, c.id)}
               onChange={e => onToggle(c.id, e.target.checked)}
             />
             <span>{c.label}</span>
