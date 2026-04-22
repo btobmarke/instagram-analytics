@@ -97,10 +97,28 @@ function DraggableCard({ card, isInTable, onEdit, onDelete }: {
           {card.formula ? formatFormula(card.formula, id => id, 'id') : card.fieldRef}
         </span>
       </div>
-      {isCustom && !isInTable && (
+      {isCustom && (
         <div className="absolute -top-1 -right-1 hidden group-hover:flex gap-0.5">
-          {onEdit && <button onClick={e => { e.stopPropagation(); onEdit() }} className="w-4 h-4 rounded-full bg-amber-400 text-white flex items-center justify-center hover:bg-amber-500" title="編集"><svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg></button>}
-          {onDelete && <button onClick={e => { e.stopPropagation(); onDelete() }} className="w-4 h-4 rounded-full bg-red-400 text-white flex items-center justify-center hover:bg-red-500" title="削除"><svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>}
+          {onEdit && (
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); e.preventDefault(); onEdit() }}
+              className="w-4 h-4 rounded-full bg-amber-400 text-white flex items-center justify-center hover:bg-amber-500"
+              title={isInTable ? '計算式・名前を編集（テーブルに追加済みでも変更できます）' : '編集'}
+            >
+              <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); e.preventDefault(); onDelete() }}
+              className="w-4 h-4 rounded-full bg-red-400 text-white flex items-center justify-center hover:bg-red-500"
+              title="ライブラリから削除（テンプレの行も消えます）"
+            >
+              <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -126,12 +144,14 @@ function SortableTemplateTableRow({
   timeHeaders,
   allCards,
   onRemove,
+  onEditCustom,
 }: {
   row: TableRow
   rowIndex: number
   timeHeaders: string[]
   allCards: MetricCard[]
   onRemove: () => void
+  onEditCustom?: (card: MetricCard) => void
 }) {
   const sortId = tableRowSortId(row.id)
   const {
@@ -200,11 +220,25 @@ function SortableTemplateTableRow({
         </td>
       ))}
       <td className="px-2 py-2.5 text-center">
-        <button onClick={onRemove} className="text-gray-300 transition hover:text-red-500" title="行を削除" type="button">
-          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <div className="flex items-center justify-center gap-1">
+          {srcCard?.formula && onEditCustom && (
+            <button
+              type="button"
+              onClick={() => onEditCustom(srcCard)}
+              className="rounded p-1 text-amber-500 transition hover:bg-amber-50 hover:text-amber-700"
+              title="カスタム指標を編集"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              </svg>
+            </button>
+          )}
+          <button onClick={onRemove} className="rounded p-1 text-gray-300 transition hover:bg-red-50 hover:text-red-500" title="行を削除" type="button">
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </td>
     </tr>
   )
@@ -1189,6 +1223,10 @@ export default function TemplateEditorPage({
                         timeHeaders={timeHeaders}
                         allCards={allCards}
                         onRemove={() => removeRowById(row.id)}
+                        onEditCustom={card => {
+                          setEditingCustomCard(card)
+                          setShowFormulaModal(true)
+                        }}
                       />
                     ))}
                   </SortableContext>
@@ -1221,6 +1259,7 @@ export default function TemplateEditorPage({
       {/* フォーミュラビルダーモーダル */}
       {showFormulaModal && (
         <FormulaBuilderModal
+          key={editingCustomCard?.id ?? 'new-custom-metric'}
           catalog={catalog}
           customCards={customCards}
           editTarget={editingCustomCard}
