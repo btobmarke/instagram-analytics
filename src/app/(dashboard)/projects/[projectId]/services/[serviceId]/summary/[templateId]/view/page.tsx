@@ -13,6 +13,7 @@ import { TIME_UNIT_LABELS, OPERATOR_SYMBOLS, formatFormula } from '../../_lib/ty
 import { getMetricCatalog } from '../../_lib/catalog'
 import { getTemplate } from '../../_lib/store'
 import { generateJstDayPeriodLabels, generateJstDayPeriods, generateCustomRangePeriod } from '@/lib/summary/jst-periods'
+import { evalServiceSummaryFormula } from '@/lib/summary/eval-service-formula'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -64,58 +65,7 @@ function isSummaryDataFieldRef(ref: string): boolean {
   return true
 }
 
-/**
- * フォーミュラを期間ごとに計算
- * + / − は欠損（null）を 0 として足し引き（片方だけデータがある合算を表示するため）
- * × / ÷ はいずれか欠損なら null
- */
-function evalFormula(
-  formula: FormulaNode,
-  rawData: Record<string, Record<string, number | null>>,
-  label: string,
-): number | null {
-  let sawNumeric = false
-  const get = (id: string): number | null => {
-    const v = rawData[id]?.[label]
-    if (v !== null && v !== undefined) sawNumeric = true
-    return v ?? null
-  }
-
-  const asPlusMinus = (v: number | null) => (v === null ? 0 : v)
-
-  let result: number | null = get(formula.baseOperandId)
-
-  for (const step of formula.steps) {
-    const operand = get(step.operandId)
-    switch (step.operator) {
-      case '+':
-        result = asPlusMinus(result) + asPlusMinus(operand)
-        break
-      case '-':
-        result = asPlusMinus(result) - asPlusMinus(operand)
-        break
-      case '*': {
-        if (result === null || operand === null) return null
-        result *= operand
-        break
-      }
-      case '/': {
-        if (result === null || operand === null) return null
-        if (operand === 0) return null
-        result /= operand
-        break
-      }
-    }
-  }
-
-  if (!sawNumeric) return null
-  const rounded = Math.round((result ?? 0) * 100) / 100
-  const tm = formula.thresholdMode ?? 'none'
-  const tv = formula.thresholdValue
-  if (tm === 'gte' && tv != null && rounded < tv) return null
-  if (tm === 'lte' && tv != null && rounded > tv) return null
-  return rounded
-}
+const evalFormula = evalServiceSummaryFormula
 
 /** 数値を読みやすい形式にフォーマット（rowId: マイクロ単位・CTR の表示調整用） */
 function formatCell(value: number | null, rowId?: string): string {
