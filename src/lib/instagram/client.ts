@@ -286,7 +286,9 @@ export class InstagramClient {
       FEED: 'views,reach,likes,comments,shares,saved,profile_visits,follows,total_interactions',
       REELS: 'views,reach,likes,comments,shares,saved,ig_reels_video_view_total_time,ig_reels_avg_watch_time,total_interactions',
       VIDEO: 'views,reach,likes,comments,shares,saved,total_interactions',
-      STORY: 'views,reach,taps_forward,taps_back,exits,replies',
+      // v22+: taps_forward / taps_back / exits はこのエンドポイントの metric 列挙に不可。
+      // ナビ系は getMediaStoryNavigationInsights（navigation breakdown）＋ legacy コードへの複写で補う。
+      STORY: 'views,reach,replies',
     }
     return this.fetch(
       `/${mediaId}/insights`,

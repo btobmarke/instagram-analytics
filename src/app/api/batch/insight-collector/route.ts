@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { InstagramApiError, InstagramClient, isRateLimitExceeded } from '@/lib/instagram/client'
+import { legacyStoryMetricCodeFromNavigationDimension } from '@/lib/instagram/story-navigation-legacy-metric'
 import { resolveClientIdFromServiceJoin } from '@/lib/batch/resolve-service-client-id'
 import { decrypt } from '@/lib/utils/crypto'
 import { validateBatchRequest } from '@/lib/utils/batch-auth'
@@ -250,6 +251,16 @@ export async function POST(request: Request) {
                     snapshot_at: snapshotAt,
                     value: typeof r.value === 'number' ? r.value : null,
                   }, { onConflict: 'media_id,metric_code,period_code,snapshot_at' })
+                  const legacyCode = legacyStoryMetricCodeFromNavigationDimension(action)
+                  if (legacyCode != null) {
+                    await admin.from('ig_media_insight_fact').upsert({
+                      media_id: media.id,
+                      metric_code: legacyCode,
+                      period_code: 'lifetime',
+                      snapshot_at: snapshotAt,
+                      value: typeof r.value === 'number' ? r.value : null,
+                    }, { onConflict: 'media_id,metric_code,period_code,snapshot_at' })
+                  }
                 }
               }
             } catch (navErr) {
