@@ -5,10 +5,26 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import {
-  DndContext, DragOverlay, useSensor, useSensors, PointerSensor,
-  useDroppable, useDraggable,
-  type DragStartEvent, type DragEndEvent,
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  useDroppable,
+  useDraggable,
+  type DragStartEvent,
+  type DragEndEvent,
 } from '@dnd-kit/core'
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import type {
   ServiceDetail, MetricCard, FormulaNode, FormulaStep,
   FormulaBinaryOperator, FormulaNAryOperator, FormulaOperandTimeOp, FormulaThresholdMode,
@@ -57,10 +73,16 @@ function MetricTooltip({ description, isCustom }: { description?: string; isCust
 }
 
 // ── ドラッグ可能カード ──────────────────────────────────────────
+/** パレット上のカードとテーブル行 id（= card.id）の衝突を避ける */
+const paletteDragId = (cardId: string) => `palette:${cardId}`
+
 function DraggableCard({ card, isInTable, onEdit, onDelete }: {
   card: MetricCard; isInTable: boolean; onEdit?: () => void; onDelete?: () => void
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: card.id, data: { card } })
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: paletteDragId(card.id),
+    data: { type: 'palette' as const, card },
+  })
   const style = transform ? { transform: `translate(${transform.x}px,${transform.y}px)` } : undefined
   const isCustom = !!card.formula
   return (
@@ -92,6 +114,99 @@ function TableDropZone({ children }: { children: React.ReactNode }) {
     <div ref={setNodeRef} className={`min-h-[200px] rounded-xl border-2 transition ${isOver ? 'border-purple-400 bg-purple-50/50' : 'border-dashed border-gray-200 bg-white'}`}>
       {children}
     </div>
+  )
+}
+
+const tableRowSortId = (rowId: string) => `table-row:${rowId}`
+
+/** テンプレート表の行（縦の並び順をドラッグで変更） */
+function SortableTemplateTableRow({
+  row,
+  rowIndex,
+  timeHeaders,
+  allCards,
+  onRemove,
+}: {
+  row: TableRow
+  rowIndex: number
+  timeHeaders: string[]
+  allCards: MetricCard[]
+  onRemove: () => void
+}) {
+  const sortId = tableRowSortId(row.id)
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: sortId, data: { type: 'row' as const, rowIndex } })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.65 : undefined,
+  }
+
+  const srcCard = allCards.find(c => c.id === row.id)
+  const isBd = row.rowKind === 'breakdown'
+
+  return (
+    <tr ref={setNodeRef} style={style} className="border-b border-gray-100 hover:bg-gray-50/50">
+      <td className="sticky left-0 z-10 border-r border-gray-100 bg-white px-2 py-2.5">
+        <div className="flex min-w-0 items-start gap-2">
+          <button
+            type="button"
+            className="mt-0.5 flex h-7 w-7 flex-shrink-0 cursor-grab touch-none items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600 active:cursor-grabbing"
+            title="ドラッグして表示順を変更"
+            aria-label="行の並び替え"
+            {...attributes}
+            {...listeners}
+          >
+            <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 16 16" aria-hidden>
+              <path d="M2 5h2v2H2V5zm5 0h2v2H7V5zm5 0h2v2h-2V5zM2 9h2v2H2V9zm5 0h2v2H7V9zm5 0h2v2h-2V9z" />
+            </svg>
+          </button>
+          <div className="min-w-0 flex-1 pr-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-xs font-medium text-gray-800">{row.label}</div>
+              {isBd && (
+                <span
+                  className={`rounded px-1.5 py-0.5 text-[9px] ${
+                    row.breakdown?.table === 'ig_account_insight_fact'
+                      ? 'bg-pink-100 text-pink-800'
+                      : 'bg-emerald-100 text-emerald-800'
+                  }`}
+                >
+                  内訳
+                </span>
+              )}
+            </div>
+            {srcCard?.formula && (
+              <div className="mt-0.5 font-mono text-[9px] text-amber-500">
+                {formatFormula(srcCard.formula, id => allCards.find(c => c.id === id)?.label ?? id)}
+              </div>
+            )}
+            {isBd && row.breakdown && (
+              <div className="mt-0.5 text-[9px] text-gray-500">{row.breakdown.slices.length} スライス（保存でテンプレに記録）</div>
+            )}
+          </div>
+        </div>
+      </td>
+      {timeHeaders.map(h => (
+        <td key={h} className="px-3 py-2.5 text-center text-xs text-gray-400">
+          —
+        </td>
+      ))}
+      <td className="px-2 py-2.5 text-center">
+        <button onClick={onRemove} className="text-gray-300 transition hover:text-red-500" title="行を削除" type="button">
+          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </td>
+    </tr>
   )
 }
 
@@ -680,29 +795,80 @@ export default function TemplateEditorPage({
     setOpenCategories(prev => cats.every(c => prev.has(c)) ? new Set() : new Set(cats))
   }, [groupedFiltered])
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+    useSensor(KeyboardSensor, {}),
+  )
   const [activeCard, setActiveCard] = useState<MetricCard | null>(null)
 
   const handleDragStart = (e: DragStartEvent) => {
-    const c = e.active.data.current?.card as MetricCard | undefined
-    if (c) setActiveCard(c)
+    if (String(e.active.id).startsWith('palette:')) {
+      const c = e.active.data.current?.card as MetricCard | undefined
+      if (c) setActiveCard(c)
+    }
   }
+  const handleDragCancel = () => {
+    setActiveCard(null)
+  }
+
   const handleDragEnd = (e: DragEndEvent) => {
     setActiveCard(null)
     const { active, over } = e
-    if (!over || over.id !== 'table-drop-zone') return
+    if (!over) return
+
+    const activeStr = String(active.id)
+    const overStr = String(over.id)
+
+    // テーブル行の並べ替え
+    if (activeStr.startsWith('table-row:')) {
+      if (overStr.startsWith('table-row:')) {
+        const activeRowId = activeStr.slice('table-row:'.length)
+        const overRowId = overStr.slice('table-row:'.length)
+        if (activeRowId !== overRowId) {
+          setRows(prev => {
+            const oldIndex = prev.findIndex(r => r.id === activeRowId)
+            const newIndex = prev.findIndex(r => r.id === overRowId)
+            if (oldIndex === -1 || newIndex === -1) return prev
+            return arrayMove(prev, oldIndex, newIndex)
+          })
+          setIsDirty(true)
+        }
+      }
+      return
+    }
+
+    // パレットから行を追加
+    if (!activeStr.startsWith('palette:')) return
     const c = active.data.current?.card as MetricCard | undefined
     if (!c || addedIds.has(c.id)) return
-    setRows(prev => [...prev, {
+    const newRow: TableRow = {
       id: c.id,
       label: c.label,
       rowKind: 'scalar',
       cells: Object.fromEntries(timeHeaders.map(h => [h, ''])),
-    }])
-    setIsDirty(true)
+    }
+
+    if (overStr === 'table-drop-zone') {
+      setRows(prev => [...prev, newRow])
+      setIsDirty(true)
+      return
+    }
+    if (overStr.startsWith('table-row:')) {
+      const overRowId = overStr.slice('table-row:'.length)
+      setRows(prev => {
+        const idx = prev.findIndex(r => r.id === overRowId)
+        if (idx === -1) return [...prev, newRow]
+        const next = [...prev]
+        next.splice(idx, 0, newRow)
+        return next
+      })
+      setIsDirty(true)
+    }
   }
-  const removeRowAt = (index: number) => {
-    setRows(prev => prev.filter((_, i) => i !== index))
+
+  const removeRowById = (rowId: string) => {
+    setRows(prev => prev.filter(r => r.id !== rowId))
     setIsDirty(true)
   }
 
@@ -757,7 +923,14 @@ export default function TemplateEditorPage({
   if (!template) return <div className="p-8 text-center text-gray-400 text-sm">読み込み中...</div>
 
   return (
-    <DndContext id={dndId} sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+    <DndContext
+      id={dndId}
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragCancel={handleDragCancel}
+      onDragEnd={handleDragEnd}
+    >
       <div className="p-6 w-full max-w-none min-w-0">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-sm text-gray-400 mb-4 flex-wrap">
@@ -777,7 +950,9 @@ export default function TemplateEditorPage({
               onChange={e => { setTemplateName(e.target.value); setIsDirty(true) }}
               className="text-xl font-bold text-gray-900 bg-transparent border-b border-transparent hover:border-gray-300 focus:border-purple-400 focus:outline-none px-0 py-0.5 w-full"
             />
-            <p className="text-xs text-gray-500 mt-1">カードをテーブルにドラッグして項目を追加 · 編集後は保存ボタンを押してください</p>
+            <p className="text-xs text-gray-500 mt-1">
+              指標カードをテーブルにドラッグして追加 · 表の左端の⋮をドラッグして行の表示順を変更 · 編集後は保存してください
+            </p>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             {/* 横軸 */}
@@ -992,7 +1167,7 @@ export default function TemplateEditorPage({
             <div className="flex flex-col items-center justify-center py-16 text-gray-400">
               <svg className="w-10 h-10 mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 14l-7 7m0 0l-7-7m7 7V3" /></svg>
               <p className="text-sm font-medium">指標カードをここにドロップ</p>
-              <p className="text-xs mt-1">テーブルの縦軸に項目が追加されます</p>
+              <p className="text-xs mt-1">テーブルの縦軸に項目が追加されます（追加後は左端の⋮で並び替え）</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -1005,36 +1180,18 @@ export default function TemplateEditorPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row, idx) => {
-                    const srcCard = allCards.find(c => c.id === row.id)
-                    const isBd = row.rowKind === 'breakdown'
-                    return (
-                      <tr key={`row-${idx}-${row.id}`} className="border-b border-gray-100 hover:bg-gray-50/50">
-                        <td className="sticky left-0 bg-white px-4 py-2.5 z-10">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <div className="text-xs font-medium text-gray-800">{row.label}</div>
-                            {isBd && (
-                              <span className={`text-[9px] px-1.5 py-0.5 rounded ${
-                                row.breakdown?.table === 'ig_account_insight_fact'
-                                  ? 'bg-pink-100 text-pink-800'
-                                  : 'bg-emerald-100 text-emerald-800'
-                              }`}>内訳</span>
-                            )}
-                          </div>
-                          {srcCard?.formula && <div className="text-[9px] text-amber-500 font-mono mt-0.5">{formatFormula(srcCard.formula, id => allCards.find(c => c.id === id)?.label ?? id)}</div>}
-                          {isBd && row.breakdown && (
-                            <div className="text-[9px] text-gray-500 mt-0.5">{row.breakdown.slices.length} スライス（保存でテンプレに記録）</div>
-                          )}
-                        </td>
-                        {timeHeaders.map(h => <td key={h} className="px-3 py-2.5 text-center text-xs text-gray-400">—</td>)}
-                        <td className="px-2 py-2.5 text-center">
-                          <button onClick={() => removeRowAt(idx)} className="text-gray-300 hover:text-red-500 transition" title="行を削除">
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
+                  <SortableContext items={rows.map(r => tableRowSortId(r.id))} strategy={verticalListSortingStrategy}>
+                    {rows.map((row, idx) => (
+                      <SortableTemplateTableRow
+                        key={`row-${row.id}-${idx}`}
+                        row={row}
+                        rowIndex={idx}
+                        timeHeaders={timeHeaders}
+                        allCards={allCards}
+                        onRemove={() => removeRowById(row.id)}
+                      />
+                    ))}
+                  </SortableContext>
                 </tbody>
               </table>
             </div>
