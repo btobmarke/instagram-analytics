@@ -49,7 +49,7 @@ const JOB_META: Record<string, JobMeta> = {
     label: '投稿一覧同期（フィード／リール中心）',
     description: '直近90日のメディアを日次で同期。ストーリーの鮮度は hourly_story_media_collector が担う',
     category: 'Instagram',
-    frequency: '毎日',
+    frequency: '1日2回（JST 0:00・12:00）',
   },
   hourly_story_media_collector: {
     label: 'ストーリー投稿同期',
