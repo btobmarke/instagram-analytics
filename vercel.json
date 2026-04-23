@@ -5,6 +5,10 @@
   },
   "crons": [
     {
+      "path": "/api/internal/batch-queue-worker?limit=8",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/batch/cron-groups/g2",
       "schedule": "0,15,30 2 * * *"
     },

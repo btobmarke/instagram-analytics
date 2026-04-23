@@ -9,6 +9,23 @@
 - 各バッチは従来どおり **全体処理**（プロジェクト単位分割・メッセージキューは**未導入**）
 - 認証は `validateBatchRequest`（`CRON_SECRET` / `BATCH_SECRET`）
 
+### 実装済み（2026-02 時点のスナップショット）
+
+| 領域 | 内容 |
+|------|------|
+| Phase 0（一部） | `cron-groups` の構造化ログ・`notifyBatchError`；`eslint.config.mjs` を FlatCompat 化；`npm run lint:batch` でキュー関連のみ lint |
+| キュー基盤 | **`batch_job_queue` + `dequeue_batch_jobs`**（migration `063_*`）、`src/lib/batch/batch-queue.ts`、**`POST /api/internal/batch-queue-worker`**、Vercel Cron **毎分** |
+| 代表ジョブ | **`weather_sync` のみ**キュー化。`/api/batch/weather-sync` は既定で enqueue のみ（`BATCH_QUEUE_DISABLED=true` で従来一括） |
+| 手動・履歴 | **`POST /api/batch/weather-sync/enqueue`**（project / all + secret）、**`GET /api/projects/:id/batch-logs`**、`batch_job_logs` に `project_id` 等カラム |
+| ドキュメント | `docs/batch-queue-runbook.md`、`docs/adr/001-batch-queue-postgres.md` |
+
+### 未完了（この計画書の残り）
+
+- **他ジョブのキュー化**（insight-collector 等すべて）
+- **外部キュー（Inngest/QStash）**への差し替えは未着手（ADR は Postgres 第一版）
+- **全リポジトリの `npm run lint` クリーン**（既存ファイルの大量 violation）
+- **DB staging・ジョブ別 concurrency の本番チューニング**（ワーカーは `limit` のみ）
+
 ---
 
 ## 1. ゴール（この計画で「完了」とみなす状態）

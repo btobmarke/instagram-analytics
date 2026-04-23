@@ -11,6 +11,7 @@ import {
   isCronGroupId,
 } from '@/lib/batch/cron-groups'
 import { logBatchAuthFailure, validateBatchRequest } from '@/lib/utils/batch-auth'
+import { notifyBatchError } from '@/lib/batch-notify'
 
 function getDeploymentOrigin(): string | null {
   const explicit = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '')
@@ -69,6 +70,13 @@ export async function POST(
   }
 
   if (due.length === 0) {
+    console.info('[cron-groups] tick', {
+      event: 'cron_group_tick',
+      group: groupId,
+      label: def.label,
+      now: now.toISOString(),
+      due: [],
+    })
     return NextResponse.json({
       ok: true,
       group: groupId,
@@ -78,6 +86,16 @@ export async function POST(
       message: 'No batch matched this cron tick (expected for sparse schedules)',
     })
   }
+
+  const tickStarted = Date.now()
+  console.info('[cron-groups] tick', {
+    event: 'cron_group_tick',
+    group: groupId,
+    label: def.label,
+    now: now.toISOString(),
+    due,
+    parallel: true,
+  })
 
   const settled = await Promise.all(
     due.map(async (slug) => {
@@ -111,6 +129,33 @@ export async function POST(
   )
 
   const results = [...settled]
+  const durationMs = Date.now() - tickStarted
+
+  const failed = results.filter((r) => !r.ok)
+  console.info('[cron-groups] tick_done', {
+    event: 'cron_group_tick_done',
+    group: groupId,
+    duration_ms: durationMs,
+    ok: failed.length === 0,
+    results: results.map((r) => ({
+      slug: r.slug,
+      ok: r.ok,
+      status: r.status,
+      error: 'error' in r ? r.error : undefined,
+    })),
+  })
+
+  if (failed.length > 0) {
+    await notifyBatchError({
+      jobName: `cron_group:${groupId}`,
+      processed: results.length - failed.length,
+      errorCount: failed.length,
+      errors: failed.map((r) => ({
+        error: `${r.slug}: ${'error' in r && r.error ? r.error : `HTTP ${r.status ?? '?'}`}`,
+      })),
+      executedAt: now,
+    })
+  }
 
   const allOk = results.every((r) => r.ok)
   return NextResponse.json(
@@ -121,6 +166,7 @@ export async function POST(
       now: now.toISOString(),
       due,
       results,
+      duration_ms: durationMs,
     },
     { status: allOk ? 200 : 207 }
   )
