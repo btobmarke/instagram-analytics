@@ -437,14 +437,14 @@ export class InstagramClient {
 
   /**
    * online_followers（条件付きで利用可能）
-   * v20+ では time_series と組み合わせ不可 → total_value + period=day
+   * Meta API では `metric_type=total_value` と非互換（#100）のため **time_series** を使う。
    */
   async getAccountInsightsOnlineFollowers(since: string, until: string) {
     return this.fetch(
       `/${this.accountId}/insights`,
       {
         metric: 'online_followers',
-        metric_type: 'total_value',
+        metric_type: 'time_series',
         period: 'day',
         since,
         until,

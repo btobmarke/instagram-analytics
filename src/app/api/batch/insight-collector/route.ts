@@ -619,7 +619,7 @@ export async function POST(request: Request) {
           return null
         }
 
-        // --- (B4) online_followers（metric_type=total_value + period=day） ---
+        // --- (B4) online_followers（metric_type=time_series + period=day） ---
         try {
           const { data: olData, rateUsage: olRate } = await igClient.getAccountInsightsOnlineFollowers(since, until)
           if (!isRateLimitExceeded(olRate, 70)) {
