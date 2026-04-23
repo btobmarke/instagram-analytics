@@ -3,6 +3,8 @@ export type BatchJobQueueRow = {
   id: string
   job_name: string
   project_id: string | null
+  service_id?: string | null
+  account_id?: string | null
   payload: Record<string, unknown>
   idempotency_key: string
   correlation_id: string | null

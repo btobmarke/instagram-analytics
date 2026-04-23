@@ -3,6 +3,7 @@ export const maxDuration = 300  // 5分（Vercel Pro上限）
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
+import { validateBatchRequest } from '@/lib/utils/batch-auth'
 import { getAccessTokenFromCredential, type GbpCredentialRow } from '@/lib/gbp/auth'
 import {
   fetchPerformance,
@@ -51,23 +52,27 @@ function addCalendarMonths(year: number, month: number, delta: number): { year: 
 
 // GET /api/batch/gbp-daily  ← Vercel Cron は GET で叩く
 export async function GET(request: NextRequest) {
-  // CRON_SECRET 認証
+  if (validateBatchRequest(request)) {
+    return runBatch(request)
+  }
   const cronSecret = process.env.CRON_SECRET
   if (cronSecret) {
     const authHeader = request.headers.get('authorization')
-    const qSecret    = new URL(request.url).searchParams.get('secret')
-    const provided   = authHeader?.replace('Bearer ', '') ?? qSecret ?? ''
+    const qSecret = new URL(request.url).searchParams.get('secret')
+    const provided = authHeader?.replace(/^Bearer\s+/i, '')?.trim() ?? qSecret ?? ''
     if (provided !== cronSecret) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
   }
-
   return runBatch(request)
 }
 
 // POST でも手動実行できるようにしておく
 export async function POST(request: NextRequest) {
-  return GET(request)
+  if (!validateBatchRequest(request)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  return runBatch(request)
 }
 
 // ------------------------------------------------------------
@@ -76,6 +81,8 @@ export async function POST(request: NextRequest) {
 async function runBatch(_request: NextRequest) {
   const admin = createSupabaseAdminClient()
   const startedAt = new Date()
+  const url = new URL(_request.url)
+  const siteFilter = url.searchParams.get('site_id')
 
   // target_date = JST昨日 から GBP_DATE_OFFSET_DAYS 日前まで
   const offsetDays = Number(process.env.GBP_DATE_OFFSET_DAYS ?? '1')
@@ -128,27 +135,70 @@ async function runBatch(_request: NextRequest) {
   let processedSites = 0
 
   try {
-    // 有効なGBP認証情報（クライアント単位）を全件取得
-    const { data: credentials } = await admin
-      .from('gbp_credentials')
-      .select('*')
-      .eq('auth_status', 'active')
+    let credentials: GbpCredentialRow[] = []
 
-    if (!credentials || credentials.length === 0) {
+    if (siteFilter) {
+      const { data: siteOne, error: siteErr } = await admin
+        .from('gbp_sites')
+        .select(
+          `
+          id, gbp_location_name, gbp_title, gbp_account_name,
+          services!inner(id, project_id, projects!inner(client_id))
+        `
+        )
+        .eq('id', siteFilter)
+        .eq('is_active', true)
+        .maybeSingle()
+
+      if (siteErr || !siteOne) {
+        errors.push({ clientId: 'unknown', siteId: siteFilter, error: 'site not found or inactive' })
+        throw new Error(siteErr?.message ?? 'site not found')
+      }
+
+      const svc = siteOne.services as { projects: { client_id: string } }
+      const clientId = svc?.projects?.client_id
+      if (!clientId) {
+        errors.push({ clientId: 'unknown', siteId: siteFilter, error: 'client_id not resolved' })
+        throw new Error('client_id not resolved')
+      }
+
+      const { data: credOne } = await admin
+        .from('gbp_credentials')
+        .select('*')
+        .eq('client_id', clientId)
+        .eq('auth_status', 'active')
+        .maybeSingle()
+
+      if (!credOne) {
+        errors.push({ clientId: clientId, siteId: siteFilter, error: 'no active gbp_credentials' })
+        throw new Error('no active credentials for site client')
+      }
+
+      credentials = [credOne as GbpCredentialRow]
+    } else {
+      const { data: creds } = await admin.from('gbp_credentials').select('*').eq('auth_status', 'active')
+      credentials = (creds ?? []) as GbpCredentialRow[]
+    }
+
+    if (credentials.length === 0) {
       await finalizeBatch(admin, batchRunId, 'success', [], 0)
       return NextResponse.json({ success: true, processed: 0, message: 'No active credentials' })
     }
 
-    for (const cred of credentials as GbpCredentialRow[]) {
+    for (const cred of credentials) {
       // このクライアントのGBPサービス（有効なgbp_sites）を取得
-      const { data: sites } = await admin
+      let sitesQuery = admin
         .from('gbp_sites')
         .select(`
-          id, gbp_location_name, gbp_title,
+          id, gbp_location_name, gbp_title, gbp_account_name,
           services!inner(id, project_id, projects!inner(client_id))
         `)
         .eq('is_active', true)
         .filter('services.projects.client_id', 'eq', cred.client_id)
+
+      if (siteFilter) sitesQuery = sitesQuery.eq('id', siteFilter)
+
+      const { data: sites } = await sitesQuery
 
       if (!sites || sites.length === 0) continue
 

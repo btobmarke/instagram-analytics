@@ -11,6 +11,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const body = await request.json().catch(() => ({}))
+  const accountIdFilter = typeof body.account_id === 'string' ? body.account_id : undefined
+
   const admin = createSupabaseAdminClient()
   const startedAt = new Date()
   const calcVersion = '1.0'
@@ -25,7 +28,9 @@ export async function POST(request: Request) {
   }).select().single()
 
   try {
-    const { data: accounts } = await admin.from('ig_accounts').select('id').eq('status', 'active')
+    let acctQ = admin.from('ig_accounts').select('id').eq('status', 'active')
+    if (accountIdFilter) acctQ = acctQ.eq('id', accountIdFilter)
+    const { data: accounts } = await acctQ
     const { data: kpiMasters } = await admin.from('kpi_master').select('*').eq('is_active', true)
 
     for (const account of (accounts ?? [])) {

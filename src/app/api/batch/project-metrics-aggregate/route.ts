@@ -17,6 +17,7 @@ export const maxDuration = 300  // 5分（Vercel Pro上限）
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
+import { logBatchAuthFailure, validateBatchRequest } from '@/lib/utils/batch-auth'
 import {
   fetchMetricsByRefs,
   buildPeriods,
@@ -34,11 +35,14 @@ function jstYesterday(): string {
 
 // GET ← Vercel Cron
 export async function GET(request: NextRequest) {
+  if (validateBatchRequest(request)) {
+    return runBatch(request)
+  }
   const cronSecret = process.env.CRON_SECRET
   if (cronSecret) {
     const authHeader = request.headers.get('authorization')
-    const qSecret    = new URL(request.url).searchParams.get('secret')
-    const provided   = authHeader?.replace('Bearer ', '') ?? qSecret ?? ''
+    const qSecret = new URL(request.url).searchParams.get('secret')
+    const provided = authHeader?.replace(/^Bearer\s+/i, '')?.trim() ?? qSecret ?? ''
     if (provided !== cronSecret) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
@@ -48,7 +52,11 @@ export async function GET(request: NextRequest) {
 
 // POST でも手動実行可
 export async function POST(request: NextRequest) {
-  return GET(request)
+  if (!validateBatchRequest(request)) {
+    logBatchAuthFailure('project-metrics-aggregate', request)
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  return runBatch(request)
 }
 
 // ── バッチ本体 ───────────────────────────────────────────────────────────────
@@ -93,12 +101,6 @@ async function runBatch(request: NextRequest) {
       throw new Error(`services 取得失敗: ${svcErr?.message}`)
     }
 
-    // 対象日を「1日分」の Period として構築
-    // buildPeriods は SupabaseServerClient を必要としないので直接呼ぶ
-    const periodsOrError = buildPeriods('day', 1,
-      // count=1 では today になるので custom_range で1日を指定
-      undefined, undefined,
-    )
     // count=1 の day では "今日" が取れてしまうため custom_range で指定
     const targetPeriods = (() => {
       const p = buildPeriods('custom_range', 1, targetDate, targetDate)

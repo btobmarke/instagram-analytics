@@ -3,7 +3,9 @@ import type { BatchJobQueueRow } from '@/lib/batch/queue-types'
 
 export type EnqueueInput = {
   job_name: string
-  project_id: string | null
+  project_id?: string | null
+  service_id?: string | null
+  account_id?: string | null
   payload?: Record<string, unknown>
   idempotency_key: string
   correlation_id?: string | null
@@ -22,7 +24,9 @@ export async function enqueueBatchJob(
 ): Promise<{ id: string | null; skipped: boolean; error?: string }> {
   const row = {
     job_name: input.job_name,
-    project_id: input.project_id,
+    project_id: input.project_id ?? null,
+    service_id: input.service_id ?? null,
+    account_id: input.account_id ?? null,
     payload: input.payload ?? {},
     idempotency_key: input.idempotency_key,
     correlation_id: input.correlation_id ?? null,

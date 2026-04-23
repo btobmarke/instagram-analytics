@@ -17,6 +17,7 @@ export const maxDuration = 60
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
+import { logBatchAuthFailure, validateBatchRequest } from '@/lib/utils/batch-auth'
 import { getHolidayInfo } from '@/lib/external/holidays'
 import { fetchWeather } from '@/lib/external/weather'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
@@ -31,11 +32,14 @@ function jstYesterday(): string {
 
 // GET /api/batch/external-data ← Vercel Cron
 export async function GET(request: NextRequest) {
+  if (validateBatchRequest(request)) {
+    return runBatch(request)
+  }
   const cronSecret = process.env.CRON_SECRET
   if (cronSecret) {
     const authHeader = request.headers.get('authorization')
-    const qSecret    = new URL(request.url).searchParams.get('secret')
-    const provided   = authHeader?.replace('Bearer ', '') ?? qSecret ?? ''
+    const qSecret = new URL(request.url).searchParams.get('secret')
+    const provided = authHeader?.replace(/^Bearer\s+/i, '')?.trim() ?? qSecret ?? ''
     if (provided !== cronSecret) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
@@ -45,7 +49,11 @@ export async function GET(request: NextRequest) {
 
 // POST でも手動実行可
 export async function POST(request: NextRequest) {
-  return GET(request)
+  if (!validateBatchRequest(request)) {
+    logBatchAuthFailure('external-data', request)
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  return runBatch(request)
 }
 
 // ── バッチ本体 ───────────────────────────────────────────────────────────────
@@ -58,6 +66,7 @@ async function runBatch(_request: NextRequest) {
   // 例: /api/batch/external-data?date=2025-04-01
   const url         = new URL(_request.url)
   const targetDate  = url.searchParams.get('date') ?? jstYesterday()
+  const projectFilter = url.searchParams.get('project')
 
   // batch_job_logs 開始記録
   const { data: jobLog } = await admin
@@ -76,10 +85,12 @@ async function runBatch(_request: NextRequest) {
 
   try {
     // 全プロジェクトを取得（latitude/longitude の有無に関わらず全件）
-    const { data: projects, error: projErr } = await admin
+    let projQ = admin
       .from('projects')
       .select('id, project_name, latitude, longitude')
       .eq('is_active', true)
+    if (projectFilter) projQ = projQ.eq('id', projectFilter)
+    const { data: projects, error: projErr } = await projQ
 
     if (projErr || !projects) {
       throw new Error(`projects 取得失敗: ${projErr?.message}`)

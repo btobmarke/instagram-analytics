@@ -7,7 +7,7 @@ import { decryptStorageState, buildCookieHeader, type LineOamSessionRecord } fro
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 import {
   parseCsv,
-  toYYYYMMDD, toYYYYMMDDDash, toUnixMs,
+  toUnixMs,
   parseLineDateTime,
   buildUrl,
 } from '@/lib/line-oam/csv-parser'
@@ -20,16 +20,34 @@ export async function GET(req: NextRequest) {
                  new URL(req.url).searchParams.get('secret') ?? ''
     if (auth !== secret) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  return runBatch()
+  return runBatch(req)
 }
-export async function POST(req: NextRequest) { return GET(req) }
+export async function POST(req: NextRequest) {
+  const secret = process.env.CRON_SECRET ?? process.env.BATCH_SECRET
+  if (secret) {
+    const auth = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '')?.trim() ??
+                 new URL(req.url).searchParams.get('secret') ?? ''
+    if (auth !== secret) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  return runBatch(req)
+}
 
 // ----------------------------------------------------------------
 // バッチ本体
 // ----------------------------------------------------------------
-async function runBatch() {
+async function runBatch(req: NextRequest) {
   const admin = createSupabaseAdminClient()
   const startedAt = new Date()
+
+  let serviceFilter: string | undefined
+  if (req.method === 'POST') {
+    const body = await req.json().catch(() => ({}))
+    serviceFilter = typeof (body as { service_id?: string }).service_id === 'string'
+      ? (body as { service_id: string }).service_id
+      : undefined
+  } else {
+    serviceFilter = new URL(req.url).searchParams.get('service_id') ?? undefined
+  }
 
   // JST 昨日を target_date とする
   // ※ toYYYYMMDD / toYYYYMMDDDash は内部で +9h するため、ここでは UTC の Date をそのまま渡す
@@ -78,13 +96,15 @@ async function runBatch() {
 
   try {
     // アクティブな LINE OAM サービス設定を全件取得（クライアント・プロジェクト情報も JOIN）
-    const { data: configs } = await admin
+    let cfgQ = admin
       .from('line_oam_service_configs')
       .select(`
         id, bot_id,
         services!inner(id, project_id, projects!inner(client_id))
       `)
       .eq('is_active', true)
+    if (serviceFilter) cfgQ = cfgQ.eq('service_id', serviceFilter)
+    const { data: configs } = await cfgQ
 
     if (!configs || configs.length === 0) {
       await finalize(admin, batchRunId, 'success', [], 0)

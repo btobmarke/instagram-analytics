@@ -13,6 +13,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const body = await request.json().catch(() => ({}))
+  const accountIdFilter = typeof body.account_id === 'string' ? body.account_id : undefined
+
   const admin = createSupabaseAdminClient()
   const startedAt = new Date()
 
@@ -35,7 +38,9 @@ export async function POST(request: Request) {
       accountsCount,
       storyListFetchFailures,
       storyRateLimitEarlyStops,
-    } = await runInstagramStoryMediaSyncAllAccounts(admin, 'story-media-collector')
+    } = await runInstagramStoryMediaSyncAllAccounts(admin, 'story-media-collector', {
+      accountId: accountIdFilter,
+    })
 
     const duration = Date.now() - startedAt.getTime()
     const summaryLine =

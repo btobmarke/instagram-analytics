@@ -12,14 +12,22 @@ export async function GET(request: NextRequest) {
     logBatchAuthFailure('/api/batch/google-ads-daily', request)
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  return runBatch()
+  return runBatch(request)
 }
 
 export async function POST(request: NextRequest) {
-  return GET(request)
+  if (!validateBatchRequest(request)) {
+    logBatchAuthFailure('/api/batch/google-ads-daily', request)
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  return runBatch(request)
 }
 
-async function runBatch() {
+async function runBatch(request: NextRequest) {
+  const body = await request.json().catch(() => ({}))
+  const serviceIdFilter =
+    typeof body.service_id === 'string' ? body.service_id : undefined
+
   const admin = createSupabaseAdminClient()
   const startedAt = new Date()
 
@@ -35,10 +43,12 @@ async function runBatch() {
   let processed = 0
 
   try {
-    const { data: configs, error: cfgErr } = await admin
+    let cfgQuery = admin
       .from('google_ads_service_configs')
       .select('service_id, customer_id, collect_keywords, backfill_days, last_synced_at, is_active, time_zone')
       .eq('is_active', true)
+    if (serviceIdFilter) cfgQuery = cfgQuery.eq('service_id', serviceIdFilter)
+    const { data: configs, error: cfgErr } = await cfgQuery
 
     if (cfgErr) throw new Error(cfgErr.message)
     if (!configs || configs.length === 0) {

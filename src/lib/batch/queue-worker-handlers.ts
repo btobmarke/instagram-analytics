@@ -2,6 +2,11 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { BatchJobQueueRow } from '@/lib/batch/queue-types'
 import { completeBatchJob, deadLetterBatchJob, failBatchJob } from '@/lib/batch/batch-queue'
 import {
+  forwardBatchRequest,
+  getBatchAuthHeader,
+  getBatchDeploymentOrigin,
+} from '@/lib/batch/internal-batch-fetch'
+import {
   DEFAULT_WEATHER_OPTIONS,
   syncWeatherForProject,
   type WeatherSyncOptions,
@@ -31,8 +36,60 @@ export async function processBatchQueueRow(
   if (row.job_name === 'weather_sync') {
     return processWeatherSyncRow(admin, row)
   }
+  if (row.job_name === 'batch_proxy') {
+    return processBatchProxyRow(admin, row)
+  }
   await deadLetterBatchJob(admin, row.id, `Unknown job_name: ${row.job_name}`)
   return { ok: false, error: `Unknown job_name: ${row.job_name}`, permanent: true }
+}
+
+async function processBatchProxyRow(admin: SupabaseClient, row: BatchJobQueueRow): Promise<HandlerResult> {
+  const origin = getBatchDeploymentOrigin()
+  const auth = getBatchAuthHeader()
+  if (!origin || !auth) {
+    await failBatchJob(
+      admin,
+      row.id,
+      'missing NEXT_PUBLIC_APP_URL/VERCEL_URL or CRON_SECRET/BATCH_SECRET for batch_proxy'
+    )
+    return { ok: false, error: 'server misconfiguration' }
+  }
+
+  const p = row.payload as {
+    path?: string
+    method?: string
+    query?: Record<string, string | undefined>
+    body?: Record<string, unknown>
+  }
+  const path = typeof p.path === 'string' ? p.path : null
+  if (!path || !path.startsWith('/api/batch/')) {
+    await deadLetterBatchJob(admin, row.id, 'invalid batch_proxy path')
+    return { ok: false, error: 'invalid path', permanent: true }
+  }
+
+  const method: 'GET' | 'POST' = p.method === 'GET' ? 'GET' : 'POST'
+
+  try {
+    const res = await forwardBatchRequest(origin, auth, {
+      path,
+      method,
+      query: p.query,
+      body: p.body,
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      await failBatchJob(admin, row.id, `HTTP ${res.status}: ${text.slice(0, 800)}`, {
+        requeueDelayMs: 120_000,
+      })
+      return { ok: false, error: `HTTP ${res.status}` }
+    }
+    await completeBatchJob(admin, row.id)
+    return { ok: true }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    await failBatchJob(admin, row.id, msg, { requeueDelayMs: 120_000 })
+    return { ok: false, error: msg }
+  }
 }
 
 async function processWeatherSyncRow(

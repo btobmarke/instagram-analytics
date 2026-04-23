@@ -48,6 +48,9 @@ export async function POST(request: NextRequest) {
   const startedAt = new Date().toISOString()
   const today = new Date().toISOString().slice(0, 10)
 
+  const url = new URL(request.url)
+  const lpSiteIdFilter = url.searchParams.get('lp_site_id')
+
   // batch_job_logs INSERT
   const { data: jobLog } = await supabase.from('batch_job_logs').insert({
     job_name: 'lp_aggregate',
@@ -58,10 +61,9 @@ export async function POST(request: NextRequest) {
   }).select().single()
 
   // アクティブな LP サービス一覧取得
-  const { data: lpSites, error: siteError } = await supabase
-    .from('lp_sites')
-    .select('id, service_id')
-    .eq('is_active', true)
+  let siteQ = supabase.from('lp_sites').select('id, service_id').eq('is_active', true)
+  if (lpSiteIdFilter) siteQ = siteQ.eq('id', lpSiteIdFilter)
+  const { data: lpSites, error: siteError } = await siteQ
 
   if (siteError) {
     return NextResponse.json(

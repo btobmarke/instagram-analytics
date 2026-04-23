@@ -16,6 +16,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const body = await request.json().catch(() => ({}))
+  const accountIdFilter = typeof body.account_id === 'string' ? body.account_id : undefined
+
   const admin = createSupabaseAdminClient()
   const startedAt = new Date()
   let totalProcessed = 0
@@ -40,11 +43,13 @@ export async function POST(request: Request) {
 
   try {
     // アクティブなアカウント一覧取得
-    const { data: accounts } = await admin
+    let acctQ = admin
       .from('ig_accounts')
       .select('id, platform_account_id, api_base_url, api_version, service_id')
       .eq('status', 'active')
       .not('service_id', 'is', null)
+    if (accountIdFilter) acctQ = acctQ.eq('id', accountIdFilter)
+    const { data: accounts } = await acctQ
 
     for (const account of (accounts ?? [])) {
       try {

@@ -32,11 +32,16 @@ export async function POST(request: NextRequest) {
   const startedAt = new Date().toISOString()
   const now = new Date()
 
+  const url = new URL(request.url)
+  const lpSiteIdFilter = url.searchParams.get('lp_site_id')
+
   // アクティブな LP サイトとそれぞれのタイムアウト設定を取得
-  const { data: lpSites, error: siteError } = await supabase
+  let siteQ = supabase
     .from('lp_sites')
     .select('id, session_timeout_minutes')
     .eq('is_active', true)
+  if (lpSiteIdFilter) siteQ = siteQ.eq('id', lpSiteIdFilter)
+  const { data: lpSites, error: siteError } = await siteQ
 
   if (siteError) {
     return NextResponse.json(

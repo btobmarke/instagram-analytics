@@ -14,14 +14,15 @@
 | 領域 | 内容 |
 |------|------|
 | Phase 0（一部） | `cron-groups` の構造化ログ・`notifyBatchError`；`eslint.config.mjs` を FlatCompat 化；`npm run lint:batch` でキュー関連のみ lint |
-| キュー基盤 | **`batch_job_queue` + `dequeue_batch_jobs`**（migration `063_*`）、`src/lib/batch/batch-queue.ts`、**`POST /api/internal/batch-queue-worker`**、Vercel Cron **毎分** |
-| 代表ジョブ | **`weather_sync` のみ**キュー化。`/api/batch/weather-sync` は既定で enqueue のみ（`BATCH_QUEUE_DISABLED=true` で従来一括） |
-| 手動・履歴 | **`POST /api/batch/weather-sync/enqueue`**（project / all + secret）、**`GET /api/projects/:id/batch-logs`**、`batch_job_logs` に `project_id` 等カラム |
+| キュー基盤 | **`batch_job_queue` + `dequeue_batch_jobs`**（`063_*`）、**`service_id` / `account_id` 列**（`064_*`）、`batch_proxy` ワーカー、**`POST /api/internal/batch-queue-worker`**（Cron `limit=15`） |
+| Cron グループ | 既定 **`enqueueCronBatchJobsForSlug`**（`BATCH_CRON_GROUPS_USE_QUEUE=false` で従来の直接 `fetch`） |
+| 代表ジョブ | **`weather_sync`** は DB 内完結。**その他 Cron 対象スラッグ**は **`batch_proxy`** で分割 enqueue（プロジェクト / サービス / アカウント / LP サイト / GBP サイト単位。`line-oam` は **サービス単位＋POST 認証**） |
+| 手動・履歴 | **`POST /api/batch/weather-sync/enqueue`**、**`GET /api/projects/:id/batch-logs`**、`batch_job_logs` 拡張 |
 | ドキュメント | `docs/batch-queue-runbook.md`、`docs/adr/001-batch-queue-postgres.md` |
 
 ### 未完了（この計画書の残り）
 
-- **他ジョブのキュー化**（insight-collector 等すべて）
+- **`batch_proxy` を廃し**各ジョブを **DB 内ハンドラのみ**に寄せる（HTTP 二重起動の排除・`gbp_batch_runs` 多重化の解消）
 - **外部キュー（Inngest/QStash）**への差し替えは未着手（ADR は Postgres 第一版）
 - **全リポジトリの `npm run lint` クリーン**（既存ファイルの大量 violation）
 - **DB staging・ジョブ別 concurrency の本番チューニング**（ワーカーは `limit` のみ）
