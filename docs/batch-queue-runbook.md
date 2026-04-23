@@ -6,7 +6,7 @@
   - **`weather_sync`**: プロジェクト単位で DB 内完結（天気 API）。
   - **その他の `job_name`**: Cron 分解用。ワーカーは **`dispatchQueueJobInProcess`** で処理（**自己 HTTP / `batch_proxy` は使わない**）。
     - 例: `external_data_project`, `ga4_collector_service`, `media_collector_account`, `weekly_ai_analysis_account` など。
-    - **重いルート**（`insight-collector`, `story-*`, `lp-*`, `line-oam-daily`, `gbp-daily`）は同一プロセス内で **`NextRequest` + `POST` ハンドラ**を直接呼び出す（外部 `fetch` なし）。
+    - 実装は **`src/lib/batch/jobs/*`** と既存 lib（例: `sync-instagram-stories-media`）に集約。HTTP / Route 呼び出しなし。
 - **`POST /api/internal/batch-queue-worker`**: `dequeue_batch_jobs` で最大 N 件取り出し、処理。Vercel Cron（毎分、`limit=15` 既定）で起動。
 - **`POST /api/batch/weather-sync`**: 既定では **キューへ enqueue のみ**（全座標付きプロジェクト）。実データ取得はワーカー側。
 - **Cron グループ**（`/api/batch/cron-groups/*`）: 既定 **`BATCH_CRON_GROUPS_USE_QUEUE` 未設定 or `true`** のとき、各スラッグは **直接 fetch せず** `enqueueCronBatchJobsForSlug` でキュー投入。従来の一括 HTTP に戻す: `BATCH_CRON_GROUPS_USE_QUEUE=false`。
@@ -15,11 +15,11 @@
 
 | 変数 | 説明 |
 |------|------|
-| `CRON_SECRET` / `BATCH_SECRET` | 既存バッチ認証。ワーカー・`weather-sync` POST・Cron グループ・キュー内の合成 `NextRequest` で使用 |
+| `CRON_SECRET` / `BATCH_SECRET` | 既存バッチ認証。ワーカー・`weather-sync` POST・Cron グループで使用 |
 | `BATCH_WORKER_SECRET` | （任意）ワーカー専用。設定時は `Authorization: Bearer <BATCH_WORKER_SECRET>` でもワーカー起動可 |
 | `BATCH_QUEUE_DISABLED` | `true` のとき `weather-sync` は従来の **一括インライン**処理（緊急用） |
 | `BATCH_CRON_GROUPS_USE_QUEUE` | `false` で Cron グループが従来どおり **各バッチへ直接 POST** |
-| `NEXT_PUBLIC_APP_URL` / `VERCEL_URL` | Cron グループの子 `fetch`（`USE_QUEUE=false` 時）に必要。キューワーカー内の合成 URL にも使用 |
+| `NEXT_PUBLIC_APP_URL` / `VERCEL_URL` | Cron グループの子 `fetch`（`USE_QUEUE=false` 時）に必要 |
 
 ## マイグレーション
 

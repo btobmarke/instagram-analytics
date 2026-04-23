@@ -22,7 +22,7 @@
 
 ### 未完了（この計画書の残り）
 
-- ~~**`batch_proxy` を廃し**各ジョブを **DB 内ハンドラのみ**に寄せる（HTTP 二重起動の排除）~~ **実装済み**（残: 巨大ルートの **完全 lib 化**で合成 `NextRequest` も不要にする）
+- ~~**`batch_proxy` を廃し**各ジョブを **DB 内ハンドラのみ**に寄せる~~ **実装済み**（`insight-collector` / `story-*` / `lp-*` / `gbp-daily` / `line-oam-daily` は `src/lib/batch/jobs/*` に集約）
 - **外部キュー（Inngest/QStash）**への差し替えは未着手（ADR は Postgres 第一版）
 - **全リポジトリの `npm run lint` クリーン**（既存ファイルの大量 violation）
 - **DB staging・ジョブ別 concurrency の本番チューニング**（ワーカーは `limit` のみ）
