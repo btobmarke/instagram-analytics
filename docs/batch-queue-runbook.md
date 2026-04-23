@@ -17,7 +17,7 @@
 
 ## マイグレーション
 
-`supabase/migrations/063_batch_job_queue_and_logs_extensions.sql` を適用後、キューが有効。
+`supabase/migrations/066_batch_job_queue_and_logs_extensions.sql` を適用後、キューが有効。
 
 ## 手動 API
 
