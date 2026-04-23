@@ -33,7 +33,7 @@ export default function BatchesOverview() {
             ['09:00 / 21:00', '外部データ', '天気・祝日 同期（weather-sync） ※UTC 00:00/12:00'],
             ['11:00', 'LP / MA', 'LP 集計（lp-aggregate） ※UTC 02:00'],
             ['11:15', 'Google 広告', '日次収集（google-ads-daily） ※UTC 02:15'],
-            ['11:30', 'Instagram', '投稿一覧同期（media-collector） ※UTC 02:30'],
+            ['0:00・12:00（JST）', 'Instagram', '投稿一覧同期（media-collector） ※UTC 3:00/15:00'],
             ['12:15', 'GA4', '日次収集（ga4-collector） ※UTC 03:15'],
             ['12:45', 'Clarity', '日次収集（clarity-collector） ※UTC 03:45'],
             ['13:00', 'GBP', '日次収集（gbp-daily） ※UTC 04:00'],

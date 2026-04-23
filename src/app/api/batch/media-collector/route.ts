@@ -10,7 +10,7 @@ import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 import { upsertActiveStoriesPages } from '@/lib/batch/sync-instagram-stories-media'
 
 // POST /api/batch/media-collector
-// Vercel Cron or manual trigger: 投稿一覧の同期
+// Vercel Cron or manual trigger: 投稿一覧の同期（vercel.json: 0 3,15 * * * = JST 0:00/12:00）
 export async function POST(request: Request) {
   if (!validateBatchRequest(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
