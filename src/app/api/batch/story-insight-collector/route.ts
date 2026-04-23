@@ -10,16 +10,7 @@ import { decrypt } from '@/lib/utils/crypto'
 import { validateBatchRequest } from '@/lib/utils/batch-auth'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 import { closeStaleRunningBatchLogs } from '@/lib/batch/close-stale-running-batch-logs'
-
-/** `ig_story_insight_fact.value` は BIGINT。非有限・範囲外は null */
-function toStoryInsightBigintValue(v: unknown): number | null {
-  if (typeof v !== 'number' || !Number.isFinite(v)) return null
-  const n = Math.round(v)
-  const MAX = 9223372036854775807
-  const MIN = -9223372036854775808
-  if (n > MAX || n < MIN) return null
-  return n
-}
+import { coerceStoryInsightBigintValue } from '@/lib/batch/instagram-insight-metric-coerce'
 
 function logStoryInsightError(ctx: Record<string, unknown>, err: unknown) {
   if (err instanceof InstagramApiError) {
@@ -159,7 +150,7 @@ export async function POST(request: Request) {
                 insight.values?.[0]?.value ??
                 insight.value ??
                 (typeof insight.total_value?.value === 'number' ? insight.total_value.value : null)
-              const value = toStoryInsightBigintValue(raw)
+              const value = coerceStoryInsightBigintValue(raw)
 
               const { error: upsertErr } = await admin.from('ig_story_insight_fact').upsert({
                 media_id: story.id,
@@ -205,7 +196,7 @@ export async function POST(request: Request) {
               for (const r of results) {
                 const action = (r.dimension_values?.[0] ?? '').toLowerCase()
                 if (!action) continue
-                const navVal = toStoryInsightBigintValue(r.value)
+                const navVal = coerceStoryInsightBigintValue(r.value)
                 const { error: navUpsertErr } = await admin.from('ig_story_insight_fact').upsert({
                   media_id: story.id,
                   metric_code: `navigation_${action}`,

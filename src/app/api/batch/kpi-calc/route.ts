@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { validateBatchRequest } from '@/lib/utils/batch-auth'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
+import { finiteNumberOrZero } from '@/lib/batch/numeric-coerce'
 
 // POST /api/batch/kpi-calc — KPI計算バッチ
 export async function POST(request: Request) {
@@ -51,10 +52,9 @@ export async function POST(request: Request) {
 
       // フォロワー増減計算
       const followerData = acctInsights?.filter(r => r.metric_code === 'follower_count') ?? []
-      const latestFollowers = followerData.at(-1)?.value ?? null
-      const earliestFollowers = followerData.at(0)?.value ?? null
-      const followerGainMonthly = latestFollowers !== null && earliestFollowers !== null
-        ? latestFollowers - earliestFollowers : null
+      const latestFollowers = finiteNumberOrZero(followerData.at(-1)?.value)
+      const earliestFollowers = finiteNumberOrZero(followerData.at(0)?.value)
+      const followerGainMonthly = latestFollowers - earliestFollowers
 
       // 投稿ごとのエンゲージメント率計算
       const { data: recentMedia } = await admin
@@ -66,27 +66,36 @@ export async function POST(request: Request) {
 
       for (const media of (recentMedia ?? [])) {
         const insights = mediaInsights?.filter(i => i.media_id === media.id) ?? []
-        const getLatest = (code: string) => {
+        const getLatestNumeric = (code: string) => {
           const rows = insights.filter(i => i.metric_code === code).sort((a, b) =>
             new Date(b.snapshot_at).getTime() - new Date(a.snapshot_at).getTime()
           )
-          return rows[0]?.value ?? null
+          return finiteNumberOrZero(rows[0]?.value)
         }
 
-        const reach = getLatest('reach')
-        const totalInteractions = getLatest('total_interactions')
-        const likes = getLatest('likes')
-        const comments = getLatest('comments')
-        const saved = getLatest('saved')
-        const shares = getLatest('shares')
+        const reach = getLatestNumeric('reach')
+        const totalInteractions = getLatestNumeric('total_interactions')
+        const likes = getLatestNumeric('likes')
+        const comments = getLatestNumeric('comments')
+        const saved = getLatestNumeric('saved')
+        const shares = getLatestNumeric('shares')
         // v22+ メディアインサイトは impressions→views、video_views 非推奨
-        const videoViews = getLatest('video_views') ?? getLatest('views')
-        const impressions = getLatest('impressions') ?? getLatest('views')
+        const videoViewsRow = insights
+          .filter(i => i.metric_code === 'video_views')
+          .sort((a, b) => new Date(b.snapshot_at).getTime() - new Date(a.snapshot_at).getTime())[0]
+        const viewsRow = insights
+          .filter(i => i.metric_code === 'views')
+          .sort((a, b) => new Date(b.snapshot_at).getTime() - new Date(a.snapshot_at).getTime())[0]
+        const videoViews = finiteNumberOrZero(videoViewsRow?.value ?? viewsRow?.value)
+        const impressionsRow = insights
+          .filter(i => i.metric_code === 'impressions')
+          .sort((a, b) => new Date(b.snapshot_at).getTime() - new Date(a.snapshot_at).getTime())[0]
+        const impressions = finiteNumberOrZero(impressionsRow?.value ?? viewsRow?.value)
 
         const snapshotAt = new Date().toISOString()
 
         // エンゲージメント率
-        if (reach && reach > 0 && totalInteractions !== null) {
+        if (reach > 0) {
           const kpi = kpiMasters?.find(k => k.kpi_code === 'engagement_rate')
           if (kpi) {
             await admin.from('kpi_result').upsert({
@@ -107,7 +116,7 @@ export async function POST(request: Request) {
         }
 
         // 保存率
-        if (reach && reach > 0 && saved !== null) {
+        if (reach > 0) {
           const kpi = kpiMasters?.find(k => k.kpi_code === 'save_rate')
           if (kpi) {
             await admin.from('kpi_result').upsert({
@@ -128,7 +137,7 @@ export async function POST(request: Request) {
         }
 
         // インプレッション/リーチ比
-        if (reach && reach > 0 && impressions !== null) {
+        if (reach > 0) {
           const kpi = kpiMasters?.find(k => k.kpi_code === 'impressions_to_reach')
           if (kpi) {
             await admin.from('kpi_result').upsert({
@@ -144,11 +153,12 @@ export async function POST(request: Request) {
               calculated_at: snapshotAt,
               calc_version: calcVersion,
             })
+            totalProcessed++
           }
         }
 
         // 動画視聴率
-        if ((media.media_product_type === 'REELS' || media.media_product_type === 'VIDEO') && reach && reach > 0 && videoViews !== null) {
+        if ((media.media_product_type === 'REELS' || media.media_product_type === 'VIDEO') && reach > 0) {
           const kpi = kpiMasters?.find(k => k.kpi_code === 'video_view_rate')
           if (kpi) {
             await admin.from('kpi_result').upsert({
@@ -164,12 +174,13 @@ export async function POST(request: Request) {
               calculated_at: snapshotAt,
               calc_version: calcVersion,
             })
+            totalProcessed++
           }
         }
       }
 
-      // アカウントレベルKPI: フォロワー月次増減
-      if (followerGainMonthly !== null) {
+      // アカウントレベルKPI: フォロワー月次増減（欠損は 0 として差分）
+      {
         const kpi = kpiMasters?.find(k => k.kpi_code === 'follower_gain_monthly')
         if (kpi) {
           await admin.from('kpi_result').insert({
