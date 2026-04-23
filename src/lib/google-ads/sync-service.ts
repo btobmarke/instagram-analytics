@@ -2,6 +2,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { getGoogleAdsAccessToken } from '@/lib/google-ads/auth'
 import { searchStream } from '@/lib/google-ads/api'
 import { resolveGoogleAdsSyncDateRange } from '@/lib/google-ads/reporting-dates'
+import { finiteNumberOrZero } from '@/lib/batch/numeric-coerce'
 
 export type GoogleAdsServiceSyncConfig = {
   service_id: string
@@ -204,8 +205,8 @@ ORDER BY segments.date DESC
       cost_micros: Number(metrics?.costMicros ?? 0),
       conversions: Number(metrics?.conversions ?? 0),
       conversion_value_micros: toMicros(metrics?.conversionsValue ?? 0),
-      ctr: metrics?.ctr != null ? Number(metrics.ctr) : null,
-      average_cpc_micros: metrics?.averageCpc != null ? toMicros(metrics.averageCpc) : null,
+      ctr: finiteNumberOrZero(metrics?.ctr),
+      average_cpc_micros: toMicros(metrics?.averageCpc),
     })
   }
 
@@ -306,8 +307,8 @@ ORDER BY segments.date DESC
       cost_micros: Number(metrics?.costMicros ?? 0),
       conversions: Number(metrics?.conversions ?? 0),
       conversion_value_micros: toMicros(metrics?.conversionsValue ?? 0),
-      ctr: metrics?.ctr != null ? Number(metrics.ctr) : null,
-      average_cpc_micros: metrics?.averageCpc != null ? toMicros(metrics.averageCpc) : null,
+      ctr: finiteNumberOrZero(metrics?.ctr),
+      average_cpc_micros: toMicros(metrics?.averageCpc),
     })
   }
 
@@ -402,7 +403,7 @@ ORDER BY segments.date DESC
           keyword_text: String(keyword?.text ?? ''),
           match_type: String(keyword?.matchType ?? ''),
           status: String(crit?.status ?? ''),
-          quality_score: quality?.qualityScore != null ? Number(quality.qualityScore) : null,
+          quality_score: finiteNumberOrZero(quality?.qualityScore),
           updated_at: new Date().toISOString(),
         })
       }
@@ -418,9 +419,9 @@ ORDER BY segments.date DESC
         cost_micros: Number(metrics?.costMicros ?? 0),
         conversions: Number(metrics?.conversions ?? 0),
         conversion_value_micros: toMicros(metrics?.conversionsValue ?? 0),
-        ctr: metrics?.ctr != null ? Number(metrics.ctr) : null,
-        average_cpc_micros: metrics?.averageCpc != null ? toMicros(metrics.averageCpc) : null,
-        quality_score: quality?.qualityScore != null ? Number(quality.qualityScore) : null,
+        ctr: finiteNumberOrZero(metrics?.ctr),
+        average_cpc_micros: toMicros(metrics?.averageCpc),
+        quality_score: finiteNumberOrZero(quality?.qualityScore),
       })
     }
 

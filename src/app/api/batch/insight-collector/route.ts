@@ -11,6 +11,14 @@ import { decrypt } from '@/lib/utils/crypto'
 import { validateBatchRequest } from '@/lib/utils/batch-auth'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 import { closeStaleRunningBatchLogs } from '@/lib/batch/close-stale-running-batch-logs'
+import {
+  accountTimeSeriesPointValueOrZero,
+  accountTotalValueScalarOrZero,
+  breakdownResultValueOrZero,
+  mediaInsightValueOrZero,
+  onlineFollowersScalarOrZero,
+} from '@/lib/batch/instagram-insight-metric-coerce'
+import { finiteNumberFromUnknown } from '@/lib/batch/numeric-coerce'
 
 type MediaInsightRow = {
   id: string
@@ -210,10 +218,7 @@ export async function POST(request: Request) {
           const snapshotAt = new Date().toISOString()
 
           for (const insight of insights) {
-            const value =
-              insight.values?.[0]?.value ??
-              insight.value ??
-              (typeof insight.total_value?.value === 'number' ? insight.total_value.value : null)
+            const value = mediaInsightValueOrZero(insight)
             await admin.from('ig_media_insight_fact').upsert({
               media_id: media.id,
               metric_code: insight.name,
@@ -254,7 +259,7 @@ export async function POST(request: Request) {
                     metric_code: `navigation_${action}`,
                     period_code: 'lifetime',
                     snapshot_at: snapshotAt,
-                    value: typeof r.value === 'number' ? r.value : null,
+                    value: breakdownResultValueOrZero(r.value),
                   }, { onConflict: 'media_id,metric_code,period_code,snapshot_at' })
                   const legacyCode = legacyStoryMetricCodeFromNavigationDimension(action)
                   if (legacyCode != null) {
@@ -263,7 +268,7 @@ export async function POST(request: Request) {
                       metric_code: legacyCode,
                       period_code: 'lifetime',
                       snapshot_at: snapshotAt,
-                      value: typeof r.value === 'number' ? r.value : null,
+                      value: breakdownResultValueOrZero(r.value),
                     }, { onConflict: 'media_id,metric_code,period_code,snapshot_at' })
                   }
                 }
@@ -309,7 +314,7 @@ export async function POST(request: Request) {
                     metric_code: `profile_activity_${action}`,
                     period_code: 'lifetime',
                     snapshot_at: snapshotAt,
-                    value: typeof r.value === 'number' ? r.value : null,
+                    value: breakdownResultValueOrZero(r.value),
                   }, { onConflict: 'media_id,metric_code,period_code,snapshot_at' })
                 }
               }
@@ -383,7 +388,7 @@ export async function POST(request: Request) {
               dimension_value: dimVal,
               period_code: params.periodCode,
               value_date: params.valueDate,
-              value: typeof r.value === 'number' ? r.value : null,
+              value: breakdownResultValueOrZero(r.value),
               fetched_at: new Date().toISOString(),
             }, { onConflict: 'account_id,metric_code,period_code,value_date,dimension_code,dimension_value' })
             if (upsertErr) {
@@ -422,7 +427,7 @@ export async function POST(request: Request) {
                 dimension_value: '',
                 period_code: 'day',
                 value_date: valueDate,
-                value: v.value,
+                value: accountTimeSeriesPointValueOrZero(v.value),
                 fetched_at: new Date().toISOString(),
               }, { onConflict: 'account_id,metric_code,period_code,value_date,dimension_code,dimension_value' })
               if (upsertErr) {
@@ -457,8 +462,7 @@ export async function POST(request: Request) {
               metrics: tvArr.map(m => ({ name: m.name, val: m.total_value?.value })),
             })
             for (const metric of tvArr) {
-              const val = metric.total_value?.value
-              if (typeof val !== 'number') continue
+              const val = accountTotalValueScalarOrZero(metric.total_value?.value)
               const { error: upsertErr } = await admin.from('ig_account_insight_fact').upsert({
                 account_id: account.id,
                 metric_code: metric.name,
@@ -606,19 +610,6 @@ export async function POST(request: Request) {
           }
         }
 
-        /** online_followers: API が number または 0–23 のオブジェクトで返す場合がある */
-        const coerceOnlineFollowersScalar = (val: unknown): number | null => {
-          if (typeof val === 'number' && Number.isFinite(val)) return val
-          if (val && typeof val === 'object' && !Array.isArray(val)) {
-            let sum = 0
-            for (const x of Object.values(val as Record<string, unknown>)) {
-              if (typeof x === 'number' && Number.isFinite(x)) sum += x
-            }
-            return sum > 0 ? sum : null
-          }
-          return null
-        }
-
         // --- (B4) online_followers（metric_type=total_value + period=day） ---
         try {
           const { data: olData, rateUsage: olRate } = await igClient.getAccountInsightsOnlineFollowers(since, until)
@@ -630,8 +621,7 @@ export async function POST(request: Request) {
                 const endDate = new Date(v.end_time)
                 endDate.setDate(endDate.getDate() - 1)
                 const valueDate = endDate.toISOString().slice(0, 10)
-                const scalar = coerceOnlineFollowersScalar(v.value)
-                if (scalar == null) continue
+                const scalar = onlineFollowersScalarOrZero(v.value)
                 const { error: upsertErr } = await admin.from('ig_account_insight_fact').upsert({
                   account_id: account.id,
                   metric_code: 'online_followers',
@@ -652,23 +642,18 @@ export async function POST(request: Request) {
               }
             } else if (metric) {
               const tv = metric.total_value?.value
-              const scalar =
-                typeof tv === 'number' && Number.isFinite(tv)
-                  ? tv
-                  : coerceOnlineFollowersScalar(tv)
-              if (scalar != null) {
-                const { error: upsertErr } = await admin.from('ig_account_insight_fact').upsert({
-                  account_id: account.id,
-                  metric_code: 'online_followers',
-                  dimension_code: '',
-                  dimension_value: '',
-                  period_code: 'day',
-                  value_date: until,
-                  value: scalar,
-                  fetched_at: new Date().toISOString(),
-                }, { onConflict: 'account_id,metric_code,period_code,value_date,dimension_code,dimension_value' })
-                if (!upsertErr) acctUpsertCount++
-              }
+              const scalar = onlineFollowersScalarOrZero(tv)
+              const { error: upsertErr } = await admin.from('ig_account_insight_fact').upsert({
+                account_id: account.id,
+                metric_code: 'online_followers',
+                dimension_code: '',
+                dimension_value: '',
+                period_code: 'day',
+                value_date: until,
+                value: scalar,
+                fetched_at: new Date().toISOString(),
+              }, { onConflict: 'account_id,metric_code,period_code,value_date,dimension_code,dimension_value' })
+              if (!upsertErr) acctUpsertCount++
             }
           }
         } catch (olErr) {
@@ -682,8 +667,8 @@ export async function POST(request: Request) {
         try {
           const { data: profileData } = await igClient.getProfileCounts()
           const pd = profileData as Record<string, unknown>
-          const followerCount = typeof pd.followers_count === 'number' ? pd.followers_count : null
-          if (followerCount !== null) {
+          const followerParsed = finiteNumberFromUnknown(pd.followers_count)
+          if (followerParsed !== null) {
             const today = new Date().toISOString().slice(0, 10)
             const { error: upsertErr } = await admin.from('ig_account_insight_fact').upsert({
               account_id: account.id,
@@ -692,7 +677,7 @@ export async function POST(request: Request) {
               dimension_value: '',
               period_code: 'day',
               value_date: today,
-              value: followerCount,
+              value: followerParsed,
               fetched_at: new Date().toISOString(),
             }, { onConflict: 'account_id,metric_code,period_code,value_date,dimension_code,dimension_value' })
             if (upsertErr) {
@@ -702,7 +687,7 @@ export async function POST(request: Request) {
             } else {
               acctUpsertCount++
               console.info('[insight-collector] follower_count upserted', {
-                account_id: account.id, value: followerCount, date: today,
+                account_id: account.id, value: followerParsed, date: today,
               })
             }
           }

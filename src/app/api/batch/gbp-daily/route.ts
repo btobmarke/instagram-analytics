@@ -13,6 +13,7 @@ import {
 import { METRIC_TO_COLUMN } from '@/lib/gbp/constants'
 import { syncGbpReviewStarCountsDaily } from '@/lib/gbp/sync-review-star-counts-daily'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
+import { finiteNumberOrZero } from '@/lib/batch/numeric-coerce'
 
 // JSTで「今日」の日付文字列を返す
 function jstToday(): Date {
@@ -211,7 +212,7 @@ async function runBatch(_request: NextRequest) {
               gbp_site_id:  siteId,
               date:         row.date,
               ...Object.fromEntries(
-                Object.entries(METRIC_TO_COLUMN).map(([, col]) => [col, row.metrics[col] ?? null])
+                Object.entries(METRIC_TO_COLUMN).map(([, col]) => [col, finiteNumberOrZero(row.metrics[col])])
               ),
               raw_payload:  row.rawPayload ?? null,
               updated_at:   new Date().toISOString(),

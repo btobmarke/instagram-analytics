@@ -25,6 +25,7 @@ import { createSupabaseAdminClient }  from '@/lib/supabase/admin'
 import { getHolidayInfo }             from '@/lib/external/holidays'
 import { fetchWeatherForecast }       from '@/lib/external/weather'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
+import { finiteNumberOrZero } from '@/lib/batch/numeric-coerce'
 
 // GET /api/batch/weather-sync ← Vercel Cron
 export async function GET(request: NextRequest) {
@@ -124,11 +125,11 @@ async function runBatch(request: NextRequest) {
             date,
             is_holiday:       holiday.isHoliday,
             holiday_name:     holiday.name ?? null,
-            temperature_max:  weather?.temperature_max  ?? null,
-            temperature_min:  weather?.temperature_min  ?? null,
-            precipitation_mm: weather?.precipitation_mm ?? null,
-            weather_code:     weather?.weather_code     ?? null,
-            weather_desc:     weather?.weather_desc     ?? null,
+            temperature_max:  weather != null ? finiteNumberOrZero(weather.temperature_max) : null,
+            temperature_min:  weather != null ? finiteNumberOrZero(weather.temperature_min) : null,
+            precipitation_mm: weather != null ? finiteNumberOrZero(weather.precipitation_mm) : null,
+            weather_code:     weather != null ? finiteNumberOrZero(weather.weather_code) : null,
+            weather_desc:     weather?.weather_desc ?? null,
             updated_at:       new Date().toISOString(),
           }
         })

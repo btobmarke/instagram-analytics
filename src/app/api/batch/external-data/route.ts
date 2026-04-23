@@ -20,6 +20,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { getHolidayInfo } from '@/lib/external/holidays'
 import { fetchWeather } from '@/lib/external/weather'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
+import { finiteNumberOrZero } from '@/lib/batch/numeric-coerce'
 
 /** JST の昨日 YYYY-MM-DD */
 function jstYesterday(): string {
@@ -105,7 +106,13 @@ async function runBatch(_request: NextRequest) {
             longitude: Number(project.longitude),
             date:      targetDate,
           })
-          weatherData = w
+          weatherData = {
+            temperature_max:  finiteNumberOrZero(w.temperature_max),
+            temperature_min:  finiteNumberOrZero(w.temperature_min),
+            precipitation_mm: finiteNumberOrZero(w.precipitation_mm),
+            weather_code:     finiteNumberOrZero(w.weather_code),
+            weather_desc:     w.weather_desc ?? null,
+          }
         }
 
         // UPSERT

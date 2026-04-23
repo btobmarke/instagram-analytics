@@ -11,6 +11,7 @@ import {
   parseLineDateTime,
   buildUrl,
 } from '@/lib/line-oam/csv-parser'
+import { csvCellNumberOrZero } from '@/lib/batch/numeric-coerce'
 
 // GET: Vercel Cron 用 / POST: 手動実行用
 export async function GET(req: NextRequest) {
@@ -163,9 +164,9 @@ async function runBatch() {
             .map(r => ({
               service_id:     serviceId,
               date:           `${r.date.slice(0,4)}-${r.date.slice(4,6)}-${r.date.slice(6,8)}`,
-              contacts:       r.contacts    ? Number(r.contacts)    : null,
-              target_reaches: r.targetReaches ? Number(r.targetReaches) : null,
-              blocks:         r.blocks      ? Number(r.blocks)      : null,
+              contacts:       csvCellNumberOrZero(r.contacts),
+              target_reaches: csvCellNumberOrZero(r.targetReaches),
+              blocks:         csvCellNumberOrZero(r.blocks),
               collected_at:   new Date().toISOString(),
             }))
           if (upsertData.length > 0) {
@@ -190,7 +191,7 @@ async function runBatch() {
             date:        targetDate,
             gender:      r.gender ?? null,
             age:         r.age ?? null,
-            percentage:  r.percentage ? Number(r.percentage) : null,
+            percentage:  csvCellNumberOrZero(r.percentage),
             collected_at: new Date().toISOString(),
           }))
           if (upsertData.length > 0) {
@@ -223,13 +224,13 @@ async function runBatch() {
               line_rewardcard_id:      cardId,
               date:                    targetDate,
               name:                    r.name ?? '',
-              valid_cards:             r.validCards             ? Number(r.validCards)             : null,
-              issued_cards:            r.issuedCards            ? Number(r.issuedCards)            : null,
-              store_visit_points:      r.storeVisitPoints       ? Number(r.storeVisitPoints)       : null,
-              welcome_bonuses_awarded: r.WelcomeBonusesAwarded  ? Number(r.WelcomeBonusesAwarded)  : null,
-              expired_points:          r.expiredPoints          ? Number(r.expiredPoints)          : null,
-              vouchers_awarded:        r.vouchersAwarded        ? Number(r.vouchersAwarded)        : null,
-              vouchers_used:           r.vouchersUsed           ? Number(r.vouchersUsed)           : null,
+              valid_cards:             csvCellNumberOrZero(r.validCards),
+              issued_cards:            csvCellNumberOrZero(r.issuedCards),
+              store_visit_points:      csvCellNumberOrZero(r.storeVisitPoints),
+              welcome_bonuses_awarded: csvCellNumberOrZero(r.WelcomeBonusesAwarded),
+              expired_points:          csvCellNumberOrZero(r.expiredPoints),
+              vouchers_awarded:        csvCellNumberOrZero(r.vouchersAwarded),
+              vouchers_used:           csvCellNumberOrZero(r.vouchersUsed),
               deleted:                 r.deleted === 'true',
               collected_at:            new Date().toISOString(),
             }))
@@ -260,7 +261,7 @@ async function runBatch() {
                 line_rewardcard_id: cardId,
                 date:               targetDate,
                 point:              Number(r.point),
-                users:              r.users ? Number(r.users) : null,
+                users:              csvCellNumberOrZero(r.users),
                 collected_at:       new Date().toISOString(),
               }))
             if (upsertData.length > 0) {
@@ -294,7 +295,7 @@ async function runBatch() {
                 txn_datetime:       parseLineDateTime(r['Date Time']),
                 customer_id:        r['Customer ID'],
                 point_type:         r['Point Type'] ?? null,
-                points:             r['Points'] ? Number(r['Points']) : null,
+                points:             csvCellNumberOrZero(r['Points']),
                 collected_at:       new Date().toISOString(),
               }))
             if (upsertData.length > 0) {
