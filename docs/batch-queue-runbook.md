@@ -56,3 +56,12 @@
 ## キュー `job_name` 一覧（代表）
 
 Cron 分解後の主な `job_name` とペイロードの対応は `src/lib/batch/batch-enqueue-by-slug.ts` を参照。
+
+## TODO（バックログ）
+
+詳細は `docs/batch-queue-cron-remaining-work-plan.md` の「未完了」を参照。
+
+- [ ] **外部キュー（Inngest / QStash 等）** — Postgres `batch_job_queue` の代替・併用の検討（任意。導入時の得失は計画書の TODO 節に記載）
+- [ ] **`npm run lint` 全リポジトリクリーン**
+- [ ] **DB staging・ジョブ別 concurrency の本番チューニング**
+- [ ] **`gbp_batch_runs` / `line_oam_batch_runs` の run 設計** — 現状は実装スコープ外（必要になったら別タスク）
