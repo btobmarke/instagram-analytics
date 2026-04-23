@@ -4,7 +4,7 @@ export const maxDuration = 300
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { validateBatchRequest, logBatchAuthFailure } from '@/lib/utils/batch-auth'
-import { syncGoogleAdsForServiceConfig } from '@/lib/google-ads/sync-service'
+import { runGoogleAdsForService } from '@/lib/batch/queue-job-handlers/google-ads-service'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 
 export async function GET(request: NextRequest) {
@@ -84,7 +84,7 @@ async function runBatch(request: NextRequest) {
         customer_id: cfg.customer_id,
       })
       try {
-        await syncGoogleAdsForServiceConfig(admin, cfg)
+        await runGoogleAdsForService(admin, { service_id: serviceId })
         processed += 1
         console.info('[google-ads-daily] service finished ok', { serviceId })
       } catch (err) {

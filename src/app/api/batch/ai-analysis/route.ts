@@ -22,7 +22,8 @@ export async function POST(request: Request) {
   return runAiAnalysisBatch(accountIdFilter)
 }
 
-async function runAiAnalysisBatch(accountIdFilter?: string) {
+/** キューワーカー・内部呼び出し用 */
+export async function runAiAnalysisBatch(accountIdFilter?: string) {
   const admin = createSupabaseAdminClient()
   const startedAt = new Date()
   let processed = 0

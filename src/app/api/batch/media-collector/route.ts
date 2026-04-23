@@ -2,12 +2,10 @@ export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
-import { InstagramApiError, InstagramClient, isRateLimitExceeded } from '@/lib/instagram/client'
-import { resolveClientIdFromServiceJoin } from '@/lib/batch/resolve-service-client-id'
-import { decrypt } from '@/lib/utils/crypto'
+import { InstagramApiError } from '@/lib/instagram/client'
 import { validateBatchRequest } from '@/lib/utils/batch-auth'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
-import { upsertActiveStoriesPages } from '@/lib/batch/sync-instagram-stories-media'
+import { runMediaCollectorForAccount } from '@/lib/batch/media-collector-one-account'
 
 // POST /api/batch/media-collector
 // Vercel Cron or manual trigger: 投稿一覧の同期
@@ -53,15 +51,8 @@ export async function POST(request: Request) {
 
     for (const account of (accounts ?? [])) {
       try {
-        // service_id → project_id → client_id → client_ig_tokens
-        const { data: svcRow } = await admin
-          .from('services')
-          .select('project_id, projects!inner(client_id)')
-          .eq('id', account.service_id!)
-          .single()
-
-        const clientId = resolveClientIdFromServiceJoin(svcRow)
-        if (!clientId) {
+        const r = await runMediaCollectorForAccount(admin, account)
+        if (r.skippedNoClient) {
           skippedNoClient++
           console.warn('[media-collector] skip account (cannot resolve client)', {
             account_id: account.id,
@@ -69,83 +60,18 @@ export async function POST(request: Request) {
           })
           continue
         }
-
-        const { data: tokenRow } = await admin
-          .from('client_ig_tokens')
-          .select('access_token_enc')
-          .eq('client_id', clientId)
-          .eq('is_active', true)
-          .single()
-
-        if (!tokenRow) {
+        if (r.skippedNoToken) {
           skippedNoToken++
           console.warn('[media-collector] skip account (no active token for client)', {
             account_id: account.id,
-            client_id: clientId,
           })
           continue
         }
-
-        const accessToken = decrypt(tokenRow.access_token_enc)
-        const igClient = new InstagramClient(accessToken, account.platform_account_id, {
-          apiBaseUrl: account.api_base_url ?? undefined,
-          apiVersion: account.api_version ?? undefined,
-        })
-
-        const upsertIgMediaRow = async (m: Record<string, unknown>) => {
-          await admin.from('ig_media').upsert({
-            account_id: account.id,
-            platform_media_id: m.id as string,
-            media_type: m.media_type as string,
-            media_product_type: m.media_product_type as string | null,
-            caption: m.caption as string | null,
-            permalink: m.permalink as string | null,
-            thumbnail_url: m.thumbnail_url as string | null,
-            media_url: m.media_url as string | null,
-            children_json: m.children ?? null,
-            posted_at: m.timestamp as string,
-            shortcode: m.shortcode as string | null,
-            is_comment_enabled: m.is_comment_enabled as boolean | null,
-            updated_at: new Date().toISOString(),
-          }, { onConflict: 'account_id,platform_media_id' })
-        }
-
-        // 直近90日分の投稿を取得（フィード／リール等）
-        const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
-        let after: string | undefined
-        let pageCount = 0
-
-        while (pageCount < 10) {
-          const { data: response, paging, rateUsage } = await igClient.getMediaList({ limit: 50, after, since })
-          if (isRateLimitExceeded(rateUsage, 70)) break
-
-          const mediaList = (response as { data: unknown[] })?.data ?? []
-
-          for (const media of mediaList) {
-            const m = media as Record<string, unknown>
-            try {
-              await upsertIgMediaRow(m)
-              totalProcessed++
-            } catch (rowErr) {
-              totalFailed++
-              console.error('[media-collector] upsert row failed', account.id, rowErr)
-            }
-          }
-
-          after = paging?.cursors?.after
-          if (!paging?.next || !after) break
-          pageCount++
-        }
-
-        // アクティブなストーリー（別エッジ。24時間経過で API から消える）
-        const st = await upsertActiveStoriesPages(igClient, upsertIgMediaRow, {
-          accountId: account.id,
-          logPrefix: 'media-collector',
-        })
-        if (st.listFetchFailed) storyListFetchFailures += 1
-        if (st.rateLimitStoppedEarly) storyRateLimitEarlyStops += 1
-        totalProcessed += st.processed
-        totalFailed += st.failed
+        if (r.storyListFetchFailures) storyListFetchFailures += 1
+        if (r.storyRateLimitEarlyStops) storyRateLimitEarlyStops += 1
+        if (r.tokenInvalid) tokenInvalid = true
+        totalProcessed += r.processed
+        totalFailed += r.failed
       } catch (loopErr) {
         totalFailed++
         const msg = loopErr instanceof Error ? loopErr.message : String(loopErr)

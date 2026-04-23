@@ -22,7 +22,8 @@ function percentileSorted(sortedAsc: number[], p: number): number | null {
  * - トップ投稿のレトロ要約を通知行に載せる
  * - 同一週データの 75 パーセンタイルの 1.4 倍以上の初速を「アラート」行に載せる（相対基準）
  */
-async function runBatch(accountIdFilter?: string) {
+/** キューワーカー・内部呼び出し用 */
+export async function runInstagramVelocityRetroBatch(accountIdFilter?: string) {
   const admin = createSupabaseAdminClient()
   const startedAt = new Date()
 
@@ -164,7 +165,7 @@ export async function POST(request: Request) {
   const accountIdFilter = typeof (body as { account_id?: string }).account_id === 'string'
     ? (body as { account_id: string }).account_id
     : undefined
-  return runBatch(accountIdFilter)
+  return runInstagramVelocityRetroBatch(accountIdFilter)
 }
 
 export async function GET(request: Request) {
@@ -174,5 +175,5 @@ export async function GET(request: Request) {
   }
   const url = new URL(request.url)
   const accountIdFilter = url.searchParams.get('account_id') ?? undefined
-  return runBatch(accountIdFilter ?? undefined)
+  return runInstagramVelocityRetroBatch(accountIdFilter ?? undefined)
 }
