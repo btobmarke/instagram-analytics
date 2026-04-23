@@ -125,6 +125,19 @@ const GBP_REVIEW: [string, string, string][] = [
   ['reply_comment',     '返信本文',  'ビジネスオーナーが返信したテキスト内容。'],
   ['reply_update_time', '返信日時',  'ビジネスオーナーが返信した日時。'],
 ]
+/** 各列＝その期間の終端時点までの累計（create_time < 期間.end）。RPC: gbp_reviews_cumulative_by_cutoffs */
+const GBP_REVIEW_CUMULATIVE: [string, string, string][] = [
+  [
+    'cumulative_avg_star_rating',
+    '累計・平均評価（各列の期間末までの星）',
+    '各列の期間の終わりの時点より前に投稿されたクチコミのみを対象に、星 ONE〜FIVE の算術平均（1〜5）。左の列ほど過去の時点の平均になります。',
+  ],
+  [
+    'cumulative_review_count',
+    '累計・口コミ件数（各列の期間末まで）',
+    '各列の期間の終わりの時点より前に投稿されたクチコミ行の件数。左の列ほど過去の時点の累計件数になります。',
+  ],
+]
 
 /** バッチ集計: 投稿日（JST）× 星の件数。stars_none = 星未指定・NULL・想定外 */
 const GBP_REVIEW_STAR_COUNTS: [string, string, string][] = [
@@ -335,6 +348,7 @@ export function getMetricCatalog(serviceType: string): MetricCard[] {
       ...GBP_PERF  .map(([f,l,d]) => card('gbp_performance_daily',     f, l, 'パフォーマンス', d)),
       ...GBP_SEARCH_KW.map(([f,l,d]) => card('gbp_search_keyword_monthly', f, l, '検索キーワード（月次）', d)),
       ...GBP_REVIEW.map(([f,l,d]) => card('gbp_reviews',               f, l, 'クチコミ',       d)),
+      ...GBP_REVIEW_CUMULATIVE.map(([f,l,d]) => card('gbp_reviews', f, l, 'クチコミ（累計）', d)),
       ...GBP_REVIEW_STAR_COUNTS.map(([f,l,d]) => card('gbp_review_star_counts_daily', f, l, 'クチコミ（星別・日次）', d)),
     ]
     case 'line': return [

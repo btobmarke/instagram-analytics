@@ -24,6 +24,16 @@ export interface Period {
   rangeEnd?: string
 }
 
+/** PostgREST の DATE / TIMESTAMPTZ 文字列先頭から YYYY-MM-DD を取り出す */
+export function parseSqlDateToYmd(raw: unknown): string | null {
+  if (raw == null) return null
+  if (typeof raw === 'string') {
+    const m = raw.trim().match(/^(\d{4}-\d{2}-\d{2})/)
+    return m ? m[1]! : null
+  }
+  return null
+}
+
 // ── 期間生成 ────────────────────────────────────────────────────────────────
 
 function generatePeriods(unit: TimeUnit, count: number): Period[] {
@@ -734,31 +744,70 @@ export async function fetchGbpPerformance(
 ): Promise<Record<string, Record<string, number | null>>> {
   const result: Record<string, Record<string, number | null>> = {}
 
-  const { data: siteRow } = await supabase
+  const { data: siteRow, error: siteErr } = await supabase
     .from('gbp_sites')
     .select('id')
     .eq('service_id', serviceId)
-    .single()
+    .maybeSingle()
+  if (siteErr) {
+    console.error('[fetch-metrics] gbp_sites lookup failed', { serviceId, error: siteErr })
+  }
   if (!siteRow) return result
 
   const siteId = siteRow.id
-  const rangeStart = periods[0].start.toISOString().slice(0, 10)
-  const rangeEnd   = periods[periods.length - 1].end.toISOString().slice(0, 10)
-  const selectCols = ['date', ...fields].join(',')
+  const p0 = periods[0]
+  const pLast = periods[periods.length - 1]
+  const dayKeys = periods.map(p => p.dateKey).filter((k): k is string => Boolean(k))
+  const dateKeyToLabel: Map<string, string> | null =
+    dayKeys.length === periods.length && dayKeys.length > 0 ? new Map() : null
+  if (dateKeyToLabel) {
+    for (const p of periods) {
+      if (p.dateKey) dateKeyToLabel.set(p.dateKey, p.label)
+    }
+  }
+  let rangeStart: string
+  let rangeEnd: string
+  if (periods.length === 1 && p0.rangeStart && p0.rangeEnd) {
+    rangeStart = p0.rangeStart
+    rangeEnd = p0.rangeEnd
+  } else if (dayKeys.length === periods.length && dayKeys.length > 0) {
+    const sorted = [...dayKeys].sort()
+    rangeStart = sorted[0]!
+    rangeEnd = sorted[sorted.length - 1]!
+  } else {
+    rangeStart = p0.start.toISOString().slice(0, 10)
+    rangeEnd = pLast.end.toISOString().slice(0, 10)
+  }
+  const selectCols = ['date', ...new Set(fields.filter(Boolean))].join(',')
 
-  const { data: rawRows } = await supabase
+  const { data: rawRows, error } = await supabase
     .from('gbp_performance_daily')
     .select(selectCols)
     .eq('gbp_site_id', siteId)
     .gte('date', rangeStart)
     .lte('date', rangeEnd)
+  if (error) {
+    console.error('[fetch-metrics] gbp_performance_daily query failed', { serviceId, error })
+  }
   const rows = (rawRows ?? []) as unknown as Record<string, unknown>[]
 
   for (const field of fields) {
+    if (!field) continue
     const accum = emptyAccum(periods)
     for (const row of rows) {
-      const label = bucketDate(new Date(row.date as string), periods)
-      addValue(accum, label, row[field] as number)
+      const vd = parseSqlDateToYmd(row.date)
+      if (!vd) continue
+      let label: string | null = null
+      if (periods.length === 1 && p0.rangeStart && p0.rangeEnd) {
+        if (vd >= p0.rangeStart && vd <= p0.rangeEnd) label = p0.label
+      } else {
+        label = dateKeyToLabel?.get(vd) ?? null
+      }
+      if (label == null) {
+        label = bucketDate(new Date(`${vd}T12:00:00+09:00`), periods)
+      }
+      const n = Number(row[field])
+      addValue(accum, label, Number.isFinite(n) ? n : null)
     }
     result[`gbp_performance_daily.${field}`] = finalizeAccum(accum, AVG_FIELDS.has(field) ? 'avg' : 'sum')
   }
@@ -770,10 +819,19 @@ export async function fetchGbpPerformance(
  * date軸: create_time TIMESTAMPTZ
  * star_rating は 'ONE'→1 … 'FIVE'→5 に変換して avg
  * テキスト系フィールド（comment, reviewer_name, reply_comment等）は non-null 件数を返す
+ *
+ * cumulative_* は各列＝その期間終端（Period.end）より前の create_time までの累計。カタログ名と一致させること。
  */
 const STAR_RATING_MAP: Record<string, number> = {
   ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5,
 }
+
+const GBP_REVIEW_CUMULATIVE_FIELDS = new Set(['cumulative_avg_star_rating', 'cumulative_review_count'])
+
+function gbpReviewCumulativeNullRow(periods: Period[]): Record<string, number | null> {
+  return Object.fromEntries(periods.map(p => [p.label, null]))
+}
+
 export async function fetchGbpReviews(
   supabase: SupabaseServerClient,
   serviceId: string,
@@ -782,42 +840,113 @@ export async function fetchGbpReviews(
 ): Promise<Record<string, Record<string, number | null>>> {
   const result: Record<string, Record<string, number | null>> = {}
 
-  const { data: siteRow } = await supabase
+  const { data: siteRow, error: siteErr } = await supabase
     .from('gbp_sites')
     .select('id')
     .eq('service_id', serviceId)
-    .single()
+    .maybeSingle()
+  if (siteErr) {
+    console.error('[fetch-metrics] gbp_sites lookup failed (gbp_reviews)', { serviceId, error: siteErr })
+  }
   if (!siteRow) return result
 
   const siteId = siteRow.id
-  const rangeStart = periods[0].start.toISOString()
-  const rangeEnd   = periods[periods.length - 1].end.toISOString()
-  // create_time はカタログフィールドにも含まれるため Set で重複を排除
-  const selectCols = [...new Set(['create_time', ...fields])].join(',')
+  const rowFields = [...new Set(fields.filter(Boolean))].filter(f => !GBP_REVIEW_CUMULATIVE_FIELDS.has(f))
+  const cumFields = [...new Set(fields.filter(Boolean))].filter(f => GBP_REVIEW_CUMULATIVE_FIELDS.has(f))
 
-  const { data: rawRows } = await supabase
-    .from('gbp_reviews')
-    .select(selectCols)
-    .eq('gbp_site_id', siteId)
-    .gte('create_time', rangeStart)
-    .lte('create_time', rangeEnd)
-  const rows = (rawRows ?? []) as unknown as Record<string, unknown>[]
+  if (rowFields.length > 0) {
+    const rangeStart = periods[0].start.toISOString()
+    const rangeEnd = periods[periods.length - 1].end.toISOString()
+    // create_time はカタログフィールドにも含まれるため Set で重複を排除
+    const selectCols = [...new Set(['create_time', ...rowFields])].join(',')
 
-  for (const field of fields) {
-    const accum = emptyAccum(periods)
-    for (const row of rows) {
-      const label = bucketDate(new Date(row.create_time as string), periods)
-      if (field === 'star_rating') {
-        const num = STAR_RATING_MAP[row[field] as string] ?? null
-        addValue(accum, label, num)
+    const { data: rawRows, error: rowErr } = await supabase
+      .from('gbp_reviews')
+      .select(selectCols)
+      .eq('gbp_site_id', siteId)
+      .gte('create_time', rangeStart)
+      .lte('create_time', rangeEnd)
+    if (rowErr) {
+      console.error('[fetch-metrics] gbp_reviews row query failed', { serviceId, error: rowErr })
+    }
+    const rows = (rawRows ?? []) as unknown as Record<string, unknown>[]
+
+    for (const field of rowFields) {
+      const accum = emptyAccum(periods)
+      for (const row of rows) {
+        const label = bucketDate(new Date(row.create_time as string), periods)
+        if (field === 'star_rating') {
+          const num = STAR_RATING_MAP[row[field] as string] ?? null
+          addValue(accum, label, num)
+        } else {
+          // テキスト系: non-null なら 1 としてカウント
+          addValue(accum, label, row[field] != null ? 1 : null)
+        }
+      }
+      // star_rating のみ平均、その他はカウント（sum）
+      result[`gbp_reviews.${field}`] = finalizeAccum(accum, field === 'star_rating' ? 'avg' : 'sum')
+    }
+  }
+
+  if (cumFields.length > 0) {
+    const nullRow = gbpReviewCumulativeNullRow(periods)
+    if (periods.length === 0) {
+      for (const f of cumFields) {
+        result[`gbp_reviews.${f}`] = {}
+      }
+    } else {
+      const cutoffs = periods.map(p => p.end.toISOString())
+      const { data: rpcRows, error: rpcErr } = await supabase.rpc('gbp_reviews_cumulative_by_cutoffs', {
+        p_site_id: siteId,
+        p_cutoffs: cutoffs,
+      })
+      if (rpcErr) {
+        console.error('[fetch-metrics] gbp_reviews_cumulative_by_cutoffs rpc failed', {
+          serviceId,
+          siteId,
+          error: rpcErr,
+        })
+        for (const f of cumFields) {
+          result[`gbp_reviews.${f}`] = { ...nullRow }
+        }
       } else {
-        // テキスト系: non-null なら 1 としてカウント
-        addValue(accum, label, row[field] != null ? 1 : null)
+        type RpcCum = { ord: number; total_review_count: unknown; avg_star_rating: unknown }
+        const list = (Array.isArray(rpcRows) ? rpcRows : []) as RpcCum[]
+        const byOrd = new Map<number, { cnt: number | null; avg: number | null }>()
+        for (const r of list) {
+          if (r.ord == null || !Number.isFinite(Number(r.ord))) continue
+          const ord = Math.trunc(Number(r.ord))
+          const cntRaw = r.total_review_count
+          const cnt =
+            cntRaw != null && Number.isFinite(Number(cntRaw)) ? Math.trunc(Number(cntRaw)) : null
+          const avgRaw = r.avg_star_rating
+          const avg =
+            avgRaw != null && Number.isFinite(Number(avgRaw)) ? Math.round(Number(avgRaw) * 100) / 100 : null
+          byOrd.set(ord, { cnt, avg })
+        }
+
+        const countByLabel: Record<string, number | null> = {}
+        const avgByLabel: Record<string, number | null> = {}
+        for (let i = 0; i < periods.length; i++) {
+          const label = periods[i].label
+          const cell = byOrd.get(i + 1)
+          countByLabel[label] = cell?.cnt ?? null
+          avgByLabel[label] = cell?.avg ?? null
+        }
+
+        for (const f of cumFields) {
+          if (f === 'cumulative_review_count') {
+            result[`gbp_reviews.${f}`] = countByLabel
+          } else if (f === 'cumulative_avg_star_rating') {
+            result[`gbp_reviews.${f}`] = avgByLabel
+          } else {
+            result[`gbp_reviews.${f}`] = { ...nullRow }
+          }
+        }
       }
     }
-    // star_rating のみ平均、その他はカウント（sum）
-    result[`gbp_reviews.${field}`] = finalizeAccum(accum, field === 'star_rating' ? 'avg' : 'sum')
   }
+
   return result
 }
 
@@ -832,31 +961,70 @@ export async function fetchGbpReviewStarCountsDaily(
 ): Promise<Record<string, Record<string, number | null>>> {
   const result: Record<string, Record<string, number | null>> = {}
 
-  const { data: siteRow } = await supabase
+  const { data: siteRow, error: siteErr } = await supabase
     .from('gbp_sites')
     .select('id')
     .eq('service_id', serviceId)
-    .single()
+    .maybeSingle()
+  if (siteErr) {
+    console.error('[fetch-metrics] gbp_sites lookup failed', { serviceId, error: siteErr })
+  }
   if (!siteRow) return result
 
   const siteId = siteRow.id
-  const rangeStart = periods[0].start.toISOString().slice(0, 10)
-  const rangeEnd = periods[periods.length - 1].end.toISOString().slice(0, 10)
-  const selectCols = ['date', ...fields].join(',')
+  const p0 = periods[0]
+  const pLast = periods[periods.length - 1]
+  const dayKeys = periods.map(p => p.dateKey).filter((k): k is string => Boolean(k))
+  const dateKeyToLabel: Map<string, string> | null =
+    dayKeys.length === periods.length && dayKeys.length > 0 ? new Map() : null
+  if (dateKeyToLabel) {
+    for (const p of periods) {
+      if (p.dateKey) dateKeyToLabel.set(p.dateKey, p.label)
+    }
+  }
+  let rangeStart: string
+  let rangeEnd: string
+  if (periods.length === 1 && p0.rangeStart && p0.rangeEnd) {
+    rangeStart = p0.rangeStart
+    rangeEnd = p0.rangeEnd
+  } else if (dayKeys.length === periods.length && dayKeys.length > 0) {
+    const sorted = [...dayKeys].sort()
+    rangeStart = sorted[0]!
+    rangeEnd = sorted[sorted.length - 1]!
+  } else {
+    rangeStart = p0.start.toISOString().slice(0, 10)
+    rangeEnd = pLast.end.toISOString().slice(0, 10)
+  }
+  const selectCols = ['date', ...new Set(fields.filter(Boolean))].join(',')
 
-  const { data: rawRows } = await supabase
+  const { data: rawRows, error } = await supabase
     .from('gbp_review_star_counts_daily')
     .select(selectCols)
     .eq('gbp_site_id', siteId)
     .gte('date', rangeStart)
     .lte('date', rangeEnd)
+  if (error) {
+    console.error('[fetch-metrics] gbp_review_star_counts_daily query failed', { serviceId, error })
+  }
   const rows = (rawRows ?? []) as unknown as Record<string, unknown>[]
 
   for (const field of fields) {
+    if (!field) continue
     const accum = emptyAccum(periods)
     for (const row of rows) {
-      const label = bucketDate(new Date(row.date as string), periods)
-      addValue(accum, label, row[field] as number)
+      const vd = parseSqlDateToYmd(row.date)
+      if (!vd) continue
+      let label: string | null = null
+      if (periods.length === 1 && p0.rangeStart && p0.rangeEnd) {
+        if (vd >= p0.rangeStart && vd <= p0.rangeEnd) label = p0.label
+      } else {
+        label = dateKeyToLabel?.get(vd) ?? null
+      }
+      if (label == null) {
+        label = bucketDate(new Date(`${vd}T12:00:00+09:00`), periods)
+      }
+      const n = Number(row[field])
+      addValue(accum, label, Number.isFinite(n) ? n : null)
     }
     result[`gbp_review_star_counts_daily.${field}`] = finalizeAccum(accum, 'sum')
   }
