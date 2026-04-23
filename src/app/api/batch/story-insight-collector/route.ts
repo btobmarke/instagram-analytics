@@ -1,4 +1,5 @@
 export const dynamic = 'force-dynamic'
+export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
@@ -8,6 +9,7 @@ import { resolveClientIdFromServiceJoin } from '@/lib/batch/resolve-service-clie
 import { decrypt } from '@/lib/utils/crypto'
 import { validateBatchRequest } from '@/lib/utils/batch-auth'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
+import { closeStaleRunningBatchLogs } from '@/lib/batch/close-stale-running-batch-logs'
 
 /** `ig_story_insight_fact.value` は BIGINT。非有限・範囲外は null */
 function toStoryInsightBigintValue(v: unknown): number | null {
@@ -48,6 +50,8 @@ export async function POST(request: Request) {
   const startedAt = new Date()
   let totalProcessed = 0
   let totalFailed = 0
+
+  await closeStaleRunningBatchLogs(admin, ['hourly_story_insight_collector'])
 
   const { data: jobLog } = await admin.from('batch_job_logs').insert({
     job_name: 'hourly_story_insight_collector',
