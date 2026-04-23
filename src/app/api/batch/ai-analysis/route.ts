@@ -14,6 +14,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const body = await request.json().catch(() => ({}))
+  const accountIdFilter = typeof (body as { account_id?: string }).account_id === 'string'
+    ? (body as { account_id: string }).account_id
+    : undefined
+
+  return runAiAnalysisBatch(accountIdFilter)
+}
+
+async function runAiAnalysisBatch(accountIdFilter?: string) {
   const admin = createSupabaseAdminClient()
   const startedAt = new Date()
   let processed = 0
@@ -27,7 +36,9 @@ export async function POST(request: Request) {
   }).select().single()
 
   try {
-    const { data: accounts } = await admin.from('ig_accounts').select('id, username').eq('status', 'active')
+    let acctQ = admin.from('ig_accounts').select('id, username').eq('status', 'active')
+    if (accountIdFilter) acctQ = acctQ.eq('id', accountIdFilter)
+    const { data: accounts } = await acctQ
     const { data: kpiMasters } = await admin.from('kpi_master').select('*')
 
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
@@ -108,14 +119,16 @@ export async function POST(request: Request) {
       }).eq('id', jobLog.id)
     }
 
-    await notifyBatchSuccess({
-      jobName: 'weekly_ai_analysis',
-      processed,
-      executedAt: startedAt,
-      lines: ['種別: account_weekly'],
-    })
+    if (!accountIdFilter) {
+      await notifyBatchSuccess({
+        jobName: 'weekly_ai_analysis',
+        processed,
+        executedAt: startedAt,
+        lines: ['種別: account_weekly'],
+      })
+    }
 
-    return NextResponse.json({ success: true, processed })
+    return NextResponse.json({ success: true, processed, shard: Boolean(accountIdFilter) })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     if (jobLog) {
@@ -126,18 +139,25 @@ export async function POST(request: Request) {
         duration_ms: Date.now() - startedAt.getTime(),
       }).eq('id', jobLog.id)
     }
-    await notifyBatchError({
-      jobName: 'weekly_ai_analysis',
-      processed: 0,
-      errorCount: 1,
-      errors: [{ error: message }],
-      executedAt: startedAt,
-    })
+    if (!accountIdFilter) {
+      await notifyBatchError({
+        jobName: 'weekly_ai_analysis',
+        processed: 0,
+        errorCount: 1,
+        errors: [{ error: message }],
+        executedAt: startedAt,
+      })
+    }
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }
 
 // Vercel Cron は GET で呼び出す
 export async function GET(request: Request) {
-  return POST(request)
+  if (!validateBatchRequest(request)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  const url = new URL(request.url)
+  const accountIdFilter = url.searchParams.get('account_id') ?? undefined
+  return runAiAnalysisBatch(accountIdFilter)
 }

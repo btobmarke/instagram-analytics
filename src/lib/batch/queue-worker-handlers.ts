@@ -68,6 +68,7 @@ async function processBatchProxyRow(admin: SupabaseClient, row: BatchJobQueueRow
   }
 
   const method: 'GET' | 'POST' = p.method === 'GET' ? 'GET' : 'POST'
+  const t0 = Date.now()
 
   try {
     const res = await forwardBatchRequest(origin, auth, {
@@ -76,12 +77,59 @@ async function processBatchProxyRow(admin: SupabaseClient, row: BatchJobQueueRow
       query: p.query,
       body: p.body,
     })
+    const durationMs = Date.now() - t0
     if (!res.ok) {
       const text = await res.text().catch(() => '')
+      if (process.env.BATCH_PROXY_JOB_LOGS !== 'false') {
+        await admin.from('batch_job_logs').insert({
+          job_name: 'batch_proxy',
+          project_id: row.project_id,
+          status: 'failed',
+          trigger_source: 'queue_worker',
+          correlation_id: row.correlation_id,
+          idempotency_key: row.idempotency_key,
+          started_at: new Date(t0).toISOString(),
+          finished_at: new Date().toISOString(),
+          duration_ms: durationMs,
+          records_processed: 0,
+          records_failed: 1,
+          error_message: `HTTP ${res.status}: ${text.slice(0, 2000)}`,
+          job_metadata: {
+            queue_job_id: row.id,
+            target_path: path,
+            method,
+            query: p.query ?? null,
+            body_keys: p.body ? Object.keys(p.body) : [],
+          },
+        })
+      }
       await failBatchJob(admin, row.id, `HTTP ${res.status}: ${text.slice(0, 800)}`, {
         requeueDelayMs: 120_000,
       })
       return { ok: false, error: `HTTP ${res.status}` }
+    }
+    if (process.env.BATCH_PROXY_JOB_LOGS !== 'false') {
+      await admin.from('batch_job_logs').insert({
+        job_name: 'batch_proxy',
+        project_id: row.project_id,
+        status: 'success',
+        trigger_source: 'queue_worker',
+        correlation_id: row.correlation_id,
+        idempotency_key: row.idempotency_key,
+        started_at: new Date(t0).toISOString(),
+        finished_at: new Date().toISOString(),
+        duration_ms: durationMs,
+        records_processed: 1,
+        records_failed: 0,
+        job_metadata: {
+          queue_job_id: row.id,
+          target_path: path,
+          method,
+          http_status: res.status,
+          query: p.query ?? null,
+          body_keys: p.body ? Object.keys(p.body) : [],
+        },
+      })
     }
     await completeBatchJob(admin, row.id)
     return { ok: true }

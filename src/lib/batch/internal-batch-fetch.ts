@@ -58,9 +58,16 @@ export async function forwardBatchRequest(
     headers['Content-Type'] = 'application/json'
   }
 
+  const timeoutMs = Math.min(
+    290_000,
+    Math.max(30_000, parseInt(process.env.BATCH_PROXY_FETCH_TIMEOUT_MS ?? '240000', 10) || 240_000)
+  )
+  const signal = AbortSignal.timeout(timeoutMs)
+
   return fetch(url, {
     method,
     headers,
     body: method === 'POST' ? JSON.stringify(payload.body ?? {}) : undefined,
+    signal,
   })
 }

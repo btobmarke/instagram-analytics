@@ -17,6 +17,8 @@
 | `BATCH_WORKER_SECRET` | （任意）ワーカー専用。設定時は `Authorization: Bearer <BATCH_WORKER_SECRET>` でもワーカー起動可 |
 | `BATCH_QUEUE_DISABLED` | `true` のとき `weather-sync` は従来の **一括インライン**処理（緊急用） |
 | `BATCH_CRON_GROUPS_USE_QUEUE` | `false` で Cron グループが従来どおり **各バッチへ直接 POST** |
+| `BATCH_PROXY_JOB_LOGS` | `false` で **`batch_proxy` 完了時の `batch_job_logs` 行を抑制**（子バッチが既にログる場合の重複軽減） |
+| `BATCH_PROXY_FETCH_TIMEOUT_MS` | 内部 `fetch` のタイムアウト（既定 240000ms、上限 290000ms にクランプ） |
 | `NEXT_PUBLIC_APP_URL` / `VERCEL_URL` | Cron グループの子 `fetch` に必要 |
 
 ## マイグレーション
@@ -25,6 +27,8 @@
 
 ## 手動 API
 
+- **`POST /api/batch/enqueue`**（Bearer **CRON_SECRET / BATCH_SECRET** のみ）  
+  - Body: `{ "job_slug": "ga4-collector" }` … `enqueueCronBatchJobsForSlug` と同じ分解投入（Cron グループと同じスラッグ名）
 - **`POST /api/batch/weather-sync/enqueue`**  
   - `{ "scope": "project", "project_id": "<uuid>" }` … ログインユーザー（プロジェクト参照可のみ）  
   - `{ "scope": "all_active_projects" }` … **Bearer CRON_SECRET / BATCH_SECRET のみ**
@@ -44,6 +48,7 @@
 | `ga4-collector` / `clarity-collector` | POST body `service_id` |
 | `media-collector` / `insight-collector` / `kpi-calc` | POST body `account_id` |
 | `story-*` | POST body `account_id` |
+| `ai-analysis` / `instagram-velocity-retro` | POST body `account_id`（週次は **UTC 月曜始まりの週**で冪等キー）。**シャード時は通知（notify）を送らない** |
 | `lp-session-cleanup` / `lp-aggregate` | `?lp_site_id=<uuid>` |
 | `line-oam-daily` | POST body `service_id`（**サービスごとに `line_oam_batch_runs` が1行**） |
 | `gbp-daily` | `?site_id=<gbp_site uuid>`（**サイトごとに `gbp_batch_runs` が1行**。並列日次では run が複数になる） |

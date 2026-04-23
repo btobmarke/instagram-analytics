@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "lint:batch": "eslint src/lib/batch/batch-queue.ts src/lib/batch/batch-enqueue-by-slug.ts src/lib/batch/internal-batch-fetch.ts src/lib/batch/cron-groups.ts src/lib/batch/cron-groups.test.ts src/lib/batch/queue-types.ts src/lib/batch/queue-weather.ts src/lib/batch/queue-worker-handlers.ts src/lib/batch/jobs/weather-sync-project.ts \"src/app/api/batch/cron-groups/**/*.ts\" \"src/app/api/batch/weather-sync/**/*.ts\" \"src/app/api/internal/batch-queue-worker/**/*.ts\" \"src/app/api/projects/**/batch-logs/**/*.ts\"",
+    "lint:batch": "eslint src/lib/batch/batch-queue.ts src/lib/batch/batch-enqueue-by-slug.ts src/lib/batch/internal-batch-fetch.ts src/lib/batch/cron-groups.ts src/lib/batch/cron-groups.test.ts src/lib/batch/queue-types.ts src/lib/batch/queue-weather.ts src/lib/batch/queue-worker-handlers.ts src/lib/batch/jobs/weather-sync-project.ts src/app/api/batch/enqueue/route.ts src/app/api/batch/ai-analysis/route.ts src/app/api/batch/instagram-velocity-retro/route.ts \"src/app/api/batch/cron-groups/**/*.ts\" \"src/app/api/batch/weather-sync/**/*.ts\" \"src/app/api/internal/batch-queue-worker/**/*.ts\" \"src/app/api/projects/**/batch-logs/**/*.ts\"",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ga4-live": "vitest run src/lib/ga4/ga4-client.live.test.ts",

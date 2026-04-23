@@ -22,10 +22,11 @@
 
 ### 未完了（この計画書の残り）
 
-- **`batch_proxy` を廃し**各ジョブを **DB 内ハンドラのみ**に寄せる（HTTP 二重起動の排除・`gbp_batch_runs` 多重化の解消）
+- **`batch_proxy` を廃し**各ジョブを **DB 内ハンドラのみ**に寄せる（HTTP 二重起動の排除）
 - **外部キュー（Inngest/QStash）**への差し替えは未着手（ADR は Postgres 第一版）
 - **全リポジトリの `npm run lint` クリーン**（既存ファイルの大量 violation）
 - **DB staging・ジョブ別 concurrency の本番チューニング**（ワーカーは `limit` のみ）
+- （除外）**`gbp_batch_runs` / `line_oam_batch_runs` の run 持ち方**はユーザー指示により本計画のスコープ外
 
 ---
 

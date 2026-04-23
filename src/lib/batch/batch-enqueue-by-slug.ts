@@ -360,7 +360,31 @@ export async function enqueueCronBatchJobsForSlug(
     return { correlation_id: correlationId, ...summary }
   }
 
-  // 単一 HTTP（複雑ジョブ）: instagram-velocity-retro, ai-analysis 等
+  if (slug === 'ai-analysis' || slug === 'instagram-velocity-retro') {
+    const { data: accounts, error } = await admin
+      .from('ig_accounts')
+      .select('id, service_id')
+      .eq('status', 'active')
+    if (error) {
+      summary.failed++
+      return { correlation_id: correlationId, ...summary }
+    }
+    const jobKey = slug === 'ai-analysis' ? 'weekly_ai_analysis' : 'instagram_velocity_retro'
+    const weekId = weekStartUtcMondayId()
+    for (const a of accounts ?? []) {
+      await track({
+        project_id: null,
+        service_id: a.service_id,
+        account_id: a.id,
+        idempotency_key: `batch_proxy:${jobKey}:${a.id}:${weekId}`,
+        path: `/api/batch/${slug}`,
+        method: 'POST',
+        body: { account_id: a.id },
+      })
+    }
+    return { correlation_id: correlationId, ...summary }
+  }
+
   await track({
     project_id: null,
     service_id: null,
@@ -371,4 +395,13 @@ export async function enqueueCronBatchJobsForSlug(
     body: {},
   })
   return { correlation_id: correlationId, ...summary }
+}
+
+/** 週次ジョブの冪等キー用: UTC 月曜始まりの週 YYYY-MM-DD */
+function weekStartUtcMondayId(d = new Date()): string {
+  const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+  const day = x.getUTCDay() // 0 Sun .. 6 Sat
+  const diff = day === 0 ? -6 : 1 - day
+  x.setUTCDate(x.getUTCDate() + diff)
+  return x.toISOString().slice(0, 10)
 }
