@@ -1,4 +1,6 @@
 export const dynamic = 'force-dynamic'
+/** 未設定だと Vercel の短い既定上限で kill され、`batch_job_logs` が `running` のまま残る */
+export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
@@ -8,6 +10,7 @@ import { resolveClientIdFromServiceJoin } from '@/lib/batch/resolve-service-clie
 import { decrypt } from '@/lib/utils/crypto'
 import { validateBatchRequest } from '@/lib/utils/batch-auth'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
+import { closeStaleRunningBatchLogs } from '@/lib/batch/close-stale-running-batch-logs'
 
 type MediaInsightRow = {
   id: string
@@ -111,6 +114,8 @@ export async function POST(request: Request) {
   let totalProcessed = 0
   let totalFailed = 0
   let acctInsightTotal = 0
+
+  await closeStaleRunningBatchLogs(admin, ['hourly_media_insight_collector'])
 
   const { data: jobLog } = await admin.from('batch_job_logs').insert({
     job_name: 'hourly_media_insight_collector',
