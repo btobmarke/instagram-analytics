@@ -23,6 +23,7 @@ import {
 } from '@/lib/summary/fetch-metrics'
 import { getMetricCatalogForProjectAggregate } from '@/app/(dashboard)/projects/[projectId]/services/[serviceId]/summary/_lib/catalog'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
+import { finiteNumberOrZero } from '@/lib/batch/numeric-coerce'
 
 /** JST の昨日 YYYY-MM-DD */
 function jstYesterday(): string {
@@ -121,21 +122,16 @@ async function runBatch(request: NextRequest) {
 
         // UPSERT 行を構築
         // custom_range のラベルは "YYYYMMDD~YYYYMMDD" 形式なので period label で値を取る
-        // null 値はキャッシュしない（バッチ未取得日と「値=0」を区別するため & stale null 汚染を防ぐ）
+        // 取得に成功した本バッチ経路では欠損・非数を 0 に寄せてキャッシュする（一次バッチ側と整合）
         const periodLabel = targetPeriods[0].label
-        const upsertRows = fieldRefs
-          .map(ref => ({
-            project_id: svc.project_id,
-            service_id: svc.id,
-            date:       targetDate,
-            metric_ref: ref,
-            value:      rawData[ref]?.[periodLabel] ?? null,
-            updated_at: new Date().toISOString(),
-          }))
-          .filter(row => row.value !== null)
-
-        // upsertRows が空（全フィールドが null）ならスキップ
-        if (upsertRows.length === 0) continue
+        const upsertRows = fieldRefs.map(ref => ({
+          project_id: svc.project_id,
+          service_id: svc.id,
+          date:       targetDate,
+          metric_ref: ref,
+          value:      finiteNumberOrZero(rawData[ref]?.[periodLabel]),
+          updated_at: new Date().toISOString(),
+        }))
 
         // 500件ずつに分割して UPSERT（Supabase の上限対策）
         const CHUNK = 500

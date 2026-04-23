@@ -12,7 +12,8 @@
 - `weather-sync` / `external-data`（天気取得成功時の数値列。未取得日は従来どおり null）
 - Google Ads `sync-service`（CTR・CPC micros・quality_score を含む日次・マスター数値）
 
-未着手の例: `project_metrics_aggregate` のキャッシュ方針、`kpi-calc` の派生 null。
+- `project_metrics_aggregate`（カタログの全 `metric_ref` を対象日で upsert、`value` は `finiteNumberOrZero`）
+- `kpi-calc`（インサイト欠損を 0 として比率計算。`follower_gain_monthly` は欠損フォロワーを 0 扱いで常に insert）
 
 ## 凡例
 
