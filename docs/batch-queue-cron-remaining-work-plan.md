@@ -35,6 +35,7 @@
   - **いつやるか**: Postgres キューで運用・負荷・可観測性に限界を感じたタイミングで検討でよい（現状は `docs/adr/001-batch-queue-postgres.md` の第一版）。
 - [ ] **全リポジトリの `npm run lint` クリーン**（既存ファイルの大量 violation。バッチ周りは `npm run lint:batch` で別カバー）
 - [ ] **DB staging・ジョブ別 concurrency の本番チューニング**（ワーカー `limit`、enqueue 粒度、DB ロックの見直し）
+- [ ] **手動実行のプロジェクト単位（全バッチ）** — **認証・認可（プロジェクト単位の権限）を整えてから**実装するのがよい。**後回し**。現状は `weather-sync` の `POST /api/batch/weather-sync/enqueue`（`scope=project`）のみ。汎用 `POST /api/batch/enqueue` は `job_slug` 全体分解のみで `project_id` 絞り込みなし。
 - [ ] **（スコープ外・参照のみ）** `gbp_batch_runs` / `line_oam_batch_runs` の run 持ち方の整理 — ユーザー指示により本計画の実装スコープ外
 
 ---

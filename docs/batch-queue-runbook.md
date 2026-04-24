@@ -9,7 +9,7 @@
     - 実装は **`src/lib/batch/jobs/*`** と既存 lib（例: `sync-instagram-stories-media`）に集約。HTTP / Route 呼び出しなし。
 - **`POST /api/internal/batch-queue-worker`**: `dequeue_batch_jobs` で最大 N 件取り出し、処理。Vercel Cron（毎分、`limit=15` 既定）で起動。
 - **`POST /api/batch/weather-sync`**: 既定では **キューへ enqueue のみ**（全座標付きプロジェクト）。実データ取得はワーカー側。
-- **Cron グループ**（`/api/batch/cron-groups/*`）: 既定 **`BATCH_CRON_GROUPS_USE_QUEUE` 未設定 or `true`** のとき、各スラッグは **直接 fetch せず** `enqueueCronBatchJobsForSlug` でキュー投入。従来の一括 HTTP に戻す: `BATCH_CRON_GROUPS_USE_QUEUE=false`。
+- **Cron グループ（自動実行）**（`/api/batch/cron-groups/*`）: 既定 **`BATCH_CRON_GROUPS_USE_QUEUE` 未設定 or `true`** のとき、ティックで該当する各スラッグを **`enqueueCronBatchJobsForSlug` で `batch_job_queue` に分割投入**（プロジェクト / サービス / アカウント等のシャード）。**`false`** のときのみ従来どおり各バッチへ **直接 `fetch`**。
 
 ## 環境変数
 
@@ -65,3 +65,4 @@ Cron 分解後の主な `job_name` とペイロードの対応は `src/lib/batch
 - [ ] **`npm run lint` 全リポジトリクリーン**
 - [ ] **DB staging・ジョブ別 concurrency の本番チューニング**
 - [ ] **`gbp_batch_runs` / `line_oam_batch_runs` の run 設計** — 現状は実装スコープ外（必要になったら別タスク）
+- [ ] **手動のプロジェクト単位バッチ（`weather-sync` 以外）** — **認証・認可を先に**整備してから。現状は `weather-sync/enqueue` のみプロジェクトスコープ対応（計画書の TODO を参照）
