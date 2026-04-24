@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useEffect, useState, useMemo } from 'react'
+import { use, useEffect, useState, useMemo, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
@@ -28,7 +28,12 @@ async function summaryQueryFetcher([url, body]: [string, Record<string, unknown>
 }
 import { getMetricCatalog } from '../../_lib/catalog'
 import { getTemplate } from '../../_lib/store'
-import { generateJstDayPeriodLabels, generateJstDayPeriods, generateCustomRangePeriod } from '@/lib/summary/jst-periods'
+import {
+  generateJstDayPeriodLabels,
+  generateJstDayPeriods,
+  generateJstDayPeriodsFromRange,
+  generateCustomRangePeriod,
+} from '@/lib/summary/jst-periods'
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
 const SERVICE_THEME: Record<string, { accent: string; bg: string; border: string; badge: string }> = {
@@ -58,7 +63,12 @@ function generateTimeHeaders(
     if (rangeStart && rangeEnd) return [generateCustomRangePeriod(rangeStart, rangeEnd).label]
     return ['（期間未設定）']
   }
-  if (unit === 'day') return generateJstDayPeriodLabels(count)
+  if (unit === 'day') {
+    if (rangeStart && rangeEnd && rangeStart <= rangeEnd) {
+      return generateJstDayPeriodsFromRange(rangeStart, rangeEnd).map(p => p.label)
+    }
+    return generateJstDayPeriodLabels(count)
+  }
   const headers: string[] = []
   const now = new Date()
   for (let i = count - 1; i >= 0; i--) {
@@ -81,14 +91,6 @@ function isSummaryDataFieldRef(ref: string): boolean {
   return true
 }
 
-function evalFormula(
-  formula: FormulaNode,
-  rawData: Record<string, Record<string, number | null>>,
-  label: string,
-  timeHeaders: string[],
-): number | null {
-  return evalSummaryFormula(formula, rawData, label, timeHeaders)
-}
 
 /** 数値を読みやすい形式にフォーマット（rowId: マイクロ単位・CTR の表示調整用） */
 function formatCell(value: number | null, rowId?: string): string {
@@ -738,6 +740,15 @@ export default function SummaryViewPage({
       body.rangeStart = template.rangeStart
       body.rangeEnd = template.rangeEnd
     }
+    if (
+      template.timeUnit === 'day' &&
+      template.rangeStart &&
+      template.rangeEnd &&
+      template.rangeStart <= template.rangeEnd
+    ) {
+      body.rangeStart = template.rangeStart
+      body.rangeEnd = template.rangeEnd
+    }
     if (breakdownRows.length > 0) {
       body.breakdowns = breakdownRows.map(({ rowId, breakdown }) => {
         if (breakdown.table === 'line_oam_friends_attr') {
@@ -793,11 +804,33 @@ export default function SummaryViewPage({
     return generateTimeHeaders(template.timeUnit, TIME_COL_COUNT, template.rangeStart, template.rangeEnd)
   }, [template])
 
-  // day 単位のとき: ヘッダラベル → dateKey（YYYY-MM-DD）マッピング
+  // day 単位のとき: ヘッダラベル → dateKey（YYYY-MM-DD）マッピング（API の buildPeriods と同一）
   const labelToDateKey = useMemo<Map<string, string>>(() => {
     if (!template || template.timeUnit !== 'day') return new Map()
+    const rs = template.rangeStart
+    const re = template.rangeEnd
+    if (rs && re && rs <= re) {
+      return new Map(generateJstDayPeriodsFromRange(rs, re).map(p => [p.label, p.dateKey]))
+    }
     return new Map(generateJstDayPeriods(TIME_COL_COUNT).map(p => [p.label, p.dateKey]))
   }, [template])
+
+  const evalFormula = useCallback(
+    (
+      formula: FormulaNode,
+      rawDataArg: Record<string, Record<string, number | null>>,
+      label: string,
+      timeHeadersArg: string[],
+    ) =>
+      evalSummaryFormula(
+        formula,
+        rawDataArg,
+        label,
+        timeHeadersArg,
+        template?.timeUnit === 'day' ? labelToDateKey : null,
+      ),
+    [template?.timeUnit, labelToDateKey],
+  )
 
   // 外因変数取得（day 単位のみ）
   const externalDataUrl = useMemo(() => {
