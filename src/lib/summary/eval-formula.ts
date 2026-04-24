@@ -95,7 +95,9 @@ function evalNAry(
 
 /**
  * フォーミュラを 1 期間ラベルについて評価する。
- * + / − は欠損（null）を 0 として足し引き（既存 UI と同じ）
+ * + / − は欠損（null）を 0 として足し引き（既存 UI と同じ）。
+ * 例外: 左端の列で「− 左の列（lag1）」かつ左列がないためオペランドが null のときは
+ * 自列 − 0 とせず null（差・前期比のセマンティクスに合わせる）。
  * × / ÷ / min / max / coalesce は厳密な null 伝播（coalesce は先頭の非 null）
  */
 export function evalSummaryFormula(
@@ -151,9 +153,16 @@ export function evalSummaryFormula(
       case '+':
         result = asPlusMinus(result) + asPlusMinus(operand)
         break
-      case '-':
+      case '-': {
+        const colIdx = timeHeaders.indexOf(label)
+        const lag1MissingAtLeftEdge =
+          colIdx <= 0 &&
+          (step.operandTimeOp ?? 'none') === 'lag1' &&
+          operand === null
+        if (lag1MissingAtLeftEdge) return null
         result = asPlusMinus(result) - asPlusMinus(operand)
         break
+      }
       case '*': {
         if (result === null || operand === null) return null
         result *= operand
