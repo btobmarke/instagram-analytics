@@ -52,6 +52,36 @@ export interface GbpSearchKeywordMonthlyItem {
   threshold:    string | null
 }
 
+/**
+ * GBP API が同一月・同一キーワードを複数行返すことがある。
+ * 1 文の upsert で ON CONFLICT ... が同じ行に 2 回当たると Postgres が 21000 を返すためマージする。
+ */
+function mergeSearchKeywordMonthly(
+  a: GbpSearchKeywordMonthlyItem,
+  b: GbpSearchKeywordMonthlyItem
+): GbpSearchKeywordMonthlyItem {
+  const kw = a.searchKeyword.trim()
+  const ai = a.impressions
+  const bi = b.impressions
+  if (ai != null && bi != null) {
+    return { searchKeyword: kw, impressions: Math.max(ai, bi), threshold: a.threshold ?? b.threshold }
+  }
+  if (ai != null) return { searchKeyword: kw, impressions: ai, threshold: a.threshold ?? b.threshold }
+  if (bi != null) return { searchKeyword: kw, impressions: bi, threshold: b.threshold ?? a.threshold }
+  return { searchKeyword: kw, impressions: null, threshold: a.threshold ?? b.threshold }
+}
+
+function dedupeSearchKeywordMonthlyItems(items: GbpSearchKeywordMonthlyItem[]): GbpSearchKeywordMonthlyItem[] {
+  const map = new Map<string, GbpSearchKeywordMonthlyItem>()
+  for (const it of items) {
+    const kw = it.searchKeyword.trim()
+    if (!kw) continue
+    const prev = map.get(kw)
+    map.set(kw, prev ? mergeSearchKeywordMonthly(prev, it) : { ...it, searchKeyword: kw })
+  }
+  return [...map.values()]
+}
+
 // ------------------------------------------------
 // 共通フェッチ（429/503 はリトライ）
 // ------------------------------------------------
@@ -307,7 +337,7 @@ export async function fetchSearchKeywordImpressionsMonthly(params: {
     pageToken = (data.nextPageToken ?? data.next_page_token) as string | undefined
   } while (pageToken)
 
-  return out
+  return dedupeSearchKeywordMonthlyItems(out)
 }
 
 // ------------------------------------------------
