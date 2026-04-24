@@ -607,6 +607,7 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
             </div>
           )}
           {formulaMode === 'cumulative_slice' ? null : (
+          <>
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">ステップ 1（起点）</label>
             <p className="text-[10px] text-gray-500 mb-2 leading-relaxed">
@@ -738,6 +739,7 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
               演算ステップを追加
             </button>
           </div>
+          </>
           )}
           {showThresholdControls && formulaMode === 'arithmetic' && (
             <div className="rounded-lg border border-green-200 bg-green-50/50 px-3 py-3 space-y-2">
