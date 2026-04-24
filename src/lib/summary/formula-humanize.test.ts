@@ -14,7 +14,7 @@ describe('buildFormulaPlainLanguageSummary', () => {
     const s = buildFormulaPlainLanguageSummary(f, L)
     expect(s).toContain('友だち数')
     expect(s).toContain('この列')
-    expect(s).toContain('左となり')
+    expect(s).toContain('一つ前')
   })
 
   it('describes const base with add', () => {

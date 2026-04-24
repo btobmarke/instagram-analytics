@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { FormulaNode } from '@/lib/summary/formula-types'
+import { generateJstDayPeriodsFromRange } from '@/lib/summary/jst-periods'
 import { evalSummaryFormula, collectFormulaMetricRefs } from '@/lib/summary/eval-formula'
 
 describe('evalSummaryFormula', () => {
@@ -18,6 +19,47 @@ describe('evalSummaryFormula', () => {
     expect(evalSummaryFormula(f, raw, 'D1', headers)).toBe(null)
     expect(evalSummaryFormula(f, raw, 'D2', headers)).toBe(2)
     expect(evalSummaryFormula(f, raw, 'D3', headers)).toBe(3)
+  })
+
+  it('day mode: diff_prev uses calendar previous day, not table column order', () => {
+    const periods = generateJstDayPeriodsFromRange('2026-04-01', '2026-04-03')
+    const revHeaders = [...periods.map(p => p.label)].reverse()
+    const labelToKey = new Map(periods.map(p => [p.label, p.dateKey]))
+    const rawDay: Record<string, Record<string, number | null>> = {
+      'm.a': {
+        [periods[0]!.label]: 100,
+        [periods[1]!.label]: 20,
+        [periods[2]!.label]: 300,
+      },
+    }
+    const f: FormulaNode = {
+      baseOperandId: 'm.a',
+      baseTimeOp: 'diff_prev',
+      steps: [],
+    }
+    const mid = periods[1]!.label
+    expect(evalSummaryFormula(f, rawDay, mid, revHeaders, labelToKey)).toBe(-80)
+  })
+
+  it('day mode: minus lag1 uses calendar previous day', () => {
+    const periods = generateJstDayPeriodsFromRange('2026-04-01', '2026-04-03')
+    const headersDay = periods.map(p => p.label)
+    const labelToKey = new Map(periods.map(p => [p.label, p.dateKey]))
+    const rawDay: Record<string, Record<string, number | null>> = {
+      'm.a': {
+        [periods[0]!.label]: 5,
+        [periods[1]!.label]: 12,
+        [periods[2]!.label]: 20,
+      },
+    }
+    const f: FormulaNode = {
+      baseOperandId: 'm.a',
+      baseTimeOp: 'none',
+      steps: [{ operator: '-', operandId: 'm.a', operandTimeOp: 'lag1' }],
+    }
+    expect(evalSummaryFormula(f, rawDay, periods[0]!.label, headersDay, labelToKey)).toBe(null)
+    expect(evalSummaryFormula(f, rawDay, periods[1]!.label, headersDay, labelToKey)).toBe(7)
+    expect(evalSummaryFormula(f, rawDay, periods[2]!.label, headersDay, labelToKey)).toBe(8)
   })
 
   it('divides by constant', () => {

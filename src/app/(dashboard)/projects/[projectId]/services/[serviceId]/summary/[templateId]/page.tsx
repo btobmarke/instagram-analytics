@@ -35,7 +35,11 @@ import {
 } from '../_lib/types'
 import { getMetricCatalog } from '../_lib/catalog'
 import { getTemplate, updateTemplate } from '../_lib/store'
-import { generateJstDayPeriodLabels, generateCustomRangePeriod } from '@/lib/summary/jst-periods'
+import {
+  generateJstDayPeriodLabels,
+  generateJstDayPeriodsFromRange,
+  generateCustomRangePeriod,
+} from '@/lib/summary/jst-periods'
 import { DEFAULT_LINE_FRIENDS_ATTR_SLICES } from '@/lib/summary/line-friends-attr-default-slices'
 import {
   DEFAULT_INSTAGRAM_FOLLOWER_DEMO_SLICES,
@@ -255,7 +259,12 @@ function generateTimeHeaders(
     if (rangeStart && rangeEnd) return [generateCustomRangePeriod(rangeStart, rangeEnd).label]
     return ['（開始・終了日を設定）']
   }
-  if (unit === 'day') return generateJstDayPeriodLabels(count)
+  if (unit === 'day') {
+    if (rangeStart && rangeEnd && rangeStart <= rangeEnd) {
+      return generateJstDayPeriodsFromRange(rangeStart, rangeEnd).map(p => p.label)
+    }
+    return generateJstDayPeriodLabels(count)
+  }
   const headers: string[] = []
   const now = new Date()
   for (let i = count - 1; i >= 0; i--) {
