@@ -1,4 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { addCalendarDaysFromYmd } from '@/lib/google-ads/reporting-dates'
+import { getInstagramBusinessTodayYmd } from '@/lib/instagram/business-calendar'
 
 const calcVersion = '1.0'
 
@@ -15,9 +17,9 @@ export async function runKpiCalcForAccount(
   let totalProcessed = 0
 
   const now = new Date()
-  const todayStr = now.toISOString().slice(0, 10)
-  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-  const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const todayStr = getInstagramBusinessTodayYmd(now)
+  const weekAgo = addCalendarDaysFromYmd(todayStr, -7)
+  const monthAgo = addCalendarDaysFromYmd(todayStr, -30)
 
   const { data: mediaInsights } = await admin
     .from('ig_media_insight_fact')

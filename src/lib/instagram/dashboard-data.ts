@@ -1,4 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { addCalendarDaysFromYmd } from '@/lib/google-ads/reporting-dates'
+import { getInstagramBusinessTodayYmd } from '@/lib/instagram/business-calendar'
 
 export type DashboardPeriod = '7d' | '30d' | '90d'
 
@@ -13,18 +15,12 @@ function periodDays(p: DashboardPeriod): number {
   return p === '7d' ? 7 : p === '30d' ? 30 : 90
 }
 
-function addDays(isoDate: string, delta: number): string {
-  const d = new Date(isoDate + 'T12:00:00Z')
-  d.setUTCDate(d.getUTCDate() + delta)
-  return d.toISOString().slice(0, 10)
-}
-
-export function dashboardDateRanges(period: DashboardPeriod) {
+export function dashboardDateRanges(period: DashboardPeriod, now: Date = new Date()) {
   const days = periodDays(period)
-  const until = new Date().toISOString().slice(0, 10)
-  const since = addDays(until, -days)
-  const prevUntil = addDays(since, -1)
-  const prevSince = addDays(prevUntil, -(days - 1))
+  const until = getInstagramBusinessTodayYmd(now)
+  const since = addCalendarDaysFromYmd(until, -days)
+  const prevUntil = addCalendarDaysFromYmd(since, -1)
+  const prevSince = addCalendarDaysFromYmd(prevUntil, -(days - 1))
   return { days, since, until, prevSince, prevUntil }
 }
 
