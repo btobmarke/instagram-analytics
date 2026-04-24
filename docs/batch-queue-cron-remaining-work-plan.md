@@ -14,17 +14,28 @@
 | 領域 | 内容 |
 |------|------|
 | Phase 0（一部） | `cron-groups` の構造化ログ・`notifyBatchError`；`eslint.config.mjs` を FlatCompat 化；`npm run lint:batch` でキュー関連のみ lint |
-| キュー基盤 | **`batch_job_queue` + `dequeue_batch_jobs`**（migration `063_*`）、`src/lib/batch/batch-queue.ts`、**`POST /api/internal/batch-queue-worker`**、Vercel Cron **毎分** |
-| 代表ジョブ | **`weather_sync` のみ**キュー化。`/api/batch/weather-sync` は既定で enqueue のみ（`BATCH_QUEUE_DISABLED=true` で従来一括） |
-| 手動・履歴 | **`POST /api/batch/weather-sync/enqueue`**（project / all + secret）、**`GET /api/projects/:id/batch-logs`**、`batch_job_logs` に `project_id` 等カラム |
+| キュー基盤 | **`batch_job_queue` + `dequeue_batch_jobs`**（`063_*`）、**`service_id` / `account_id` 列**（`064_*`）、**`POST /api/internal/batch-queue-worker`**（Cron `limit=15`）。**`batch_proxy` は廃止**（`dispatchQueueJobInProcess` で lib 直叩き or 合成 `NextRequest`） |
+| Cron グループ | 既定 **`enqueueCronBatchJobsForSlug`**（`BATCH_CRON_GROUPS_USE_QUEUE=false` で従来の直接 `fetch`） |
+| 代表ジョブ | **`weather_sync`** は DB 内完結。**その他 Cron 対象スラッグ**は **専用 `job_name` + `payload`** で分割 enqueue（プロジェクト / サービス / アカウント / LP サイト / GBP サイト単位） |
+| 手動・履歴 | **`POST /api/batch/weather-sync/enqueue`**、**`GET /api/projects/:id/batch-logs`**、`batch_job_logs` 拡張 |
 | ドキュメント | `docs/batch-queue-runbook.md`、`docs/adr/001-batch-queue-postgres.md` |
 
 ### 未完了（この計画書の残り）
 
-- **他ジョブのキュー化**（insight-collector 等すべて）
-- **外部キュー（Inngest/QStash）**への差し替えは未着手（ADR は Postgres 第一版）
-- **全リポジトリの `npm run lint` クリーン**（既存ファイルの大量 violation）
-- **DB staging・ジョブ別 concurrency の本番チューニング**（ワーカーは `limit` のみ）
+- ~~**`batch_proxy` を廃し**各ジョブを **DB 内ハンドラのみ**に寄せる~~ **実装済み**（`insight-collector` / `story-*` / `lp-*` / `gbp-daily` / `line-oam-daily` は `src/lib/batch/jobs/*` に集約）
+
+以下は **TODO（バックログ）** として追跡する。
+
+- [ ] **外部キュー（Inngest / QStash 等）の検討・導入**（任意）
+  - **何を指すか**: いまの **`batch_job_queue`（Postgres）＋ワーカー Cron** ではなく、**ジョブ専用のマネージド基盤**にキュー層を移す選択肢（例: Inngest、Upstash QStash）。
+  - **やると何が変わるか**:
+    - 再試行・遅延実行・同時実行上限・DLQ・ダッシュボードなどを **プロダクト寄りの機能**として使いやすくできることが多い。
+    - 高負荷時に **DB への enqueue / dequeue の競合・負荷**を減らせる可能性がある。
+    - 一方で **外部依存・料金・障害時の影響範囲・実装の切り替えコスト**が増える。
+  - **いつやるか**: Postgres キューで運用・負荷・可観測性に限界を感じたタイミングで検討でよい（現状は `docs/adr/001-batch-queue-postgres.md` の第一版）。
+- [ ] **全リポジトリの `npm run lint` クリーン**（既存ファイルの大量 violation。バッチ周りは `npm run lint:batch` で別カバー）
+- [ ] **DB staging・ジョブ別 concurrency の本番チューニング**（ワーカー `limit`、enqueue 粒度、DB ロックの見直し）
+- [ ] **（スコープ外・参照のみ）** `gbp_batch_runs` / `line_oam_batch_runs` の run 持ち方の整理 — ユーザー指示により本計画の実装スコープ外
 
 ---
 

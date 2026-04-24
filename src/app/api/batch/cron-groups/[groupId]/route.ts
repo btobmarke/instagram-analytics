@@ -12,6 +12,8 @@ import {
 } from '@/lib/batch/cron-groups'
 import { logBatchAuthFailure, validateBatchRequest } from '@/lib/utils/batch-auth'
 import { notifyBatchError } from '@/lib/batch-notify'
+import { createSupabaseAdminClient } from '@/lib/supabase/admin'
+import { enqueueCronBatchJobsForSlug } from '@/lib/batch/batch-enqueue-by-slug'
 
 function getDeploymentOrigin(): string | null {
   const explicit = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '')
@@ -25,6 +27,10 @@ function getBatchAuthHeader(): string | null {
   const t = process.env.CRON_SECRET || process.env.BATCH_SECRET
   if (!t) return null
   return `Bearer ${t}`
+}
+
+function cronGroupsUseQueue(): boolean {
+  return process.env.BATCH_CRON_GROUPS_USE_QUEUE !== 'false'
 }
 
 /**
@@ -97,8 +103,44 @@ export async function POST(
     parallel: true,
   })
 
+  const useQueue = cronGroupsUseQueue()
+
   const settled = await Promise.all(
     due.map(async (slug) => {
+      if (useQueue) {
+        try {
+          const admin = createSupabaseAdminClient()
+          const q = await enqueueCronBatchJobsForSlug(admin, slug, 'cron')
+          const ok = q.failed === 0
+          if (!ok) {
+            console.warn('[cron-groups] enqueue incomplete', {
+              group: groupId,
+              slug,
+              enqueued: q.enqueued,
+              skipped: q.skipped,
+              failed: q.failed,
+            })
+          }
+          return {
+            slug,
+            ok,
+            status: ok ? 200 : 500,
+            mode: 'queue' as const,
+            enqueue: q,
+          } as const
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e)
+          console.error('[cron-groups] enqueue failed', { group: groupId, slug, message }, e)
+          return {
+            slug,
+            ok: false,
+            status: null as number | null,
+            error: message,
+            mode: 'queue' as const,
+          } as const
+        }
+      }
+
       const url = `${origin}/api/batch/${slug}`
       try {
         const res = await fetch(url, {
@@ -119,11 +161,11 @@ export async function POST(
             bodyPreview: text.slice(0, 500),
           })
         }
-        return { slug, ok, status: res.status } as const
+        return { slug, ok, status: res.status, mode: 'fetch' as const } as const
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e)
         console.error('[cron-groups] batch fetch failed', { group: groupId, slug, message }, e)
-        return { slug, ok: false, status: null as number | null, error: message } as const
+        return { slug, ok: false, status: null as number | null, error: message, mode: 'fetch' as const } as const
       }
     })
   )

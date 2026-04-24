@@ -22,7 +22,8 @@ function percentileSorted(sortedAsc: number[], p: number): number | null {
  * - トップ投稿のレトロ要約を通知行に載せる
  * - 同一週データの 75 パーセンタイルの 1.4 倍以上の初速を「アラート」行に載せる（相対基準）
  */
-async function runBatch() {
+/** キューワーカー・内部呼び出し用 */
+export async function runInstagramVelocityRetroBatch(accountIdFilter?: string) {
   const admin = createSupabaseAdminClient()
   const startedAt = new Date()
 
@@ -40,7 +41,9 @@ async function runBatch() {
   try {
     const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString()
 
-    const { data: accounts } = await admin.from('ig_accounts').select('id, username').eq('status', 'active')
+    let acctQ = admin.from('ig_accounts').select('id, username').eq('status', 'active')
+    if (accountIdFilter) acctQ = acctQ.eq('id', accountIdFilter)
+    const { data: accounts } = await acctQ
 
     for (const account of accounts ?? []) {
       const { data: medias } = await admin
@@ -115,14 +118,21 @@ async function runBatch() {
       }).eq('id', jobLog.id)
     }
 
-    await notifyBatchSuccess({
-      jobName: 'instagram_velocity_retro',
-      processed,
-      executedAt: startedAt,
-      lines: lines.length ? lines : ['該当サマリーなし（投稿・インサイト不足）'],
-    })
+    if (!accountIdFilter) {
+      await notifyBatchSuccess({
+        jobName: 'instagram_velocity_retro',
+        processed,
+        executedAt: startedAt,
+        lines: lines.length ? lines : ['該当サマリーなし（投稿・インサイト不足）'],
+      })
+    }
 
-    return NextResponse.json({ success: true, processed, lines: lines.length })
+    return NextResponse.json({
+      success: true,
+      processed,
+      lines: lines.length,
+      shard: Boolean(accountIdFilter),
+    })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     if (jobLog) {
@@ -133,13 +143,15 @@ async function runBatch() {
         duration_ms: Date.now() - startedAt.getTime(),
       }).eq('id', jobLog.id)
     }
-    await notifyBatchError({
-      jobName: 'instagram_velocity_retro',
-      processed: 0,
-      errorCount: 1,
-      errors: [{ error: message }],
-      executedAt: startedAt,
-    })
+    if (!accountIdFilter) {
+      await notifyBatchError({
+        jobName: 'instagram_velocity_retro',
+        processed: 0,
+        errorCount: 1,
+        errors: [{ error: message }],
+        executedAt: startedAt,
+      })
+    }
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }
@@ -149,9 +161,19 @@ export async function POST(request: Request) {
     logBatchAuthFailure('instagram-velocity-retro', request)
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  return runBatch()
+  const body = await request.json().catch(() => ({}))
+  const accountIdFilter = typeof (body as { account_id?: string }).account_id === 'string'
+    ? (body as { account_id: string }).account_id
+    : undefined
+  return runInstagramVelocityRetroBatch(accountIdFilter)
 }
 
 export async function GET(request: Request) {
-  return POST(request)
+  if (!validateBatchRequest(request)) {
+    logBatchAuthFailure('instagram-velocity-retro', request)
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  const url = new URL(request.url)
+  const accountIdFilter = url.searchParams.get('account_id') ?? undefined
+  return runInstagramVelocityRetroBatch(accountIdFilter ?? undefined)
 }

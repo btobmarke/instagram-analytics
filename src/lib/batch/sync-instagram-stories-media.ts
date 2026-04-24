@@ -88,7 +88,8 @@ export type IgAccountForStorySync = {
  */
 export async function runInstagramStoryMediaSyncAllAccounts(
   admin: SupabaseClient,
-  logPrefix: string
+  logPrefix: string,
+  opts?: { accountId?: string }
 ): Promise<{
   totalProcessed: number
   totalFailed: number
@@ -105,11 +106,13 @@ export async function runInstagramStoryMediaSyncAllAccounts(
   let storyListFetchFailures = 0
   let storyRateLimitEarlyStops = 0
 
-  const { data: accounts } = await admin
+  let q = admin
     .from('ig_accounts')
     .select('id, platform_account_id, api_base_url, api_version, service_id')
     .eq('status', 'active')
     .not('service_id', 'is', null)
+  if (opts?.accountId) q = q.eq('id', opts.accountId)
+  const { data: accounts } = await q
 
   const list = (accounts ?? []) as IgAccountForStorySync[]
 

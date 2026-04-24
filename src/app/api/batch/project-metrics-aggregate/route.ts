@@ -17,13 +17,9 @@ export const maxDuration = 300  // 5分（Vercel Pro上限）
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
-import {
-  fetchMetricsByRefs,
-  buildPeriods,
-} from '@/lib/summary/fetch-metrics'
-import { getMetricCatalogForProjectAggregate } from '@/app/(dashboard)/projects/[projectId]/services/[serviceId]/summary/_lib/catalog'
+import { logBatchAuthFailure, validateBatchRequest } from '@/lib/utils/batch-auth'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
-import { finiteNumberOrZero } from '@/lib/batch/numeric-coerce'
+import { runProjectMetricsAggregateForProject } from '@/lib/batch/project-metrics-aggregate-one-project'
 
 /** JST の昨日 YYYY-MM-DD */
 function jstYesterday(): string {
@@ -35,11 +31,14 @@ function jstYesterday(): string {
 
 // GET ← Vercel Cron
 export async function GET(request: NextRequest) {
+  if (validateBatchRequest(request)) {
+    return runBatch(request)
+  }
   const cronSecret = process.env.CRON_SECRET
   if (cronSecret) {
     const authHeader = request.headers.get('authorization')
-    const qSecret    = new URL(request.url).searchParams.get('secret')
-    const provided   = authHeader?.replace('Bearer ', '') ?? qSecret ?? ''
+    const qSecret = new URL(request.url).searchParams.get('secret')
+    const provided = authHeader?.replace(/^Bearer\s+/i, '')?.trim() ?? qSecret ?? ''
     if (provided !== cronSecret) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
@@ -49,7 +48,11 @@ export async function GET(request: NextRequest) {
 
 // POST でも手動実行可
 export async function POST(request: NextRequest) {
-  return GET(request)
+  if (!validateBatchRequest(request)) {
+    logBatchAuthFailure('project-metrics-aggregate', request)
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  return runBatch(request)
 }
 
 // ── バッチ本体 ───────────────────────────────────────────────────────────────
@@ -78,79 +81,23 @@ async function runBatch(request: NextRequest) {
   let totalErrors   = 0
 
   try {
-    // 対象プロジェクトのアクティブサービスを一括取得
-    let svcQuery = admin
-      .from('services')
-      .select('id, service_name, service_type, project_id')
-      .is('deleted_at', null)
-      .eq('is_active', true)
+    let serviceCountForNotify = 0
 
     if (targetProject) {
-      svcQuery = svcQuery.eq('project_id', targetProject)
-    }
-
-    const { data: services, error: svcErr } = await svcQuery
-    if (svcErr || !services) {
-      throw new Error(`services 取得失敗: ${svcErr?.message}`)
-    }
-
-    // 対象日を「1日分」の Period として構築
-    // buildPeriods は SupabaseServerClient を必要としないので直接呼ぶ
-    const periodsOrError = buildPeriods('day', 1,
-      // count=1 では today になるので custom_range で1日を指定
-      undefined, undefined,
-    )
-    // count=1 の day では "今日" が取れてしまうため custom_range で指定
-    const targetPeriods = (() => {
-      const p = buildPeriods('custom_range', 1, targetDate, targetDate)
-      if ('error' in p) throw new Error(p.error)
-      return p
-    })()
-
-    // サービスごとに処理（エラーが出ても他は続行）
-    for (const svc of services) {
-      try {
-        const catalog = getMetricCatalogForProjectAggregate(svc.service_type)
-        if (catalog.length === 0) continue  // カタログのないサービスはスキップ
-
-        const fieldRefs = catalog.map(c => c.id)
-
-        // fetch-metrics の関数群を使ってデータ取得
-        // admin client は SupabaseServerClient と同じインターフェースを持つ
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rawData = await fetchMetricsByRefs(admin as any, svc.id, fieldRefs, targetPeriods)
-
-        // UPSERT 行を構築
-        // custom_range のラベルは "YYYYMMDD~YYYYMMDD" 形式なので period label で値を取る
-        // 取得に成功した本バッチ経路では欠損・非数を 0 に寄せてキャッシュする（一次バッチ側と整合）
-        const periodLabel = targetPeriods[0].label
-        const upsertRows = fieldRefs.map(ref => ({
-          project_id: svc.project_id,
-          service_id: svc.id,
-          date:       targetDate,
-          metric_ref: ref,
-          value:      finiteNumberOrZero(rawData[ref]?.[periodLabel]),
-          updated_at: new Date().toISOString(),
-        }))
-
-        // 500件ずつに分割して UPSERT（Supabase の上限対策）
-        const CHUNK = 500
-        for (let i = 0; i < upsertRows.length; i += CHUNK) {
-          const chunk = upsertRows.slice(i, i + CHUNK)
-          const { error: upsertErr } = await admin
-            .from('project_metrics_daily')
-            .upsert(chunk, { onConflict: 'project_id,service_id,date,metric_ref' })
-
-          if (upsertErr) {
-            console.error(`[project-metrics-aggregate] upsert error svc=${svc.id}:`, upsertErr)
-            totalErrors++
-          } else {
-            totalUpserted += chunk.length
-          }
-        }
-      } catch (e) {
-        console.error(`[project-metrics-aggregate] service=${svc.id} error:`, e)
-        totalErrors++
+      const r = await runProjectMetricsAggregateForProject(admin, targetProject, targetDate)
+      totalUpserted = r.upserted
+      totalErrors = r.errors
+      serviceCountForNotify = r.services
+    } else {
+      const { data: projectRows, error: pErr } = await admin.from('projects').select('id').eq('is_active', true)
+      if (pErr || !projectRows) {
+        throw new Error(`projects 取得失敗: ${pErr?.message}`)
+      }
+      for (const p of projectRows) {
+        const r = await runProjectMetricsAggregateForProject(admin, p.id, targetDate)
+        totalUpserted += r.upserted
+        totalErrors += r.errors
+        serviceCountForNotify += r.services
       }
     }
 
@@ -180,7 +127,7 @@ async function runBatch(request: NextRequest) {
         executedAt: startedAt,
         lines: [
           `対象日: ${targetDate}`,
-          `対象サービス数: ${services.length}`,
+          `対象サービス数（概算）: ${serviceCountForNotify}`,
           ...(targetProject ? [`project: ${targetProject}`] : []),
         ],
       })
@@ -197,7 +144,7 @@ async function runBatch(request: NextRequest) {
     return NextResponse.json({
       success:      true,
       date:         targetDate,
-      services:     services.length,
+      services:     serviceCountForNotify,
       upserted:     totalUpserted,
       errors:       totalErrors,
       status:       finalStatus,

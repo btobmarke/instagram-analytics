@@ -6,12 +6,13 @@ import { validateBatchRequest } from '@/lib/utils/batch-auth'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
 import { runInstagramStoryMediaSyncAllAccounts } from '@/lib/batch/sync-instagram-stories-media'
 
-// POST /api/batch/story-media-collector
-// 毎時実行: 公開中ストーリーを GET /{ig-user-id}/stories で取得し ig_media に反映
 export async function POST(request: Request) {
   if (!validateBatchRequest(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+
+  const body = await request.json().catch(() => ({}))
+  const accountIdFilter = typeof body.account_id === 'string' ? body.account_id : undefined
 
   const admin = createSupabaseAdminClient()
   const startedAt = new Date()
@@ -35,7 +36,9 @@ export async function POST(request: Request) {
       accountsCount,
       storyListFetchFailures,
       storyRateLimitEarlyStops,
-    } = await runInstagramStoryMediaSyncAllAccounts(admin, 'story-media-collector')
+    } = await runInstagramStoryMediaSyncAllAccounts(admin, 'story-media-collector', {
+      accountId: accountIdFilter,
+    })
 
     const duration = Date.now() - startedAt.getTime()
     const summaryLine =
@@ -52,18 +55,6 @@ export async function POST(request: Request) {
         duration_ms: duration,
       }).eq('id', jobLog.id)
     }
-
-    console.info('[story-media-collector] done', {
-      job_id: jobLog?.id ?? null,
-      processed: totalProcessed,
-      failed: totalFailed,
-      skipped_no_token: skippedNoToken,
-      skipped_no_client: skippedNoClient,
-      accounts: accountsCount,
-      story_list_fetch_failures: storyListFetchFailures,
-      story_rate_limit_early_stops: storyRateLimitEarlyStops,
-      duration_ms: duration,
-    })
 
     if (totalFailed === 0) {
       await notifyBatchSuccess({
