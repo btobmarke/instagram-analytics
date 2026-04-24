@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { UnifiedTableRow } from './types'
 import type { FormulaNode } from '@/app/(dashboard)/projects/[projectId]/services/[serviceId]/summary/_lib/types'
 import { collectUnifiedTemplateFieldRefs } from './collect-template-field-refs'
-import { DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM } from '@/lib/summary/summary-conditional-definitions'
+import { DEF_LINE_OAM_REWARDCARD_TABLE_COND_AGG } from '@/lib/summary/summary-conditional-definitions'
 import { encodeSummaryConditionalRef } from '@/lib/summary/summary-conditional-ref'
 
 describe('collectUnifiedTemplateFieldRefs', () => {
@@ -39,17 +39,26 @@ describe('collectUnifiedTemplateFieldRefs', () => {
       baseOperandId: 'line_oam_shopcard_point.point',
       steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
       conditionalAggregate: {
-        definitionId: DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
-        params: { compareField: 'point', compareOp: 'eq', compareValue: 3, sumField: 'users' },
+        definitionId: DEF_LINE_OAM_REWARDCARD_TABLE_COND_AGG,
+        params: {
+          table: 'line_oam_shopcard_point',
+          compareField: 'point',
+          compareOp: 'eq',
+          compareValue: 3,
+          aggregate: 'sum',
+          sumField: 'users',
+        },
       },
     }
     const formulas = new Map([['s1', new Map([['uuid-cm-pt3', formula]])]])
     const out = collectUnifiedTemplateFieldRefs(rows, formulas)
     const expectedRef = encodeSummaryConditionalRef({
-      definitionId: DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
+      definitionId: DEF_LINE_OAM_REWARDCARD_TABLE_COND_AGG,
+      table: 'line_oam_shopcard_point',
       compareField: 'point',
       compareOp: 'eq',
       compareValue: 3,
+      aggregate: 'sum',
       sumField: 'users',
     })
     expect(out).toEqual([{ serviceId: 's1', fieldRefs: [expectedRef] }])

@@ -33,9 +33,15 @@ import type {
 import type { CumulativeUsersCompareOp } from '@/lib/summary/formula-types'
 import { parseLineShopcardCumulativeUsersRef } from '@/lib/summary/line-shopcard-cumulative-users-ref'
 import {
+  DEF_LINE_OAM_REWARDCARD_TABLE_COND_AGG,
   DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
-  LineShopcardPointSliceParamsSchema,
+  LineRewardcardTableCondAggParamsSchema,
 } from '@/lib/summary/summary-conditional-definitions'
+import {
+  LINE_REWARDCARD_COND_AGG_TABLE_SPEC,
+  LINE_REWARDCARD_COND_AGG_TABLES,
+  type LineRewardcardCondAggTableName,
+} from '@/lib/summary/line-rewardcard-conditional-allowlist'
 import {
   OPERATOR_SYMBOLS, TIME_UNIT_LABELS, formatFormula, NARY_OPERATOR_LABELS, TIME_OP_LABELS,
 } from '../_lib/types'
@@ -410,24 +416,48 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
   const allCards = [...catalog, ...customCards]
   const initialCa = editTarget?.formula?.conditionalAggregate
   const initialLegacy = editTarget?.formula?.cumulativeUsersSliceRef
-  const initialSliceParsed =
+
+  const initialRewardcardCondParsed =
+    initialCa?.definitionId === DEF_LINE_OAM_REWARDCARD_TABLE_COND_AGG
+      ? LineRewardcardTableCondAggParamsSchema.safeParse(initialCa.params)
+      : null
+  const initialOldPointParsed =
     initialCa?.definitionId === DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM
-      ? LineShopcardPointSliceParamsSchema.safeParse(initialCa.params)
+      ? LineRewardcardTableCondAggParamsSchema.safeParse({
+          table: 'line_oam_shopcard_point',
+          compareField: 'point',
+          compareOp: (initialCa.params as { compareOp?: string }).compareOp ?? 'eq',
+          compareValue: (initialCa.params as { compareValue?: number }).compareValue ?? 0,
+          aggregate: 'sum' as const,
+          sumField: 'users',
+        })
       : null
   const initialLegacyParsed = initialLegacy ? parseLineShopcardCumulativeUsersRef(initialLegacy) : null
   const initialCumParsed =
-    initialSliceParsed?.success ? initialSliceParsed.data
-      : initialLegacyParsed
-        ? {
-            compareField: 'point' as const,
-            compareOp: initialLegacyParsed.op,
-            compareValue: initialLegacyParsed.threshold,
-            sumField: 'users' as const,
-          }
-        : null
+    initialRewardcardCondParsed?.success ? initialRewardcardCondParsed.data
+      : initialOldPointParsed?.success ? initialOldPointParsed.data
+        : initialLegacyParsed
+          ? {
+              table: 'line_oam_shopcard_point' as const,
+              compareField: 'point' as const,
+              compareOp: initialLegacyParsed.op,
+              compareValue: initialLegacyParsed.threshold,
+              aggregate: 'sum' as const,
+              sumField: 'users' as const,
+            }
+          : null
+
   const [formulaMode, setFormulaMode] = useState<'arithmetic' | 'cumulative_slice'>(
     initialCumParsed ? 'cumulative_slice' : 'arithmetic',
   )
+  const [condTable, setCondTable] = useState<LineRewardcardCondAggTableName>(
+    initialCumParsed?.table ?? 'line_oam_shopcard_point',
+  )
+  const [condCompareField, setCondCompareField] = useState(initialCumParsed?.compareField ?? 'point')
+  const [condAggregate, setCondAggregate] = useState<'sum' | 'row_count'>(
+    initialCumParsed?.aggregate ?? 'sum',
+  )
+  const [condSumField, setCondSumField] = useState(initialCumParsed?.sumField ?? 'users')
   const [cumOp, setCumOp] = useState<CumulativeUsersCompareOp>(initialCumParsed?.compareOp ?? 'eq')
   const [cumThresholdStr, setCumThresholdStr] = useState(
     initialCumParsed != null ? String(initialCumParsed.compareValue) : '3',
@@ -435,8 +465,17 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
 
   const [name, setName] = useState(editTarget?.label ?? '')
   const [baseOperandId, setBaseOperandId] = useState(
-    initialCumParsed ? 'line_oam_shopcard_point.point' : (editTarget?.formula?.baseOperandId ?? ''),
+    initialCumParsed ? `${initialCumParsed.table}.${initialCumParsed.compareField}` : (editTarget?.formula?.baseOperandId ?? ''),
   )
+
+  const applyTableDefaultFields = useCallback((t: LineRewardcardCondAggTableName) => {
+    const spec = LINE_REWARDCARD_COND_AGG_TABLE_SPEC[t]
+    const first = spec.numericFields[0]!
+    const second = spec.numericFields.find((f) => f !== first) ?? first
+    setCondCompareField(first)
+    setCondSumField(second)
+  }, [])
+
   const [baseOperandIsConst, setBaseOperandIsConst] = useState(editTarget?.formula?.baseOperandIsConst ?? false)
   const [baseTimeOp, setBaseTimeOp] = useState<FormulaOperandTimeOp>(editTarget?.formula?.baseTimeOp ?? 'none')
   const [steps, setSteps] = useState<FormulaStep[]>(editTarget?.formula?.steps ?? [{ operator: '+', operandId: '', operandTimeOp: 'none' }])
@@ -475,12 +514,27 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
   })
 
   const cumTh = Number(cumThresholdStr)
+  const condParamsBuilt =
+    formulaMode === 'cumulative_slice' && allowCumulativeSliceUsers && cumThresholdStr.trim() !== '' && Number.isFinite(cumTh)
+      ? {
+          table: condTable,
+          compareField: condCompareField,
+          compareOp: cumOp,
+          compareValue: cumTh,
+          aggregate: condAggregate,
+          ...(condAggregate === 'sum' ? { sumField: condSumField } : {}),
+        }
+      : null
+  const condParamsParsed = condParamsBuilt
+    ? LineRewardcardTableCondAggParamsSchema.safeParse(condParamsBuilt)
+    : null
+  const pointIntOk =
+    !(condTable === 'line_oam_shopcard_point' && condCompareField === 'point') || Number.isInteger(cumTh)
   const cumValid =
     allowCumulativeSliceUsers &&
     formulaMode === 'cumulative_slice' &&
-    cumThresholdStr.trim() !== '' &&
-    Number.isFinite(cumTh) &&
-    Number.isInteger(cumTh)
+    condParamsParsed?.success === true &&
+    pointIntOk
 
   const baseOk = operandOk(baseOperandId, baseOperandIsConst)
   const canSave =
@@ -496,19 +550,14 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
   }, {})
 
   const previewFormula: FormulaNode | null = (() => {
-    if (formulaMode === 'cumulative_slice' && cumValid) {
+    if (formulaMode === 'cumulative_slice' && cumValid && condParamsParsed?.success) {
       return {
-        baseOperandId: 'line_oam_shopcard_point.point',
+        baseOperandId: `${condTable}.${condCompareField}`,
         baseOperandIsConst: false,
         steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
         conditionalAggregate: {
-          definitionId: DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
-          params: {
-            compareField: 'point',
-            compareOp: cumOp,
-            compareValue: cumTh,
-            sumField: 'users',
-          },
+          definitionId: DEF_LINE_OAM_REWARDCARD_TABLE_COND_AGG,
+          params: condParamsParsed.data as Record<string, unknown>,
         },
       }
     }
@@ -530,19 +579,14 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
     if (!canSave) return
     const id = editTarget?.id ?? `custom.${Date.now()}`
     let formula: FormulaNode
-    if (formulaMode === 'cumulative_slice' && cumValid) {
+    if (formulaMode === 'cumulative_slice' && cumValid && condParamsParsed?.success) {
       formula = {
-        baseOperandId: 'line_oam_shopcard_point.point',
+        baseOperandId: `${condTable}.${condCompareField}`,
         baseOperandIsConst: false,
         steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
         conditionalAggregate: {
-          definitionId: DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
-          params: {
-            compareField: 'point',
-            compareOp: cumOp,
-            compareValue: cumTh,
-            sumField: 'users',
-          },
+          definitionId: DEF_LINE_OAM_REWARDCARD_TABLE_COND_AGG,
+          params: condParamsParsed.data as Record<string, unknown>,
         },
       }
     } else {
@@ -596,43 +640,120 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
                       : 'bg-transparent border-emerald-200 text-emerald-800 hover:bg-white/60'
                   }`}
                 >
-                  ポイント分布（人数）
+                  条件付き集計（LINE）
                 </button>
               </div>
               {formulaMode === 'cumulative_slice' && (
-                <div className="space-y-2 pt-1">
+                <div className="space-y-3 pt-1">
                   <p className="text-[10px] text-gray-600 leading-relaxed">
                     各列の<strong>対象日</strong>（日次はその日、週次・月次・期間指定は<strong>終端の暦日</strong>）のスナップショットで、
-                    <code className="text-[10px] bg-white/80 px-1 rounded">line_oam_shopcard_point</code> の <strong>point</strong> が条件を満たす行の <strong>users</strong> をリワードカード横断で合算します。
+                    選んだテーブルの行をリワードカード横断で集計します。比較できるのは<strong>数値列のみ</strong>（ホワイトリスト）です。
                   </p>
-                  <div className="flex flex-wrap items-end gap-2">
+                  <div>
+                    <span className="text-[10px] text-gray-500 block mb-1">テーブル</span>
+                    <select
+                      value={condTable}
+                      onChange={(e) => {
+                        const t = e.target.value as LineRewardcardCondAggTableName
+                        setCondTable(t)
+                        applyTableDefaultFields(t)
+                      }}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                    >
+                      {LINE_REWARDCARD_COND_AGG_TABLES.map((tid) => (
+                        <option key={tid} value={tid}>
+                          {LINE_REWARDCARD_COND_AGG_TABLE_SPEC[tid].label}（{tid}）
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
                     <div className="flex-1 min-w-[140px]">
-                      <span className="text-[10px] text-gray-500 block mb-1">point の条件</span>
+                      <span className="text-[10px] text-gray-500 block mb-1">条件に使う列</span>
+                      <select
+                        value={condCompareField}
+                        onChange={(e) => setCondCompareField(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                      >
+                        {LINE_REWARDCARD_COND_AGG_TABLE_SPEC[condTable].numericFields.map((f) => (
+                          <option key={f} value={f}>{f}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex-1 min-w-[120px]">
+                      <span className="text-[10px] text-gray-500 block mb-1">演算子</span>
                       <select
                         value={cumOp}
                         onChange={e => setCumOp(e.target.value as CumulativeUsersCompareOp)}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
                       >
-                        <option value="eq">＝（等しい）</option>
-                        <option value="gte">≧ 以上</option>
-                        <option value="lte">≦ 以下</option>
-                        <option value="gt">&gt; より大きい</option>
-                        <option value="lt">&lt; より小さい</option>
+                        <option value="eq">＝</option>
+                        <option value="gte">≧</option>
+                        <option value="lte">≦</option>
+                        <option value="gt">&gt;</option>
+                        <option value="lt">&lt;</option>
                       </select>
                     </div>
                     <div className="w-28">
-                      <span className="text-[10px] text-gray-500 block mb-1">point（整数）</span>
+                      <span className="text-[10px] text-gray-500 block mb-1">しきい値</span>
                       <input
                         type="number"
-                        step={1}
+                        step={condTable === 'line_oam_shopcard_point' && condCompareField === 'point' ? 1 : 'any'}
                         value={cumThresholdStr}
                         onChange={e => setCumThresholdStr(e.target.value)}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
                       />
                     </div>
                   </div>
+                  <div>
+                    <span className="text-[10px] text-gray-500 block mb-1">集約</span>
+                    <div className="flex flex-wrap gap-2">
+                      <label className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="condAgg"
+                          checked={condAggregate === 'sum'}
+                          onChange={() => setCondAggregate('sum')}
+                          className="rounded-full border-gray-300 text-emerald-600 focus:ring-emerald-400"
+                        />
+                        数値列を合算
+                      </label>
+                      <label className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="condAgg"
+                          checked={condAggregate === 'row_count'}
+                          onChange={() => setCondAggregate('row_count')}
+                          className="rounded-full border-gray-300 text-emerald-600 focus:ring-emerald-400"
+                        />
+                        行数を数える
+                      </label>
+                    </div>
+                  </div>
+                  {condAggregate === 'sum' && (
+                    <div>
+                      <span className="text-[10px] text-gray-500 block mb-1">合算する列（条件列と別の数値列）</span>
+                      <select
+                        value={condSumField}
+                        onChange={(e) => setCondSumField(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                      >
+                        {LINE_REWARDCARD_COND_AGG_TABLE_SPEC[condTable].numericFields
+                          .filter((f) => f !== condCompareField)
+                          .map((f) => (
+                            <option key={f} value={f}>{f}</option>
+                          ))}
+                      </select>
+                    </div>
+                  )}
                   {!cumValid && formulaMode === 'cumulative_slice' && (
-                    <p className="text-[10px] text-red-600">point は整数で入力してください。</p>
+                    <p className="text-[10px] text-red-600">
+                      {condParamsParsed && !condParamsParsed.success
+                        ? condParamsParsed.error.errors.map((er) => er.message).join(' / ')
+                        : condTable === 'line_oam_shopcard_point' && condCompareField === 'point' && !Number.isInteger(cumTh)
+                          ? 'ポイント値（point）を条件にする場合はしきい値を整数にしてください。'
+                          : '入力を確認してください。'}
+                    </p>
                   )}
                 </div>
               )}

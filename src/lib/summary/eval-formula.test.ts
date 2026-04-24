@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import type { FormulaNode } from '@/lib/summary/formula-types'
 import { evalSummaryFormula, collectFormulaMetricRefs } from '@/lib/summary/eval-formula'
-import { DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM } from '@/lib/summary/summary-conditional-definitions'
+import {
+  DEF_LINE_OAM_REWARDCARD_TABLE_COND_AGG,
+} from '@/lib/summary/summary-conditional-definitions'
 import { encodeSummaryConditionalRef, parseSummaryConditionalRef } from '@/lib/summary/summary-conditional-ref'
 
 describe('evalSummaryFormula', () => {
@@ -56,10 +58,12 @@ describe('evalSummaryFormula', () => {
   it('evalSummaryFormula reads conditional aggregate virtual ref', () => {
     const headers = ['4/22', '4/23']
     const vref = encodeSummaryConditionalRef({
-      definitionId: DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
+      definitionId: DEF_LINE_OAM_REWARDCARD_TABLE_COND_AGG,
+      table: 'line_oam_shopcard_point',
       compareField: 'point',
       compareOp: 'eq',
       compareValue: 3,
+      aggregate: 'sum',
       sumField: 'users',
     })
     const raw: Record<string, Record<string, number | null>> = {
@@ -69,8 +73,15 @@ describe('evalSummaryFormula', () => {
       baseOperandId: 'line_oam_shopcard_point.point',
       steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
       conditionalAggregate: {
-        definitionId: DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
-        params: { compareField: 'point', compareOp: 'eq', compareValue: 3, sumField: 'users' },
+        definitionId: DEF_LINE_OAM_REWARDCARD_TABLE_COND_AGG,
+        params: {
+          table: 'line_oam_shopcard_point',
+          compareField: 'point',
+          compareOp: 'eq',
+          compareValue: 3,
+          aggregate: 'sum',
+          sumField: 'users',
+        },
       },
     }
     expect(evalSummaryFormula(f, raw, '4/23', headers)).toBe(12)
@@ -81,8 +92,15 @@ describe('evalSummaryFormula', () => {
       baseOperandId: 'line_oam_shopcard_point.point',
       steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
       conditionalAggregate: {
-        definitionId: DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
-        params: { compareField: 'point', compareOp: 'eq', compareValue: 2, sumField: 'users' },
+        definitionId: DEF_LINE_OAM_REWARDCARD_TABLE_COND_AGG,
+        params: {
+          table: 'line_oam_shopcard_point',
+          compareField: 'point',
+          compareOp: 'eq',
+          compareValue: 2,
+          aggregate: 'sum',
+          sumField: 'users',
+        },
       },
     }
     expect(collectFormulaMetricRefs(f).length).toBe(1)
@@ -98,8 +116,12 @@ describe('evalSummaryFormula', () => {
     const refs = collectFormulaMetricRefs(f)
     expect(refs).toHaveLength(1)
     expect(parseSummaryConditionalRef(refs[0]!)).toMatchObject({
-      definitionId: DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
-      params: expect.objectContaining({ compareOp: 'lte', compareValue: 1 }),
+      definitionId: DEF_LINE_OAM_REWARDCARD_TABLE_COND_AGG,
+      params: expect.objectContaining({
+        table: 'line_oam_shopcard_point',
+        compareOp: 'lte',
+        compareValue: 1,
+      }),
     })
   })
 })

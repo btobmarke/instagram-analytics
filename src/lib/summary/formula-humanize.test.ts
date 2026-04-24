@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { FormulaNode } from '@/lib/summary/formula-types'
 import { buildFormulaPlainLanguageSummary } from '@/lib/summary/formula-humanize'
-import { DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM } from '@/lib/summary/summary-conditional-definitions'
+import { DEF_LINE_OAM_REWARDCARD_TABLE_COND_AGG } from '@/lib/summary/summary-conditional-definitions'
 
 describe('buildFormulaPlainLanguageSummary', () => {
   const L = (id: string) => (id === 'm.c' ? '友だち数' : id)
@@ -40,8 +40,15 @@ describe('buildFormulaPlainLanguageSummary', () => {
       baseOperandId: 'line_oam_shopcard_point.point',
       steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
       conditionalAggregate: {
-        definitionId: DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
-        params: { compareField: 'point', compareOp: 'eq', compareValue: 3, sumField: 'users' },
+        definitionId: DEF_LINE_OAM_REWARDCARD_TABLE_COND_AGG,
+        params: {
+          table: 'line_oam_shopcard_point',
+          compareField: 'point',
+          compareOp: 'eq',
+          compareValue: 3,
+          aggregate: 'sum',
+          sumField: 'users',
+        },
       },
     }
     const s = buildFormulaPlainLanguageSummary(f, L2)
