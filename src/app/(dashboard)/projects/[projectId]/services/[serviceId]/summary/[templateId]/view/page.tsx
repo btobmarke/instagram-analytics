@@ -74,7 +74,9 @@ function generateTimeHeaders(
 
 /** サマリーAPIが返す生フィールドRefか（custom.* はデータ取得対象外） */
 function isSummaryDataFieldRef(ref: string): boolean {
-  if (!ref || !ref.includes('.')) return false
+  if (!ref) return false
+  if (ref.startsWith('summary@cond:')) return true
+  if (!ref.includes('.')) return false
   if (ref.startsWith('custom.')) return false
   return true
 }

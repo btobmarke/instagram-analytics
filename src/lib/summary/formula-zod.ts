@@ -11,6 +11,11 @@ export const FormulaStepSchema = z.object({
   extraOperandsAreConst: z.array(z.boolean()).max(20).optional(),
 })
 
+const FormulaConditionalAggregateSchema = z.object({
+  definitionId: z.string().min(1).max(120),
+  params: z.record(z.string(), z.unknown()),
+})
+
 export const FormulaNodeSchema = z.object({
   baseOperandId: z.string().min(1),
   baseOperandIsConst: z.boolean().optional(),
@@ -18,6 +23,7 @@ export const FormulaNodeSchema = z.object({
   steps: z.array(FormulaStepSchema),
   thresholdMode: z.enum(['none', 'gte', 'lte']).optional(),
   thresholdValue: z.number().nullable().optional(),
+  conditionalAggregate: FormulaConditionalAggregateSchema.optional().nullable(),
   cumulativeUsersSliceRef: z.string().min(1).max(200).optional().nullable(),
 })
 

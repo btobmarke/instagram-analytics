@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import type { FormulaNode } from '@/lib/summary/formula-types'
 import { evalSummaryFormula, collectFormulaMetricRefs } from '@/lib/summary/eval-formula'
+import { DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM } from '@/lib/summary/summary-conditional-definitions'
+import { encodeSummaryConditionalRef, parseSummaryConditionalRef } from '@/lib/summary/summary-conditional-ref'
 
 describe('evalSummaryFormula', () => {
   const headers = ['D1', 'D2', 'D3']
@@ -51,25 +53,53 @@ describe('evalSummaryFormula', () => {
     expect(collectFormulaMetricRefs(f)).toEqual(['m.a'])
   })
 
-  it('evalSummaryFormula reads cumulative virtual ref', () => {
+  it('evalSummaryFormula reads conditional aggregate virtual ref', () => {
     const headers = ['4/22', '4/23']
+    const vref = encodeSummaryConditionalRef({
+      definitionId: DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
+      compareField: 'point',
+      compareOp: 'eq',
+      compareValue: 3,
+      sumField: 'users',
+    })
     const raw: Record<string, Record<string, number | null>> = {
-      'line_oam_shopcard_point.cumulative_users@eq:3': { '4/22': 10, '4/23': 12 },
+      [vref]: { '4/22': 10, '4/23': 12 },
     }
     const f: FormulaNode = {
       baseOperandId: 'line_oam_shopcard_point.point',
       steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
-      cumulativeUsersSliceRef: 'line_oam_shopcard_point.cumulative_users@eq:3',
+      conditionalAggregate: {
+        definitionId: DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
+        params: { compareField: 'point', compareOp: 'eq', compareValue: 3, sumField: 'users' },
+      },
     }
     expect(evalSummaryFormula(f, raw, '4/23', headers)).toBe(12)
   })
 
-  it('collectFormulaMetricRefs for cumulative slice', () => {
+  it('collectFormulaMetricRefs for conditional aggregate', () => {
     const f: FormulaNode = {
       baseOperandId: 'line_oam_shopcard_point.point',
       steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
-      cumulativeUsersSliceRef: 'line_oam_shopcard_point.cumulative_users@eq:2',
+      conditionalAggregate: {
+        definitionId: DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
+        params: { compareField: 'point', compareOp: 'eq', compareValue: 2, sumField: 'users' },
+      },
     }
-    expect(collectFormulaMetricRefs(f)).toEqual(['line_oam_shopcard_point.cumulative_users@eq:2'])
+    expect(collectFormulaMetricRefs(f).length).toBe(1)
+    expect(collectFormulaMetricRefs(f)[0]).toMatch(/^summary@cond:v1:/)
+  })
+
+  it('legacy cumulativeUsersSliceRef resolves to summary@cond ref for fetch', () => {
+    const f: FormulaNode = {
+      baseOperandId: 'line_oam_shopcard_point.point',
+      steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
+      cumulativeUsersSliceRef: 'line_oam_shopcard_point.cumulative_users@lte:1',
+    }
+    const refs = collectFormulaMetricRefs(f)
+    expect(refs).toHaveLength(1)
+    expect(parseSummaryConditionalRef(refs[0]!)).toMatchObject({
+      definitionId: DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
+      params: expect.objectContaining({ compareOp: 'lte', compareValue: 1 }),
+    })
   })
 })

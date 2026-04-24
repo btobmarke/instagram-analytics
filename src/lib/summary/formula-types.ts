@@ -21,8 +21,15 @@ export interface FormulaStep {
 
 export type FormulaThresholdMode = 'none' | 'gte' | 'lte'
 
-/** LINE ショップカード「ポイント分布」: 対象日までの累計 users（point 軸で比較） */
+/** 条件付き集計の比較演算子（数値列向け） */
 export type CumulativeUsersCompareOp = 'eq' | 'gte' | 'lte' | 'gt' | 'lt'
+
+/** サマリ用の条件付き集計（仮想 ref は summary@cond:v1:… で取得） */
+export interface FormulaConditionalAggregate {
+  definitionId: string
+  /** 定義ごとのパラメータ（Zod で fetch 側が検証） */
+  params: Record<string, unknown>
+}
 
 export interface FormulaNode {
   baseOperandId: string
@@ -33,9 +40,10 @@ export interface FormulaNode {
   steps: FormulaStep[]
   thresholdMode?: FormulaThresholdMode
   thresholdValue?: number | null
+  /** 条件付き集計（推奨）。設定時は四則ステップを無視し仮想 ref で値を取得する。 */
+  conditionalAggregate?: FormulaConditionalAggregate | null
   /**
-   * 設定時は「ポイント分布スライス人数」として評価し、値は `line_oam_shopcard_point.cumulative_users@op:threshold` のキーで取得する。
-   * 通常の四則ステップは無視される（API では steps はダミー 1 段で保存される）。
+   * @deprecated 互換用。`conditionalAggregate`（definitionId `line_oam_shopcard_point_cond_sum`）へ移行済みの新規保存では使わない。
    */
   cumulativeUsersSliceRef?: string | null
 }

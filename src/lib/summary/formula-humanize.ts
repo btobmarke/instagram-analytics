@@ -1,6 +1,7 @@
 import type { FormulaNode, FormulaStep, FormulaOperandTimeOp } from '@/lib/summary/formula-types'
 import { NARY_OPERATOR_LABELS, OPERATOR_SYMBOLS } from '@/lib/summary/formula-types'
 import { parseLineShopcardCumulativeUsersRef } from '@/lib/summary/line-shopcard-cumulative-users-ref'
+import { humanizeConditionalAggregate } from '@/lib/summary/summary-conditional-definitions'
 
 function isNAry(op: FormulaStep['operator']): boolean {
   return op === 'min' || op === 'max' || op === 'coalesce'
@@ -50,6 +51,12 @@ export function buildFormulaPlainLanguageSummary(
   formula: FormulaNode,
   findLabel: (id: string) => string,
 ): string {
+  const ca = formula.conditionalAggregate
+  if (ca?.definitionId) {
+    const h = humanizeConditionalAggregate(ca.definitionId, ca.params, findLabel)
+    if (h) return h
+  }
+
   const cum = formula.cumulativeUsersSliceRef
     ? parseLineShopcardCumulativeUsersRef(formula.cumulativeUsersSliceRef)
     : null

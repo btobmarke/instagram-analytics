@@ -1,10 +1,13 @@
 import type { UnifiedTableRow } from './types'
 import type { FormulaNode } from '@/app/(dashboard)/projects/[projectId]/services/[serviceId]/summary/_lib/types'
 import { collectFormulaOperandRefs } from '@/lib/summary/eval-service-formula'
+import { isSummaryConditionalRef } from '@/lib/summary/summary-conditional-ref'
 
 /** 横断テンプレで「生の table.field」として fetch 可能な ref か（カスタム指標 UUID は false） */
 export function isUnifiedSummaryScalarMetricRef(ref: string): boolean {
-  if (!ref || !ref.includes('.')) return false
+  if (!ref) return false
+  if (isSummaryConditionalRef(ref)) return true
+  if (!ref.includes('.')) return false
   if (ref.startsWith('custom.')) return false
   return true
 }

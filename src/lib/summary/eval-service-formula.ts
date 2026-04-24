@@ -4,16 +4,13 @@
  */
 
 import type { FormulaNode } from '@/app/(dashboard)/projects/[projectId]/services/[serviceId]/summary/_lib/types'
-import { parseLineShopcardCumulativeUsersRef } from '@/lib/summary/line-shopcard-cumulative-users-ref'
+import { resolveSummaryFormulaDataRef } from '@/lib/summary/summary-formula-data-ref'
 
 /** 式が参照する生指標 ID（カスタム指標 UUID は含めない） */
 export function collectFormulaOperandRefs(formula: FormulaNode | undefined): string[] {
   if (!formula) return []
-  if (formula.cumulativeUsersSliceRef) {
-    return parseLineShopcardCumulativeUsersRef(formula.cumulativeUsersSliceRef)
-      ? [formula.cumulativeUsersSliceRef]
-      : []
-  }
+  const dr = resolveSummaryFormulaDataRef(formula)
+  if (dr) return [dr]
   const out = new Set<string>()
   if (formula.baseOperandId) out.add(formula.baseOperandId)
   for (const s of formula.steps ?? []) {
@@ -32,10 +29,9 @@ export function evalServiceSummaryFormula(
   rawData: Record<string, Record<string, number | null>>,
   label: string,
 ): number | null {
-  const cumRef = formula.cumulativeUsersSliceRef
-  if (cumRef) {
-    if (!parseLineShopcardCumulativeUsersRef(cumRef)) return null
-    const v = rawData[cumRef]?.[label]
+  const dataRef = resolveSummaryFormulaDataRef(formula)
+  if (dataRef) {
+    const v = rawData[dataRef]?.[label]
     return v !== null && v !== undefined ? Math.round(v as number) : null
   }
 

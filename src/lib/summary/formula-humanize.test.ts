@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { FormulaNode } from '@/lib/summary/formula-types'
 import { buildFormulaPlainLanguageSummary } from '@/lib/summary/formula-humanize'
-import { encodeLineShopcardCumulativeUsersRef } from '@/lib/summary/line-shopcard-cumulative-users-ref'
+import { DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM } from '@/lib/summary/summary-conditional-definitions'
 
 describe('buildFormulaPlainLanguageSummary', () => {
   const L = (id: string) => (id === 'm.c' ? '友だち数' : id)
@@ -39,7 +39,10 @@ describe('buildFormulaPlainLanguageSummary', () => {
     const f: FormulaNode = {
       baseOperandId: 'line_oam_shopcard_point.point',
       steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
-      cumulativeUsersSliceRef: encodeLineShopcardCumulativeUsersRef('eq', 3),
+      conditionalAggregate: {
+        definitionId: DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
+        params: { compareField: 'point', compareOp: 'eq', compareValue: 3, sumField: 'users' },
+      },
     }
     const s = buildFormulaPlainLanguageSummary(f, L2)
     expect(s).toContain('ポイント値')

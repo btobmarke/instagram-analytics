@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { UnifiedTableRow } from './types'
 import type { FormulaNode } from '@/app/(dashboard)/projects/[projectId]/services/[serviceId]/summary/_lib/types'
 import { collectUnifiedTemplateFieldRefs } from './collect-template-field-refs'
+import { DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM } from '@/lib/summary/summary-conditional-definitions'
+import { encodeSummaryConditionalRef } from '@/lib/summary/summary-conditional-ref'
 
 describe('collectUnifiedTemplateFieldRefs', () => {
   it('includes scalar row metricRefs', () => {
@@ -29,19 +31,27 @@ describe('collectUnifiedTemplateFieldRefs', () => {
     ])
   })
 
-  it('expands LINE cumulative slice custom metric ref', () => {
+  it('expands LINE conditional aggregate custom metric ref', () => {
     const rows: UnifiedTableRow[] = [
       { id: '1', serviceId: 's1', serviceType: 'line', metricRef: 'uuid-cm-pt3', label: '3pt' },
     ]
     const formula: FormulaNode = {
       baseOperandId: 'line_oam_shopcard_point.point',
       steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
-      cumulativeUsersSliceRef: 'line_oam_shopcard_point.cumulative_users@eq:3',
+      conditionalAggregate: {
+        definitionId: DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
+        params: { compareField: 'point', compareOp: 'eq', compareValue: 3, sumField: 'users' },
+      },
     }
     const formulas = new Map([['s1', new Map([['uuid-cm-pt3', formula]])]])
     const out = collectUnifiedTemplateFieldRefs(rows, formulas)
-    expect(out).toEqual([
-      { serviceId: 's1', fieldRefs: ['line_oam_shopcard_point.cumulative_users@eq:3'] },
-    ])
+    const expectedRef = encodeSummaryConditionalRef({
+      definitionId: DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
+      compareField: 'point',
+      compareOp: 'eq',
+      compareValue: 3,
+      sumField: 'users',
+    })
+    expect(out).toEqual([{ serviceId: 's1', fieldRefs: [expectedRef] }])
   })
 })

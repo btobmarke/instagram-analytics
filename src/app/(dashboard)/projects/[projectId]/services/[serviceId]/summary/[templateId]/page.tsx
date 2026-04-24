@@ -31,10 +31,11 @@ import type {
   TableRow, TimeUnit, SummaryTemplate, StoredTemplateRow,
 } from '../_lib/types'
 import type { CumulativeUsersCompareOp } from '@/lib/summary/formula-types'
+import { parseLineShopcardCumulativeUsersRef } from '@/lib/summary/line-shopcard-cumulative-users-ref'
 import {
-  encodeLineShopcardCumulativeUsersRef,
-  parseLineShopcardCumulativeUsersRef,
-} from '@/lib/summary/line-shopcard-cumulative-users-ref'
+  DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
+  LineShopcardPointSliceParamsSchema,
+} from '@/lib/summary/summary-conditional-definitions'
 import {
   OPERATOR_SYMBOLS, TIME_UNIT_LABELS, formatFormula, NARY_OPERATOR_LABELS, TIME_OP_LABELS,
 } from '../_lib/types'
@@ -407,14 +408,29 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
   onSave: (card: MetricCard) => void; onClose: () => void
 }) {
   const allCards = [...catalog, ...customCards]
-  const initialCumRef = editTarget?.formula?.cumulativeUsersSliceRef
-  const initialCumParsed = initialCumRef ? parseLineShopcardCumulativeUsersRef(initialCumRef) : null
+  const initialCa = editTarget?.formula?.conditionalAggregate
+  const initialLegacy = editTarget?.formula?.cumulativeUsersSliceRef
+  const initialSliceParsed =
+    initialCa?.definitionId === DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM
+      ? LineShopcardPointSliceParamsSchema.safeParse(initialCa.params)
+      : null
+  const initialLegacyParsed = initialLegacy ? parseLineShopcardCumulativeUsersRef(initialLegacy) : null
+  const initialCumParsed =
+    initialSliceParsed?.success ? initialSliceParsed.data
+      : initialLegacyParsed
+        ? {
+            compareField: 'point' as const,
+            compareOp: initialLegacyParsed.op,
+            compareValue: initialLegacyParsed.threshold,
+            sumField: 'users' as const,
+          }
+        : null
   const [formulaMode, setFormulaMode] = useState<'arithmetic' | 'cumulative_slice'>(
     initialCumParsed ? 'cumulative_slice' : 'arithmetic',
   )
-  const [cumOp, setCumOp] = useState<CumulativeUsersCompareOp>(initialCumParsed?.op ?? 'eq')
+  const [cumOp, setCumOp] = useState<CumulativeUsersCompareOp>(initialCumParsed?.compareOp ?? 'eq')
   const [cumThresholdStr, setCumThresholdStr] = useState(
-    initialCumParsed != null ? String(initialCumParsed.threshold) : '3',
+    initialCumParsed != null ? String(initialCumParsed.compareValue) : '3',
   )
 
   const [name, setName] = useState(editTarget?.label ?? '')
@@ -485,7 +501,15 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
         baseOperandId: 'line_oam_shopcard_point.point',
         baseOperandIsConst: false,
         steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
-        cumulativeUsersSliceRef: encodeLineShopcardCumulativeUsersRef(cumOp, cumTh),
+        conditionalAggregate: {
+          definitionId: DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
+          params: {
+            compareField: 'point',
+            compareOp: cumOp,
+            compareValue: cumTh,
+            sumField: 'users',
+          },
+        },
       }
     }
     if (!baseOperandId || steps.length === 0) return null
@@ -511,7 +535,15 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
         baseOperandId: 'line_oam_shopcard_point.point',
         baseOperandIsConst: false,
         steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
-        cumulativeUsersSliceRef: encodeLineShopcardCumulativeUsersRef(cumOp, cumTh),
+        conditionalAggregate: {
+          definitionId: DEF_LINE_OAM_SHOPCARD_POINT_COND_SUM,
+          params: {
+            compareField: 'point',
+            compareOp: cumOp,
+            compareValue: cumTh,
+            sumField: 'users',
+          },
+        },
       }
     } else {
       formula = {
@@ -941,7 +973,12 @@ export default function TemplateEditorPage({
   }, [filteredCatalog])
 
   const toggleCategory = useCallback((cat: string) => {
-    setOpenCategories(prev => { const n = new Set(prev); n.has(cat) ? n.delete(cat) : n.add(cat); return n })
+    setOpenCategories((prev) => {
+      const n = new Set(prev)
+      if (n.has(cat)) n.delete(cat)
+      else n.add(cat)
+      return n
+    })
   }, [])
   const toggleAllCategories = useCallback(() => {
     const cats = Object.keys(groupedFiltered)

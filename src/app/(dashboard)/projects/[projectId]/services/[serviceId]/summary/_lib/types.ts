@@ -7,6 +7,10 @@ import {
   TIME_OP_LABELS,
 } from '@/lib/summary/formula-types'
 import { parseLineShopcardCumulativeUsersRef } from '@/lib/summary/line-shopcard-cumulative-users-ref'
+import {
+  formatConditionalAggregateSummary,
+  humanizeConditionalAggregate,
+} from '@/lib/summary/summary-conditional-definitions'
 
 export type {
   FormulaNode,
@@ -67,6 +71,11 @@ export function formatFormula(
   findLabel: (id: string) => string,
   mode: 'label' | 'id' = 'label',
 ): string {
+  const ca = formula.conditionalAggregate
+  if (ca?.definitionId) {
+    const s = formatConditionalAggregateSummary(ca.definitionId, ca.params)
+    if (s) return mode === 'id' ? `${ca.definitionId}:${JSON.stringify(ca.params)}` : s
+  }
   if (formula.cumulativeUsersSliceRef) {
     const p = parseLineShopcardCumulativeUsersRef(formula.cumulativeUsersSliceRef)
     if (p) {
