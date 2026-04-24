@@ -50,4 +50,26 @@ describe('evalSummaryFormula', () => {
     }
     expect(collectFormulaMetricRefs(f)).toEqual(['m.a'])
   })
+
+  it('evalSummaryFormula reads cumulative virtual ref', () => {
+    const headers = ['4/22', '4/23']
+    const raw: Record<string, Record<string, number | null>> = {
+      'line_oam_shopcard_point.cumulative_users@eq:3': { '4/22': 10, '4/23': 12 },
+    }
+    const f: FormulaNode = {
+      baseOperandId: 'line_oam_shopcard_point.point',
+      steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
+      cumulativeUsersSliceRef: 'line_oam_shopcard_point.cumulative_users@eq:3',
+    }
+    expect(evalSummaryFormula(f, raw, '4/23', headers)).toBe(12)
+  })
+
+  it('collectFormulaMetricRefs for cumulative slice', () => {
+    const f: FormulaNode = {
+      baseOperandId: 'line_oam_shopcard_point.point',
+      steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
+      cumulativeUsersSliceRef: 'line_oam_shopcard_point.cumulative_users@eq:2',
+    }
+    expect(collectFormulaMetricRefs(f)).toEqual(['line_oam_shopcard_point.cumulative_users@eq:2'])
+  })
 })

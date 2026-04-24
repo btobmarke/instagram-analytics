@@ -21,6 +21,9 @@ export interface FormulaStep {
 
 export type FormulaThresholdMode = 'none' | 'gte' | 'lte'
 
+/** LINE ショップカード「ポイント分布」: 対象日までの累計 users（point 軸で比較） */
+export type CumulativeUsersCompareOp = 'eq' | 'gte' | 'lte' | 'gt' | 'lt'
+
 export interface FormulaNode {
   baseOperandId: string
   /** true のとき baseOperandId を数値定数として解釈 */
@@ -30,6 +33,11 @@ export interface FormulaNode {
   steps: FormulaStep[]
   thresholdMode?: FormulaThresholdMode
   thresholdValue?: number | null
+  /**
+   * 設定時は「ポイント分布スライス人数」として評価し、値は `line_oam_shopcard_point.cumulative_users@op:threshold` のキーで取得する。
+   * 通常の四則ステップは無視される（API では steps はダミー 1 段で保存される）。
+   */
+  cumulativeUsersSliceRef?: string | null
 }
 
 export const OPERATOR_SYMBOLS: Record<FormulaBinaryOperator, string> = {

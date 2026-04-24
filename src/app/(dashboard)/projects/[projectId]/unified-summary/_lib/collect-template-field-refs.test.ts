@@ -28,4 +28,20 @@ describe('collectUnifiedTemplateFieldRefs', () => {
       'ig_account_insight_fact.views',
     ])
   })
+
+  it('expands LINE cumulative slice custom metric ref', () => {
+    const rows: UnifiedTableRow[] = [
+      { id: '1', serviceId: 's1', serviceType: 'line', metricRef: 'uuid-cm-pt3', label: '3pt' },
+    ]
+    const formula: FormulaNode = {
+      baseOperandId: 'line_oam_shopcard_point.point',
+      steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
+      cumulativeUsersSliceRef: 'line_oam_shopcard_point.cumulative_users@eq:3',
+    }
+    const formulas = new Map([['s1', new Map([['uuid-cm-pt3', formula]])]])
+    const out = collectUnifiedTemplateFieldRefs(rows, formulas)
+    expect(out).toEqual([
+      { serviceId: 's1', fieldRefs: ['line_oam_shopcard_point.cumulative_users@eq:3'] },
+    ])
+  })
 })

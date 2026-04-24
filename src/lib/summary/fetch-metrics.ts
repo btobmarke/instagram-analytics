@@ -7,7 +7,16 @@
  */
 
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-import { generateCustomRangePeriod, generateJstDayPeriods, generateJstDayPeriodsFromRange } from '@/lib/summary/jst-periods'
+import {
+  generateCustomRangePeriod,
+  generateJstDayPeriods,
+  generateJstDayPeriodsFromRange,
+  formatDateKeyJst,
+} from '@/lib/summary/jst-periods'
+import {
+  parseLineShopcardCumulativeUsersRef,
+  pointMatchesCumulativeSlice,
+} from '@/lib/summary/line-shopcard-cumulative-users-ref'
 import { salesHourlySlotsForRevenueSumByDay } from '@/lib/summary/sales-slot-aggregate'
 
 export type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>
@@ -1434,6 +1443,7 @@ export async function fetchLineRewardcardTable(
   const rows = (rawRows ?? []) as Record<string, unknown>[]
 
   for (const field of fields) {
+    if (field.startsWith('cumulative_users@')) continue
     const accum = emptyAccum(periods)
     for (const row of rows) {
       const rawDate = row[dateCol] as string
@@ -1449,6 +1459,83 @@ export async function fetchLineRewardcardTable(
     }
     result[`${tableName}.${field}`] = finalizeAccum(accum, AVG_FIELDS.has(field) ? 'avg' : 'sum')
   }
+  return result
+}
+
+/** 期間列の「対象日」（JST YYYY-MM-DD）: 半開区間 [start, end) の直前の瞬間が属する暦日 */
+function periodAsOfDateKeyJst(period: Period): string {
+  if (period.rangeEnd) return period.rangeEnd.slice(0, 10)
+  if (period.dateKey) return period.dateKey
+  return formatDateKeyJst(new Date(period.end.getTime() - 1))
+}
+
+/**
+ * LINE ショップカード「ポイント分布」: 対象日のスナップショットで point 軸が条件を満たす users をカード横断で合算。
+ */
+export async function fetchLineShopcardCumulativeUsersSlices(
+  supabase: SupabaseServerClient,
+  serviceId: string,
+  virtualFieldRefs: string[],
+  periods: Period[],
+): Promise<Record<string, Record<string, number | null>>> {
+  const result: Record<string, Record<string, number | null>> = {}
+  const slices = virtualFieldRefs
+    .map((ref) => {
+      const parsed = parseLineShopcardCumulativeUsersRef(ref)
+      return parsed ? { ref, ...parsed } : null
+    })
+    .filter((x): x is NonNullable<typeof x> => x != null)
+  if (slices.length === 0) return result
+
+  const { data: rcRows } = await supabase
+    .from('line_oam_rewardcards')
+    .select('id')
+    .eq('service_id', serviceId)
+  if (!rcRows || rcRows.length === 0) {
+    for (const s of slices) {
+      result[s.ref] = Object.fromEntries(periods.map((p) => [p.label, null]))
+    }
+    return result
+  }
+
+  const rewardcardIds = rcRows.map((r) => r.id)
+  const minKey = periods.map(periodAsOfDateKeyJst).sort()[0]!
+  const maxKey = periods.map(periodAsOfDateKeyJst).sort().slice(-1)[0]!
+
+  const { data: rawRows } = await supabase
+    .from('line_oam_shopcard_point')
+    .select('line_rewardcard_id, date, point, users')
+    .in('line_rewardcard_id', rewardcardIds)
+    .gte('date', minKey)
+    .lte('date', maxKey)
+
+  const rows = (rawRows ?? []) as Array<{
+    line_rewardcard_id: string
+    date: string
+    point: number
+    users: number | null
+  }>
+
+  for (const s of slices) {
+    const byLabel: Record<string, number | null> = {}
+    for (const p of periods) {
+      const asOf = periodAsOfDateKeyJst(p)
+      let sum = 0
+      let any = false
+      for (const row of rows) {
+        if (row.date !== asOf) continue
+        if (!pointMatchesCumulativeSlice(row.point, s.op, s.threshold)) continue
+        const u = row.users
+        if (u != null && Number.isFinite(u)) {
+          sum += u
+          any = true
+        }
+      }
+      byLabel[p.label] = any ? sum : null
+    }
+    result[s.ref] = byLabel
+  }
+
   return result
 }
 
@@ -1704,11 +1791,16 @@ export async function fetchMetricsByRefs(
 ): Promise<Record<string, Record<string, number | null>>> {
   // "table.field" のリストをテーブル別にグループ化
   const byTable: Record<string, string[]> = {}
+  const lineShopcardCumulativeRefs: string[] = []
   for (const ref of fieldRefs) {
     const dot = ref.indexOf('.')
     if (dot < 0) continue
     const table = ref.slice(0, dot)
     const field = ref.slice(dot + 1)
+    if (table === 'line_oam_shopcard_point' && field.startsWith('cumulative_users@')) {
+      if (parseLineShopcardCumulativeUsersRef(ref)) lineShopcardCumulativeRefs.push(ref)
+      continue
+    }
     ;(byTable[table] ??= []).push(field)
   }
 
@@ -1782,6 +1874,12 @@ export async function fetchMetricsByRefs(
       default:
         break
     }
+  }
+
+  if (lineShopcardCumulativeRefs.length > 0) {
+    queries.push(
+      fetchLineShopcardCumulativeUsersSlices(supabase, serviceId, lineShopcardCumulativeRefs, periods),
+    )
   }
 
   // allSettled で実行: 1テーブルが失敗しても他テーブルの結果は反映する

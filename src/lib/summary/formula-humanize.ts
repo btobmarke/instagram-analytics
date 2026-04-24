@@ -1,5 +1,6 @@
 import type { FormulaNode, FormulaStep, FormulaOperandTimeOp } from '@/lib/summary/formula-types'
 import { NARY_OPERATOR_LABELS, OPERATOR_SYMBOLS } from '@/lib/summary/formula-types'
+import { parseLineShopcardCumulativeUsersRef } from '@/lib/summary/line-shopcard-cumulative-users-ref'
 
 function isNAry(op: FormulaStep['operator']): boolean {
   return op === 'min' || op === 'max' || op === 'coalesce'
@@ -49,6 +50,20 @@ export function buildFormulaPlainLanguageSummary(
   formula: FormulaNode,
   findLabel: (id: string) => string,
 ): string {
+  const cum = formula.cumulativeUsersSliceRef
+    ? parseLineShopcardCumulativeUsersRef(formula.cumulativeUsersSliceRef)
+    : null
+  if (cum) {
+    const pt = findLabel('line_oam_shopcard_point.point')
+    const opJa =
+      cum.op === 'eq' ? 'ちょうど'
+        : cum.op === 'gte' ? '以上'
+          : cum.op === 'lte' ? '以下'
+            : cum.op === 'gt' ? 'より大きい'
+              : '未満'
+    return `各列の「対象日」（期間の終端の暦日）における ${pt} が ${opJa} ${cum.threshold} の行について、${findLabel('line_oam_shopcard_point.users')} をカード横断で合算した人数です。`
+  }
+
   const base = formula.baseOperandIsConst
     ? `定数 ${formula.baseOperandId} を起点にします。`
     : (() => {

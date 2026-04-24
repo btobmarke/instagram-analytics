@@ -34,6 +34,18 @@ describe('evalServiceSummaryFormula', () => {
     expect(evalServiceSummaryFormula(f, raw, '1/1')).toBe(null)
     expect(evalServiceSummaryFormula(f, raw, '1/2')).toBe(20)
   })
+
+  it('reads LINE cumulative virtual ref', () => {
+    const raw2: Record<string, Record<string, number | null>> = {
+      'line_oam_shopcard_point.cumulative_users@eq:3': { '1/1': 100 },
+    }
+    const f: FormulaNode = {
+      baseOperandId: 'line_oam_shopcard_point.point',
+      steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
+      cumulativeUsersSliceRef: 'line_oam_shopcard_point.cumulative_users@eq:3',
+    }
+    expect(evalServiceSummaryFormula(f, raw2, '1/1')).toBe(100)
+  })
 })
 
 describe('collectFormulaOperandRefs', () => {
@@ -46,5 +58,14 @@ describe('collectFormulaOperandRefs', () => {
       ],
     }
     expect(collectFormulaOperandRefs(f).sort()).toEqual(['x.1', 'y.2', 'z.3'])
+  })
+
+  it('collects only cumulative virtual ref when set', () => {
+    const f: FormulaNode = {
+      baseOperandId: 'line_oam_shopcard_point.point',
+      steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
+      cumulativeUsersSliceRef: 'line_oam_shopcard_point.cumulative_users@lte:1',
+    }
+    expect(collectFormulaOperandRefs(f)).toEqual(['line_oam_shopcard_point.cumulative_users@lte:1'])
   })
 })

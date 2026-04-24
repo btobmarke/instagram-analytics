@@ -3,6 +3,7 @@
  */
 
 import type { FormulaNode, FormulaStep } from '@/lib/summary/formula-types'
+import { parseLineShopcardCumulativeUsersRef } from '@/lib/summary/line-shopcard-cumulative-users-ref'
 
 export type { FormulaNode, FormulaStep } from '@/lib/summary/formula-types'
 
@@ -104,6 +105,13 @@ export function evalSummaryFormula(
   label: string,
   timeHeaders: string[],
 ): number | null {
+  const cumRef = formula.cumulativeUsersSliceRef
+  if (cumRef) {
+    if (!parseLineShopcardCumulativeUsersRef(cumRef)) return null
+    const v = readMetric(rawData, cumRef, label)
+    return v !== null && v !== undefined ? Math.round(v) : null
+  }
+
   let sawNumeric = false
   const asPlusMinus = (v: number | null) => (v === null ? 0 : v)
 
@@ -180,6 +188,11 @@ export function evalSummaryFormula(
 /** データ取得に必要なメトリクス fieldRef を列挙（定数オペランドは除く） */
 export function collectFormulaMetricRefs(formula: FormulaNode | undefined): string[] {
   if (!formula) return []
+  if (formula.cumulativeUsersSliceRef) {
+    return parseLineShopcardCumulativeUsersRef(formula.cumulativeUsersSliceRef)
+      ? [formula.cumulativeUsersSliceRef]
+      : []
+  }
   const out: string[] = []
   if (!formula.baseOperandIsConst && formula.baseOperandId) {
     out.push(formula.baseOperandId)

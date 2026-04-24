@@ -18,6 +18,7 @@ export const FormulaNodeSchema = z.object({
   steps: z.array(FormulaStepSchema),
   thresholdMode: z.enum(['none', 'gte', 'lte']).optional(),
   thresholdValue: z.number().nullable().optional(),
+  cumulativeUsersSliceRef: z.string().min(1).max(200).optional().nullable(),
 })
 
 export type FormulaNodeParsed = z.infer<typeof FormulaNodeSchema>

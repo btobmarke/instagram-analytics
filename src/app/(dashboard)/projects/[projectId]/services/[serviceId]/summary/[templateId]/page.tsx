@@ -30,6 +30,11 @@ import type {
   FormulaBinaryOperator, FormulaNAryOperator, FormulaOperandTimeOp, FormulaThresholdMode,
   TableRow, TimeUnit, SummaryTemplate, StoredTemplateRow,
 } from '../_lib/types'
+import type { CumulativeUsersCompareOp } from '@/lib/summary/formula-types'
+import {
+  encodeLineShopcardCumulativeUsersRef,
+  parseLineShopcardCumulativeUsersRef,
+} from '@/lib/summary/line-shopcard-cumulative-users-ref'
 import {
   OPERATOR_SYMBOLS, TIME_UNIT_LABELS, formatFormula, NARY_OPERATOR_LABELS, TIME_OP_LABELS,
 } from '../_lib/types'
@@ -394,14 +399,28 @@ function OperandValueRow({
 }
 
 // ── フォーミュラビルダーモーダル ───────────────────────────────
-function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdControls, onSave, onClose }: {
+function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdControls, allowCumulativeSliceUsers, onSave, onClose }: {
   catalog: MetricCard[]; customCards: MetricCard[]; editTarget: MetricCard | null
   showThresholdControls?: boolean
+  /** LINE: ポイント分布の「対象日までの users 合算」カスタム指標 */
+  allowCumulativeSliceUsers?: boolean
   onSave: (card: MetricCard) => void; onClose: () => void
 }) {
   const allCards = [...catalog, ...customCards]
+  const initialCumRef = editTarget?.formula?.cumulativeUsersSliceRef
+  const initialCumParsed = initialCumRef ? parseLineShopcardCumulativeUsersRef(initialCumRef) : null
+  const [formulaMode, setFormulaMode] = useState<'arithmetic' | 'cumulative_slice'>(
+    initialCumParsed ? 'cumulative_slice' : 'arithmetic',
+  )
+  const [cumOp, setCumOp] = useState<CumulativeUsersCompareOp>(initialCumParsed?.op ?? 'eq')
+  const [cumThresholdStr, setCumThresholdStr] = useState(
+    initialCumParsed != null ? String(initialCumParsed.threshold) : '3',
+  )
+
   const [name, setName] = useState(editTarget?.label ?? '')
-  const [baseOperandId, setBaseOperandId] = useState(editTarget?.formula?.baseOperandId ?? '')
+  const [baseOperandId, setBaseOperandId] = useState(
+    initialCumParsed ? 'line_oam_shopcard_point.point' : (editTarget?.formula?.baseOperandId ?? ''),
+  )
   const [baseOperandIsConst, setBaseOperandIsConst] = useState(editTarget?.formula?.baseOperandIsConst ?? false)
   const [baseTimeOp, setBaseTimeOp] = useState<FormulaOperandTimeOp>(editTarget?.formula?.baseTimeOp ?? 'none')
   const [steps, setSteps] = useState<FormulaStep[]>(editTarget?.formula?.steps ?? [{ operator: '+', operandId: '', operandTimeOp: 'none' }])
@@ -439,42 +458,72 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
     return operandOk(s.operandId, Boolean(s.operandIsConst))
   })
 
+  const cumTh = Number(cumThresholdStr)
+  const cumValid =
+    allowCumulativeSliceUsers &&
+    formulaMode === 'cumulative_slice' &&
+    cumThresholdStr.trim() !== '' &&
+    Number.isFinite(cumTh) &&
+    Number.isInteger(cumTh)
+
   const baseOk = operandOk(baseOperandId, baseOperandIsConst)
-  const canSave = !!(name.trim() && baseOk && steps.length >= 1 && stepsOk && thresholdValid)
+  const canSave =
+    !!name.trim() &&
+    thresholdValid &&
+    (formulaMode === 'cumulative_slice'
+      ? cumValid
+      : baseOk && steps.length >= 1 && stepsOk)
 
   const grouped = allCards.reduce<Record<string, MetricCard[]>>((acc, c) => {
     if (!c.formula) { ;(acc[c.category] ??= []).push(c) }
     return acc
   }, {})
 
-  const previewFormula: FormulaNode | null = baseOperandId && steps.length > 0
-    ? (() => {
-        const f: FormulaNode = {
-          baseOperandId,
-          baseOperandIsConst: baseOperandIsConst || undefined,
-          baseTimeOp: !baseOperandIsConst && baseTimeOp !== 'none' ? baseTimeOp : undefined,
-          steps,
-        }
-        if (showThresholdControls && thresholdMode !== 'none' && Number.isFinite(thresholdNum)) {
-          f.thresholdMode = thresholdMode
-          f.thresholdValue = thresholdNum
-        }
-        return f
-      })()
-    : null
-
-  const handleSave = () => {
-    if (!canSave) return
-    const id = editTarget?.id ?? `custom.${Date.now()}`
-    const formula: FormulaNode = {
+  const previewFormula: FormulaNode | null = (() => {
+    if (formulaMode === 'cumulative_slice' && cumValid) {
+      return {
+        baseOperandId: 'line_oam_shopcard_point.point',
+        baseOperandIsConst: false,
+        steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
+        cumulativeUsersSliceRef: encodeLineShopcardCumulativeUsersRef(cumOp, cumTh),
+      }
+    }
+    if (!baseOperandId || steps.length === 0) return null
+    const f: FormulaNode = {
       baseOperandId,
       baseOperandIsConst: baseOperandIsConst || undefined,
       baseTimeOp: !baseOperandIsConst && baseTimeOp !== 'none' ? baseTimeOp : undefined,
       steps,
     }
     if (showThresholdControls && thresholdMode !== 'none' && Number.isFinite(thresholdNum)) {
-      formula.thresholdMode = thresholdMode
-      formula.thresholdValue = thresholdNum
+      f.thresholdMode = thresholdMode
+      f.thresholdValue = thresholdNum
+    }
+    return f
+  })()
+
+  const handleSave = () => {
+    if (!canSave) return
+    const id = editTarget?.id ?? `custom.${Date.now()}`
+    let formula: FormulaNode
+    if (formulaMode === 'cumulative_slice' && cumValid) {
+      formula = {
+        baseOperandId: 'line_oam_shopcard_point.point',
+        baseOperandIsConst: false,
+        steps: [{ operator: '+', operandId: '0', operandIsConst: true }],
+        cumulativeUsersSliceRef: encodeLineShopcardCumulativeUsersRef(cumOp, cumTh),
+      }
+    } else {
+      formula = {
+        baseOperandId,
+        baseOperandIsConst: baseOperandIsConst || undefined,
+        baseTimeOp: !baseOperandIsConst && baseTimeOp !== 'none' ? baseTimeOp : undefined,
+        steps,
+      }
+      if (showThresholdControls && thresholdMode !== 'none' && Number.isFinite(thresholdNum)) {
+        formula.thresholdMode = thresholdMode
+        formula.thresholdValue = thresholdNum
+      }
     }
     onSave({ id, label: name.trim(), category: 'カスタム指標', fieldRef: formatFormula(formula, findLabel, 'id'), formula })
   }
@@ -491,6 +540,73 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
             <label className="block text-xs font-medium text-gray-700 mb-1.5">指標名</label>
             <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="例: 前日比、構成比（%）" className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400" />
           </div>
+          {allowCumulativeSliceUsers && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 px-3 py-3 space-y-3">
+              <p className="text-xs font-medium text-gray-800">指標の種類</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFormulaMode('arithmetic')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition ${
+                    formulaMode === 'arithmetic'
+                      ? 'bg-white border-emerald-400 text-emerald-900 shadow-sm'
+                      : 'bg-transparent border-emerald-200 text-emerald-800 hover:bg-white/60'
+                  }`}
+                >
+                  通常の計算式
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormulaMode('cumulative_slice')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition ${
+                    formulaMode === 'cumulative_slice'
+                      ? 'bg-white border-emerald-400 text-emerald-900 shadow-sm'
+                      : 'bg-transparent border-emerald-200 text-emerald-800 hover:bg-white/60'
+                  }`}
+                >
+                  ポイント分布（人数）
+                </button>
+              </div>
+              {formulaMode === 'cumulative_slice' && (
+                <div className="space-y-2 pt-1">
+                  <p className="text-[10px] text-gray-600 leading-relaxed">
+                    各列の<strong>対象日</strong>（日次はその日、週次・月次・期間指定は<strong>終端の暦日</strong>）のスナップショットで、
+                    <code className="text-[10px] bg-white/80 px-1 rounded">line_oam_shopcard_point</code> の <strong>point</strong> が条件を満たす行の <strong>users</strong> をリワードカード横断で合算します。
+                  </p>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div className="flex-1 min-w-[140px]">
+                      <span className="text-[10px] text-gray-500 block mb-1">point の条件</span>
+                      <select
+                        value={cumOp}
+                        onChange={e => setCumOp(e.target.value as CumulativeUsersCompareOp)}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                      >
+                        <option value="eq">＝（等しい）</option>
+                        <option value="gte">≧ 以上</option>
+                        <option value="lte">≦ 以下</option>
+                        <option value="gt">&gt; より大きい</option>
+                        <option value="lt">&lt; より小さい</option>
+                      </select>
+                    </div>
+                    <div className="w-28">
+                      <span className="text-[10px] text-gray-500 block mb-1">point（整数）</span>
+                      <input
+                        type="number"
+                        step={1}
+                        value={cumThresholdStr}
+                        onChange={e => setCumThresholdStr(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                      />
+                    </div>
+                  </div>
+                  {!cumValid && formulaMode === 'cumulative_slice' && (
+                    <p className="text-[10px] text-red-600">point は整数で入力してください。</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          {formulaMode === 'cumulative_slice' ? null : (
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">ステップ 1（起点）</label>
             <p className="text-[10px] text-gray-500 mb-2 leading-relaxed">
@@ -622,7 +738,8 @@ function FormulaBuilderModal({ catalog, customCards, editTarget, showThresholdCo
               演算ステップを追加
             </button>
           </div>
-          {showThresholdControls && (
+          )}
+          {showThresholdControls && formulaMode === 'arithmetic' && (
             <div className="rounded-lg border border-green-200 bg-green-50/50 px-3 py-3 space-y-2">
               <p className="text-xs font-medium text-gray-700">表示条件（計算後の値）</p>
               <p className="text-[10px] text-gray-500">条件を満たさないセルはサマリーで「—」になります。</p>
@@ -1263,6 +1380,7 @@ export default function TemplateEditorPage({
           catalog={catalog}
           customCards={customCards}
           editTarget={editingCustomCard}
+          allowCumulativeSliceUsers={serviceType === 'line'}
           showThresholdControls={
             serviceType === 'gbp' ||
             serviceType === 'line' ||

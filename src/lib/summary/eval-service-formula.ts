@@ -4,10 +4,16 @@
  */
 
 import type { FormulaNode } from '@/app/(dashboard)/projects/[projectId]/services/[serviceId]/summary/_lib/types'
+import { parseLineShopcardCumulativeUsersRef } from '@/lib/summary/line-shopcard-cumulative-users-ref'
 
 /** 式が参照する生指標 ID（カスタム指標 UUID は含めない） */
 export function collectFormulaOperandRefs(formula: FormulaNode | undefined): string[] {
   if (!formula) return []
+  if (formula.cumulativeUsersSliceRef) {
+    return parseLineShopcardCumulativeUsersRef(formula.cumulativeUsersSliceRef)
+      ? [formula.cumulativeUsersSliceRef]
+      : []
+  }
   const out = new Set<string>()
   if (formula.baseOperandId) out.add(formula.baseOperandId)
   for (const s of formula.steps ?? []) {
@@ -26,6 +32,13 @@ export function evalServiceSummaryFormula(
   rawData: Record<string, Record<string, number | null>>,
   label: string,
 ): number | null {
+  const cumRef = formula.cumulativeUsersSliceRef
+  if (cumRef) {
+    if (!parseLineShopcardCumulativeUsersRef(cumRef)) return null
+    const v = rawData[cumRef]?.[label]
+    return v !== null && v !== undefined ? Math.round(v as number) : null
+  }
+
   let sawNumeric = false
   const get = (id: string): number | null => {
     const v = rawData[id]?.[label]

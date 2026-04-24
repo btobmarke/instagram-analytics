@@ -6,6 +6,7 @@ import {
   NARY_OPERATOR_LABELS,
   TIME_OP_LABELS,
 } from '@/lib/summary/formula-types'
+import { parseLineShopcardCumulativeUsersRef } from '@/lib/summary/line-shopcard-cumulative-users-ref'
 
 export type {
   FormulaNode,
@@ -52,12 +53,27 @@ function operandDisplay(
   return isConst ? `定数 ${core}` : `${core}${t}`
 }
 
+const CUMULATIVE_OP_SYMBOL: Record<string, string> = {
+  eq: '=',
+  gte: '≥',
+  lte: '≤',
+  gt: '>',
+  lt: '<',
+}
+
 /** 式を人間可読な文字列に変換 */
 export function formatFormula(
   formula: FormulaNode,
   findLabel: (id: string) => string,
   mode: 'label' | 'id' = 'label',
 ): string {
+  if (formula.cumulativeUsersSliceRef) {
+    const p = parseLineShopcardCumulativeUsersRef(formula.cumulativeUsersSliceRef)
+    if (p) {
+      const sym = CUMULATIVE_OP_SYMBOL[p.op] ?? p.op
+      return `ポイント分布: point ${sym} ${p.threshold}（users 合計・対象日のスナップショット）`
+    }
+  }
   const baseStr = operandDisplay(formula.baseOperandId, findLabel, mode, formula.baseOperandIsConst, formula.baseTimeOp)
   const parts: string[] = [baseStr]
   let needsGroup = false
