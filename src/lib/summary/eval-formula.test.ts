@@ -20,6 +20,17 @@ describe('evalSummaryFormula', () => {
     expect(evalSummaryFormula(f, raw, 'D3', headers)).toBe(3)
   })
 
+  it('minus lag1 on first column is null (not same as current column)', () => {
+    const f: FormulaNode = {
+      baseOperandId: 'm.a',
+      baseTimeOp: 'none',
+      steps: [{ operator: '-', operandId: 'm.a', operandTimeOp: 'lag1' }],
+    }
+    expect(evalSummaryFormula(f, raw, 'D1', headers)).toBe(null)
+    expect(evalSummaryFormula(f, raw, 'D2', headers)).toBe(2)
+    expect(evalSummaryFormula(f, raw, 'D3', headers)).toBe(3)
+  })
+
   it('divides by constant', () => {
     const f: FormulaNode = {
       baseOperandId: 'm.a',
