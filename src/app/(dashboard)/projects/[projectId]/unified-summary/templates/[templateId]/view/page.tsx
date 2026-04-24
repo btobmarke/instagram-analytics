@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useEffect, useState, useMemo } from 'react'
+import { use, useEffect, useState, useMemo, useCallback } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 import {
@@ -11,9 +11,16 @@ import type { UnifiedTableRow, ProjectSummaryTemplate, TimeUnit } from '../../..
 import { SERVICE_TYPE_INFO, TIME_UNIT_LABELS } from '../../../_lib/types'
 import { resolveIGLabel } from '../../../../services/[serviceId]/summary/_lib/catalog'
 import { getTemplate } from '../../../_lib/store'
-import { generateJstDayPeriodLabels, generateJstDayPeriods, generateCustomRangePeriod } from '@/lib/summary/jst-periods'
+import type { JstDayPeriod } from '@/lib/summary/jst-periods'
+import {
+  addDaysToJstDateKey,
+  generateJstDayPeriodLabels,
+  generateJstDayPeriods,
+  generateJstDayPeriodsFromRange,
+  generateCustomRangePeriod,
+} from '@/lib/summary/jst-periods'
 import type { FormulaNode } from '@/app/(dashboard)/projects/[projectId]/services/[serviceId]/summary/_lib/types'
-import { evalServiceSummaryFormula } from '@/lib/summary/eval-service-formula'
+import { evalSummaryFormula } from '@/lib/summary/eval-formula'
 import { collectUnifiedTemplateFieldRefs } from '../../../_lib/collect-template-field-refs'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
@@ -115,7 +122,12 @@ function generateTimeHeaders(unit: TimeUnit, count: number, rangeStart?: string 
     if (rangeStart && rangeEnd) return [generateCustomRangePeriod(rangeStart, rangeEnd).label]
     return ['（期間未設定）']
   }
-  if (unit === 'day') return generateJstDayPeriodLabels(count)
+  if (unit === 'day') {
+    if (rangeStart && rangeEnd && rangeStart <= rangeEnd) {
+      return generateJstDayPeriodsFromRange(rangeStart, rangeEnd).map(p => p.label)
+    }
+    return generateJstDayPeriodLabels(count)
+  }
   const headers: string[] = []
   const now = new Date()
   for (let i = count - 1; i >= 0; i--) {
@@ -128,8 +140,6 @@ function generateTimeHeaders(unit: TimeUnit, count: number, rangeStart?: string 
   }
   return headers
 }
-
-const evalFormula = evalServiceSummaryFormula
 
 // ── カスタム指標ライブラリ型 ──────────────────────────────────────────────────
 
@@ -166,7 +176,12 @@ function UnifiedChartView({
   customMetricMap: Map<string, Map<string, FormulaNode>>
   timeHeaders: string[]
   formatCell: (v: number | null, ref: string) => string
-  evalFormula: (f: FormulaNode, d: Record<string, Record<string, number | null>>, label: string) => number | null
+  evalFormula: (
+    f: FormulaNode,
+    d: Record<string, Record<string, number | null>>,
+    label: string,
+    headers: string[],
+  ) => number | null
 }) {
   return (
     <div className="space-y-6">
@@ -191,7 +206,7 @@ function UnifiedChartView({
                 const formula = svcCustomMap?.get(row.metricRef) ?? null
                 const values  = !formula ? (metricDataMap[row.metricRef] ?? {}) : {}
                 const getV = (label: string): number | null =>
-                  formula ? evalFn(formula, metricDataMap, label) : (values[label] ?? null)
+                  formula ? evalFn(formula, metricDataMap, label, timeHeaders) : (values[label] ?? null)
 
                 const color        = CHART_COLORS[rowIdx % CHART_COLORS.length]
                 const displayLabel = resolveIGLabel(row.metricRef, row.label)
@@ -288,7 +303,12 @@ function UnifiedServiceCombinedChart({
   customMap: Map<string, FormulaNode> | undefined
   timeHeaders: string[]
   formatCell: (v: number | null, ref: string) => string
-  evalFn: (f: FormulaNode, d: Record<string, Record<string, number | null>>, label: string) => number | null
+  evalFn: (
+    f: FormulaNode,
+    d: Record<string, Record<string, number | null>>,
+    label: string,
+    headers: string[],
+  ) => number | null
 }) {
   const [selected, setSelected] = useState<Set<number>>(
     () => new Set(rows.map((_, i) => i)),
@@ -313,7 +333,7 @@ function UnifiedServiceCombinedChart({
     rows.forEach((row, i) => {
       const formula = customMap?.get(row.metricRef) ?? null
       point[`m_${i}`] = formula
-        ? evalFn(formula, metricDataMap, h)
+        ? evalFn(formula, metricDataMap, h, timeHeaders)
         : (metricDataMap[row.metricRef]?.[h] ?? null)
     })
     return point
@@ -431,7 +451,12 @@ function UnifiedCombinedChartView({
   customMetricMap: Map<string, Map<string, FormulaNode>>
   timeHeaders: string[]
   formatCell: (v: number | null, ref: string) => string
-  evalFormula: (f: FormulaNode, d: Record<string, Record<string, number | null>>, label: string) => number | null
+  evalFormula: (
+    f: FormulaNode,
+    d: Record<string, Record<string, number | null>>,
+    label: string,
+    headers: string[],
+  ) => number | null
 }) {
   return (
     <div className="space-y-6">
@@ -541,6 +566,21 @@ export default function UnifiedTemplateViewPage({
       body.rangeStart = tmpl.rangeStart
       body.rangeEnd = tmpl.rangeEnd
     }
+    if (tmpl.timeUnit === 'day') {
+      const rs = tmpl.rangeStart?.slice(0, 10)
+      const re = tmpl.rangeEnd?.slice(0, 10)
+      if (rs && re && rs <= re) {
+        body.rangeStart = addDaysToJstDateKey(rs, -1)
+        body.rangeEnd = re
+      } else {
+        const periods = generateJstDayPeriods(tmpl.count)
+        const firstKey = periods[0]?.dateKey
+        if (firstKey) {
+          body.rangeStart = addDaysToJstDateKey(firstKey, -1)
+          body.rangeEnd = periods[periods.length - 1]!.dateKey
+        }
+      }
+    }
     return body
   }, [tmpl, customMetricMap, customMetricsReady])
 
@@ -559,11 +599,48 @@ export default function UnifiedTemplateViewPage({
     [tmpl],
   )
 
-  // day 単位のとき: ヘッダラベル → dateKey（YYYY-MM-DD）マッピング
   const labelToDateKey = useMemo<Map<string, string>>(() => {
     if (!tmpl || tmpl.timeUnit !== 'day') return new Map()
+    const rs = tmpl.rangeStart?.slice(0, 10)
+    const re = tmpl.rangeEnd?.slice(0, 10)
+    if (rs && re && rs <= re) {
+      return new Map(generateJstDayPeriodsFromRange(rs, re).map(p => [p.label, p.dateKey]))
+    }
     return new Map(generateJstDayPeriods(tmpl.count).map(p => [p.label, p.dateKey]))
   }, [tmpl])
+
+  const fetchPeriodsForUnifiedDay = useMemo((): JstDayPeriod[] => {
+    if (!tmpl || tmpl.timeUnit !== 'day') return []
+    const rs = tmpl.rangeStart?.slice(0, 10)
+    const re = tmpl.rangeEnd?.slice(0, 10)
+    if (rs && re && rs <= re) {
+      return generateJstDayPeriodsFromRange(addDaysToJstDateKey(rs, -1), re)
+    }
+    return generateJstDayPeriods(tmpl.count + 1)
+  }, [tmpl])
+
+  const dateKeyToLabel = useMemo(() => {
+    if (fetchPeriodsForUnifiedDay.length === 0) return new Map<string, string>()
+    return new Map(fetchPeriodsForUnifiedDay.map(p => [p.dateKey, p.label]))
+  }, [fetchPeriodsForUnifiedDay])
+
+  const evalFormula = useCallback(
+    (
+      f: FormulaNode,
+      d: Record<string, Record<string, number | null>>,
+      label: string,
+      headers: string[],
+    ) =>
+      evalSummaryFormula(
+        f,
+        d,
+        label,
+        headers,
+        tmpl?.timeUnit === 'day' ? labelToDateKey : null,
+        tmpl?.timeUnit === 'day' ? dateKeyToLabel : null,
+      ),
+    [tmpl?.timeUnit, labelToDateKey, dateKeyToLabel],
+  )
 
   // 外因変数取得（day 単位のみ）
   const externalDataUrl = useMemo(() => {
@@ -754,7 +831,7 @@ export default function UnifiedTemplateViewPage({
                       const formula = svcCustomMap?.get(row.metricRef) ?? null
                       const values = !formula ? (metricDataMap[row.metricRef] ?? {}) : {}
                       const getV = (label: string): number | null =>
-                        formula ? evalFormula(formula, metricDataMap, label) : (values[label] ?? null)
+                        formula ? evalFormula(formula, metricDataMap, label, timeHeaders) : (values[label] ?? null)
 
                       return (
                         <tr

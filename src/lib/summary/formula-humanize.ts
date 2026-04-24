@@ -21,8 +21,10 @@ function operandReading(
   const title = metricTitle(id, false, findLabel)
   const t = timeOp ?? 'none'
   if (t === 'none') return `${title}の、この列の数値`
-  if (t === 'lag1') return `${title}を左となりの列で読んだ数値（表の左端の列は —）`
-  return `${title}の差（この列の数値 − 左となりの列の同じ指標。左端の列は —）`
+  if (t === 'lag1') {
+    return `${title}の一つ前の期間の数値（日次では暦の前日・JST。データが無いときは —）`
+  }
+  return `${title}の差（この列 − 一つ前の期間。日次では暦の前日・JST。データが無いときは —）`
 }
 
 function describeStep(step: FormulaStep, findLabel: (id: string) => string): string {
@@ -55,8 +57,10 @@ export function buildFormulaPlainLanguageSummary(
         const t = formula.baseTimeOp ?? 'none'
         const title = metricTitle(formula.baseOperandId, false, findLabel)
         if (t === 'none') return `${title}の、この列の数値を起点にします。`
-        if (t === 'lag1') return `${title}を左となりの列から読んだ数値を起点にします（左端の列は —）。`
-        return `${title}について（この列の数値 − 左となりの列の同じ指標）を起点にします（左端の列は —）。`
+        if (t === 'lag1') {
+          return `${title}の一つ前の期間の数値を起点にします（日次は暦の前日・JST。データが無いときは —）。`
+        }
+        return `${title}について（この列 − 一つ前の期間）を起点にします（日次は暦の前日・JST。データが無いときは —）。`
       })()
 
   if (!formula.steps.length) return `各セルでは、${base}`
