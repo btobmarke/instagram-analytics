@@ -8,7 +8,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Legend,
 } from 'recharts'
-import type { ServiceDetail, SummaryTemplate, TimeUnit, FormulaNode, MetricCard, StoredTemplateRow } from '../../_lib/types'
+import type { ServiceDetail, SummaryTemplate, FormulaNode, MetricCard, StoredTemplateRow } from '../../_lib/types'
 import { TIME_UNIT_LABELS, OPERATOR_SYMBOLS, formatFormula } from '../../_lib/types'
 import { evalSummaryFormula, collectFormulaMetricRefs } from '@/lib/summary/eval-formula'
 
@@ -31,11 +31,12 @@ import { getTemplate } from '../../_lib/store'
 import type { JstDayPeriod } from '@/lib/summary/jst-periods'
 import {
   addDaysToJstDateKey,
-  generateJstDayPeriodLabels,
   generateJstDayPeriods,
   generateJstDayPeriodsFromRange,
   generateCustomRangePeriod,
+  toYmdCompact,
 } from '@/lib/summary/jst-periods'
+import { buildPeriods, type Period } from '@/lib/summary/build-periods'
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
 const SERVICE_THEME: Record<string, { accent: string; bg: string; border: string; badge: string }> = {
@@ -55,33 +56,20 @@ const SERVICE_LABEL: Record<string, string> = {
 
 const TIME_COL_COUNT = 8
 
-function generateTimeHeaders(
-  unit: TimeUnit,
-  count: number,
-  rangeStart?: string | null,
-  rangeEnd?: string | null,
-): string[] {
-  if (unit === 'custom_range') {
-    if (rangeStart && rangeEnd) return [generateCustomRangePeriod(rangeStart, rangeEnd).label]
-    return ['（期間未設定）']
+function resolveSummaryPeriods(template: SummaryTemplate): Period[] | null {
+  if (template.timeUnit === 'custom_range') {
+    if (!template.rangeStart || !template.rangeEnd || template.rangeStart > template.rangeEnd) return null
+    const p = buildPeriods('custom_range', 1, template.rangeStart, template.rangeEnd)
+    return 'error' in p ? null : p
   }
-  if (unit === 'day') {
-    if (rangeStart && rangeEnd && rangeStart <= rangeEnd) {
-      return generateJstDayPeriodsFromRange(rangeStart, rangeEnd).map(p => p.label)
-    }
-    return generateJstDayPeriodLabels(count)
+  const ds = template.displayRangeStart?.slice(0, 10)
+  const de = template.displayRangeEnd?.slice(0, 10)
+  if (ds && de && ds <= de) {
+    const p = buildPeriods(template.timeUnit, TIME_COL_COUNT, ds, de)
+    if (!('error' in p)) return p
   }
-  const headers: string[] = []
-  const now = new Date()
-  for (let i = count - 1; i >= 0; i--) {
-    const d = new Date(now)
-    switch (unit) {
-      case 'hour':  d.setHours(d.getHours() - i);   headers.push(`${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:00`); break
-      case 'week': { const s = new Date(d); s.setDate(d.getDate()-i*7); headers.push(`${s.getMonth()+1}/${s.getDate()}週`); break }
-      case 'month': d.setMonth(d.getMonth() - i);   headers.push(`${d.getFullYear()}/${d.getMonth()+1}`); break
-    }
-  }
-  return headers
+  const p = buildPeriods(template.timeUnit, TIME_COL_COUNT)
+  return 'error' in p ? null : p
 }
 
 /** サマリーAPIが返す生フィールドRefか（custom.* はデータ取得対象外） */
@@ -740,19 +728,29 @@ export default function SummaryViewPage({
     if (template.timeUnit === 'custom_range' && template.rangeStart && template.rangeEnd) {
       body.rangeStart = template.rangeStart
       body.rangeEnd = template.rangeEnd
+    } else if (template.timeUnit !== 'custom_range') {
+      const ds = template.displayRangeStart?.slice(0, 10)
+      const de = template.displayRangeEnd?.slice(0, 10)
+      if (ds && de && ds <= de) {
+        const pr = buildPeriods(template.timeUnit, TIME_COL_COUNT, ds, de)
+        if (!('error' in pr)) {
+          body.rangeStart = ds
+          body.rangeEnd = de
+        }
+      }
     }
     if (template.timeUnit === 'day') {
-      const rs = template.rangeStart?.slice(0, 10)
-      const re = template.rangeEnd?.slice(0, 10)
-      if (rs && re && rs <= re) {
-        body.rangeStart = addDaysToJstDateKey(rs, -1)
-        body.rangeEnd = re
+      const rs0 = typeof body.rangeStart === 'string' ? body.rangeStart.slice(0, 10) : null
+      const re0 = typeof body.rangeEnd === 'string' ? body.rangeEnd.slice(0, 10) : null
+      if (rs0 && re0 && rs0 <= re0) {
+        body.rangeStart = addDaysToJstDateKey(rs0, -1)
+        body.rangeEnd = re0
       } else {
-        const periods = generateJstDayPeriods(TIME_COL_COUNT)
-        const firstKey = periods[0]?.dateKey
+        const roll = generateJstDayPeriods(TIME_COL_COUNT)
+        const firstKey = roll[0]?.dateKey
         if (firstKey) {
           body.rangeStart = addDaysToJstDateKey(firstKey, -1)
-          body.rangeEnd = periods[periods.length - 1]!.dateKey
+          body.rangeEnd = roll[roll.length - 1]!.dateKey
         }
       }
     }
@@ -806,24 +804,33 @@ export default function SummaryViewPage({
     return !anyBreakdown
   }, [rawData, summaryRes, dataLoading, breakdownRows, breakdownByRow])
 
-  const timeHeaders = useMemo(() => {
-    if (!template) return [] as string[]
-    return generateTimeHeaders(template.timeUnit, TIME_COL_COUNT, template.rangeStart, template.rangeEnd)
+  const periods = useMemo(() => {
+    if (!template) return null
+    return resolveSummaryPeriods(template)
   }, [template])
 
-  // day 単位: ヘッダラベル ↔ dateKey（API の取得期間と eval の暦前日解決に使用）
+  const timeHeaders = useMemo(() => {
+    if (!periods) return [] as string[]
+    return periods.map(p => p.label)
+  }, [periods])
+
+  // day 単位: ヘッダラベル → dateKey（eval の暦前日解決に使用）
   const labelToDateKey = useMemo<Map<string, string>>(() => {
-    if (!template || template.timeUnit !== 'day') return new Map()
-    const rs = template.rangeStart?.slice(0, 10)
-    const re = template.rangeEnd?.slice(0, 10)
-    if (rs && re && rs <= re) {
-      return new Map(generateJstDayPeriodsFromRange(rs, re).map(p => [p.label, p.dateKey]))
+    if (!template || template.timeUnit !== 'day' || !periods) return new Map()
+    const m = new Map<string, string>()
+    for (const p of periods) {
+      if (p.dateKey) m.set(p.label, p.dateKey)
     }
-    return new Map(generateJstDayPeriods(TIME_COL_COUNT).map(p => [p.label, p.dateKey]))
-  }, [template])
+    return m
+  }, [template, periods])
 
   const fetchPeriodsForDay = useMemo((): JstDayPeriod[] => {
     if (!template || template.timeUnit !== 'day') return []
+    const ds = template.displayRangeStart?.slice(0, 10)
+    const de = template.displayRangeEnd?.slice(0, 10)
+    if (ds && de && ds <= de) {
+      return generateJstDayPeriodsFromRange(addDaysToJstDateKey(ds, -1), de)
+    }
     const rs = template.rangeStart?.slice(0, 10)
     const re = template.rangeEnd?.slice(0, 10)
     if (rs && re && rs <= re) {
@@ -873,6 +880,11 @@ export default function SummaryViewPage({
     if (!template) return ''
     if (template.timeUnit === 'custom_range' && template.rangeStart && template.rangeEnd) {
       return generateCustomRangePeriod(template.rangeStart, template.rangeEnd).label
+    }
+    const ds = template.displayRangeStart?.slice(0, 10)
+    const de = template.displayRangeEnd?.slice(0, 10)
+    if (ds && de && ds <= de) {
+      return `${toYmdCompact(ds)}〜${toYmdCompact(de)}（${TIME_UNIT_LABELS[template.timeUnit]}）`
     }
     return TIME_UNIT_LABELS[template.timeUnit]
   }, [template])
