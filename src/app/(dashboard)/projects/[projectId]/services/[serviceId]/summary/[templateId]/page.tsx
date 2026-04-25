@@ -35,7 +35,8 @@ import {
 } from '../_lib/types'
 import { getMetricCatalog } from '../_lib/catalog'
 import { getTemplate, updateTemplate } from '../_lib/store'
-import { generateJstDayPeriodLabels, generateCustomRangePeriod } from '@/lib/summary/jst-periods'
+import { generateCustomRangePeriod, toYmdCompact } from '@/lib/summary/jst-periods'
+import { templateTimeHeaderLabels } from '@/lib/summary/template-time-headers'
 import { DEFAULT_LINE_FRIENDS_ATTR_SLICES } from '@/lib/summary/line-friends-attr-default-slices'
 import {
   DEFAULT_INSTAGRAM_FOLLOWER_DEMO_SLICES,
@@ -242,31 +243,6 @@ function SortableTemplateTableRow({
       </td>
     </tr>
   )
-}
-
-// ── 時間軸ヘッダ生成 ───────────────────────────────────────────
-function generateTimeHeaders(
-  unit: TimeUnit,
-  count: number,
-  rangeStart?: string | null,
-  rangeEnd?: string | null,
-): string[] {
-  if (unit === 'custom_range') {
-    if (rangeStart && rangeEnd) return [generateCustomRangePeriod(rangeStart, rangeEnd).label]
-    return ['（開始・終了日を設定）']
-  }
-  if (unit === 'day') return generateJstDayPeriodLabels(count)
-  const headers: string[] = []
-  const now = new Date()
-  for (let i = count - 1; i >= 0; i--) {
-    const d = new Date(now)
-    switch (unit) {
-      case 'hour':  d.setHours(d.getHours() - i);   headers.push(`${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:00`); break
-      case 'week': { const s = new Date(d); s.setDate(d.getDate()-i*7); headers.push(`${s.getMonth()+1}/${s.getDate()}週`); break }
-      case 'month': d.setMonth(d.getMonth() - i);   headers.push(`${d.getFullYear()}/${d.getMonth()+1}`); break
-    }
-  }
-  return headers
 }
 
 // ── フィールド選択セレクト ──────────────────────────────────────
@@ -703,6 +679,8 @@ export default function TemplateEditorPage({
   const [timeUnit, setTimeUnit] = useState<TimeUnit>('day')
   const [rangeStart, setRangeStart] = useState('')
   const [rangeEnd, setRangeEnd] = useState('')
+  const [displayRangeStart, setDisplayRangeStart] = useState('')
+  const [displayRangeEnd, setDisplayRangeEnd] = useState('')
   const [isDirty, setIsDirty] = useState(false)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -715,8 +693,17 @@ export default function TemplateEditorPage({
       setTimeUnit(tmpl.timeUnit)
       setRangeStart(tmpl.rangeStart?.slice(0, 10) ?? '')
       setRangeEnd(tmpl.rangeEnd?.slice(0, 10) ?? '')
+      setDisplayRangeStart(tmpl.displayRangeStart?.slice(0, 10) ?? '')
+      setDisplayRangeEnd(tmpl.displayRangeEnd?.slice(0, 10) ?? '')
       // rows を復元（セルは空状態）
-      const headers = generateTimeHeaders(tmpl.timeUnit, 8, tmpl.rangeStart, tmpl.rangeEnd)
+      const headers = templateTimeHeaderLabels(
+        tmpl.timeUnit,
+        8,
+        tmpl.rangeStart,
+        tmpl.rangeEnd,
+        tmpl.displayRangeStart,
+        tmpl.displayRangeEnd,
+      )
       setRows(
         tmpl.rows.map(r => ({
           id: r.id,
@@ -728,6 +715,22 @@ export default function TemplateEditorPage({
       )
     })
   }, [templateId, projectId, serviceId, router])
+
+  const TIME_COL_COUNT = 8
+  const timeHeaders = useMemo(
+    () => templateTimeHeaderLabels(timeUnit, TIME_COL_COUNT, rangeStart, rangeEnd, displayRangeStart, displayRangeEnd),
+    [timeUnit, rangeStart, rangeEnd, displayRangeStart, displayRangeEnd],
+  )
+
+  useEffect(() => {
+    setRows(prev => {
+      if (prev.length === 0) return prev
+      return prev.map(r => ({
+        ...r,
+        cells: Object.fromEntries(timeHeaders.map(h => [h, r.cells[h] ?? ''])),
+      }))
+    })
+  }, [timeHeaders])
 
   // ── カスタム指標ライブラリ（サービス単位） ────────────────────
   interface LibraryMetric { id: string; service_id: string; name: string; formula: MetricCard['formula'] }
@@ -764,11 +767,14 @@ export default function TemplateEditorPage({
       return { id: r.id, label: r.label, rowKind: 'scalar' }
     })
     try {
+      const displayOk = displayRangeStart && displayRangeEnd && displayRangeStart <= displayRangeEnd
       await updateTemplate(templateId, serviceId, {
         name: templateName,
         timeUnit,
         rangeStart: timeUnit === 'custom_range' ? rangeStart : null,
         rangeEnd: timeUnit === 'custom_range' ? rangeEnd : null,
+        displayRangeStart: timeUnit !== 'custom_range' && displayOk ? displayRangeStart : null,
+        displayRangeEnd: timeUnit !== 'custom_range' && displayOk ? displayRangeEnd : null,
         rows: storedRows,
         customCards: [],  // ライブラリ移行後は空配列
       })
@@ -781,7 +787,7 @@ export default function TemplateEditorPage({
       setSaveState('error')
       setTimeout(() => setSaveState('idle'), 4000)
     }
-  }, [templateId, serviceId, templateName, timeUnit, rangeStart, rangeEnd, rows])
+  }, [templateId, serviceId, templateName, timeUnit, rangeStart, rangeEnd, displayRangeStart, displayRangeEnd, rows])
 
   // フィルタ・タブ・アコーディオン
   const [searchQuery, setSearchQuery] = useState('')
@@ -791,12 +797,7 @@ export default function TemplateEditorPage({
   const [editingCustomCard, setEditingCustomCard] = useState<MetricCard | null>(null)
 
   const allCards = [...catalog, ...customCards]
-  const TIME_COL_COUNT = 8
-  const timeHeaders = useMemo(
-    () => generateTimeHeaders(timeUnit, TIME_COL_COUNT, rangeStart, rangeEnd),
-    [timeUnit, rangeStart, rangeEnd],
-  )
-  const timeColCount = timeUnit === 'custom_range' ? timeHeaders.length : TIME_COL_COUNT
+  const timeColCount = timeHeaders.length
   const addedIds = new Set(rows.map(r => r.id))
 
   const categories = useMemo(() => {
@@ -995,6 +996,7 @@ export default function TemplateEditorPage({
             </select>
             {timeUnit === 'custom_range' && (
               <span className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] text-gray-500 whitespace-nowrap">集計期間</span>
                 <input
                   type="date"
                   value={rangeStart}
@@ -1007,6 +1009,26 @@ export default function TemplateEditorPage({
                   value={rangeEnd}
                   onChange={e => { setRangeEnd(e.target.value); setIsDirty(true) }}
                   className="px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </span>
+            )}
+            {timeUnit !== 'custom_range' && (
+              <span className="flex items-center gap-1.5 flex-wrap max-w-[min(100%,28rem)]">
+                <span className="text-[10px] text-gray-500 whitespace-nowrap">表示期間</span>
+                <input
+                  type="date"
+                  value={displayRangeStart}
+                  onChange={e => { setDisplayRangeStart(e.target.value); setIsDirty(true) }}
+                  className="px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 shrink-0"
+                  title="横軸の開始日（未入力なら直近8本）"
+                />
+                <span className="text-xs text-gray-500">〜</span>
+                <input
+                  type="date"
+                  value={displayRangeEnd}
+                  onChange={e => { setDisplayRangeEnd(e.target.value); setIsDirty(true) }}
+                  className="px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 shrink-0"
+                  title="横軸の終了日（両方入力で列が固定されます）"
                 />
               </span>
             )}
@@ -1241,7 +1263,9 @@ export default function TemplateEditorPage({
             {rows.length} 項目 × {timeColCount}{' '}
             {timeUnit === 'custom_range' && rangeStart && rangeEnd
               ? generateCustomRangePeriod(rangeStart, rangeEnd).label
-              : TIME_UNIT_LABELS[timeUnit]}
+              : displayRangeStart && displayRangeEnd && displayRangeStart <= displayRangeEnd
+                ? `${toYmdCompact(displayRangeStart)}〜${toYmdCompact(displayRangeEnd)}（${TIME_UNIT_LABELS[timeUnit]}）`
+                : TIME_UNIT_LABELS[timeUnit]}
           </p>
         )}
       </div>

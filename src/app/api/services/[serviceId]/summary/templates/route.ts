@@ -8,6 +8,8 @@ const CreateSchema = z.object({
   time_unit:    z.enum(['hour', 'day', 'week', 'month', 'custom_range']).default('day'),
   range_start:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   range_end:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  display_range_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  display_range_end:   z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   rows:         z.array(z.any()).default([]),
   custom_cards: z.array(z.any()).default([]),
 })
@@ -21,6 +23,8 @@ function toTemplate(row: Record<string, unknown>) {
     timeUnit:    row.time_unit,
     rangeStart:  row.range_start ?? null,
     rangeEnd:    row.range_end ?? null,
+    displayRangeStart: row.display_range_start ?? null,
+    displayRangeEnd:   row.display_range_end ?? null,
     rows:        row.rows         ?? [],
     customCards: row.custom_cards ?? [],
     createdAt:   row.created_at,
@@ -123,6 +127,25 @@ export async function POST(
     )
   }
 
+  let displayStart = parsed.data.display_range_start ?? null
+  let displayEnd = parsed.data.display_range_end ?? null
+  if (parsed.data.time_unit === 'custom_range') {
+    displayStart = null
+    displayEnd = null
+  } else if (displayStart && displayEnd) {
+    if (displayStart > displayEnd) {
+      return NextResponse.json(
+        { success: false, error: { code: 'VALIDATION_ERROR', message: 'display_range_start は display_range_end 以下である必要があります' } },
+        { status: 400 },
+      )
+    }
+  } else if (displayStart || displayEnd) {
+    return NextResponse.json(
+      { success: false, error: { code: 'VALIDATION_ERROR', message: '表示期間を使う場合は display_range_start と display_range_end の両方を指定してください' } },
+      { status: 400 },
+    )
+  }
+
   // テンプレート作成
   const { data, error } = await supabase
     .from('summary_templates')
@@ -132,6 +155,8 @@ export async function POST(
       time_unit:    parsed.data.time_unit,
       range_start:  parsed.data.time_unit === 'custom_range' ? parsed.data.range_start : null,
       range_end:    parsed.data.time_unit === 'custom_range' ? parsed.data.range_end : null,
+      display_range_start: displayStart,
+      display_range_end:   displayEnd,
       rows:         parsed.data.rows,
       custom_cards: parsed.data.custom_cards,
     })

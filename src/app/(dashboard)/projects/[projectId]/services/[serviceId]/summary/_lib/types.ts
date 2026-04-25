@@ -167,9 +167,15 @@ export interface SummaryTemplate {
   serviceId: string
   name: string
   timeUnit: TimeUnit
-  /** timeUnit === custom_range のとき YYYY-MM-DD */
+  /** timeUnit === custom_range のとき YYYY-MM-DD（1列に集計する期間） */
   rangeStart?: string | null
   rangeEnd?: string | null
+  /**
+   * timeUnit が hour/day/week/month のときの横軸表示範囲（YYYY-MM-DD、両端含む）。
+   * 未設定のときは従来どおり「直近 N 本」の列。
+   */
+  displayRangeStart?: string | null
+  displayRangeEnd?: string | null
   rows: StoredTemplateRow[]
   customCards: MetricCard[]
   createdAt: string

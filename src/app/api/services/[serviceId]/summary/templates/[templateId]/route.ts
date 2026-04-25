@@ -8,6 +8,8 @@ const UpdateSchema = z.object({
   time_unit:    z.enum(['hour', 'day', 'week', 'month', 'custom_range']).optional(),
   range_start:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   range_end:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  display_range_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  display_range_end:   z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   rows:         z.array(z.any()).optional(),
   custom_cards: z.array(z.any()).optional(),
 })
@@ -23,6 +25,8 @@ function toTemplate(row: Record<string, unknown>) {
     timeUnit:    row.time_unit,
     rangeStart:  row.range_start ?? null,
     rangeEnd:    row.range_end ?? null,
+    displayRangeStart: row.display_range_start ?? null,
+    displayRangeEnd:   row.display_range_end ?? null,
     rows:        row.rows         ?? [],
     customCards: row.custom_cards ?? [],
     createdAt:   row.created_at,
@@ -118,6 +122,32 @@ export async function PUT(
     }
   }
 
+  const displayTouched =
+    parsed.data.display_range_start !== undefined || parsed.data.display_range_end !== undefined
+
+  if (nextUnit !== 'custom_range' && displayTouched) {
+    const dss = parsed.data.display_range_start !== undefined
+      ? parsed.data.display_range_start
+      : (existing.display_range_start as string | null | undefined) ?? null
+    const dse = parsed.data.display_range_end !== undefined
+      ? parsed.data.display_range_end
+      : (existing.display_range_end as string | null | undefined) ?? null
+    const hasS = dss != null && dss !== ''
+    const hasE = dse != null && dse !== ''
+    if (hasS !== hasE) {
+      return NextResponse.json(
+        { success: false, error: { code: 'VALIDATION_ERROR', message: '表示期間を使う場合は display_range_start と display_range_end の両方を指定してください' } },
+        { status: 400 },
+      )
+    }
+    if (hasS && hasE && (dss as string) > (dse as string)) {
+      return NextResponse.json(
+        { success: false, error: { code: 'VALIDATION_ERROR', message: 'display_range_start は display_range_end 以下である必要があります' } },
+        { status: 400 },
+      )
+    }
+  }
+
   // undefined フィールドは除外してパッチ
   const patch: Record<string, unknown> = {}
   if (parsed.data.name         !== undefined) patch.name         = parsed.data.name
@@ -129,6 +159,19 @@ export async function PUT(
   if (parsed.data.time_unit !== undefined && parsed.data.time_unit !== 'custom_range') {
     patch.range_start = null
     patch.range_end = null
+  }
+  if (parsed.data.time_unit === 'custom_range') {
+    patch.display_range_start = null
+    patch.display_range_end = null
+  } else if (displayTouched) {
+    const dss = parsed.data.display_range_start !== undefined
+      ? parsed.data.display_range_start
+      : (existing.display_range_start as string | null | undefined) ?? null
+    const dse = parsed.data.display_range_end !== undefined
+      ? parsed.data.display_range_end
+      : (existing.display_range_end as string | null | undefined) ?? null
+    patch.display_range_start = dss
+    patch.display_range_end = dse
   }
 
   const { data, error } = await supabase

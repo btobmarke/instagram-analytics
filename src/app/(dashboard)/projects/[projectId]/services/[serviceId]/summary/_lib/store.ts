@@ -13,6 +13,8 @@ function toTemplate(row: Record<string, unknown>): SummaryTemplate {
     timeUnit:    row.timeUnit    as TimeUnit,
     rangeStart:  (row.rangeStart ?? null) as string | null,
     rangeEnd:    (row.rangeEnd ?? null) as string | null,
+    displayRangeStart: (row.displayRangeStart ?? null) as string | null,
+    displayRangeEnd:   (row.displayRangeEnd ?? null) as string | null,
     rows:        (row.rows        ?? []) as StoredTemplateRow[],
     customCards: (row.customCards ?? []) as MetricCard[],
     createdAt:   row.createdAt   as string,
@@ -65,6 +67,8 @@ export async function createTemplate(params: {
   timeUnit?: TimeUnit
   rangeStart?: string | null
   rangeEnd?: string | null
+  displayRangeStart?: string | null
+  displayRangeEnd?: string | null
   rows?: StoredTemplateRow[]
   customCards?: MetricCard[]
 }): Promise<SummaryTemplate> {
@@ -77,6 +81,8 @@ export async function createTemplate(params: {
         time_unit:    params.timeUnit    ?? 'day',
         range_start:  params.rangeStart ?? undefined,
         range_end:    params.rangeEnd ?? undefined,
+        display_range_start: params.displayRangeStart ?? undefined,
+        display_range_end:   params.displayRangeEnd ?? undefined,
         rows:         params.rows        ?? [],
         custom_cards: params.customCards ?? [],
       }),
@@ -89,7 +95,7 @@ export async function createTemplate(params: {
 export async function updateTemplate(
   templateId: string,
   serviceId: string,
-  patch: Partial<Pick<SummaryTemplate, 'name' | 'timeUnit' | 'rows' | 'customCards' | 'rangeStart' | 'rangeEnd'>>,
+  patch: Partial<Pick<SummaryTemplate, 'name' | 'timeUnit' | 'rows' | 'customCards' | 'rangeStart' | 'rangeEnd' | 'displayRangeStart' | 'displayRangeEnd'>>,
 ): Promise<SummaryTemplate> {
   const row = await apiFetch<Record<string, unknown>>(
     `/api/services/${serviceId}/summary/templates/${templateId}`,
@@ -100,6 +106,8 @@ export async function updateTemplate(
         time_unit:    patch.timeUnit,
         range_start:  patch.rangeStart,
         range_end:    patch.rangeEnd,
+        display_range_start: patch.displayRangeStart,
+        display_range_end:   patch.displayRangeEnd,
         rows:         patch.rows,
         custom_cards: patch.customCards,
       }),
