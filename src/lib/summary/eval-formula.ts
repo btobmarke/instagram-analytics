@@ -27,11 +27,16 @@ function readMetric(
   return v !== null && v !== undefined ? v : null
 }
 
-/** lag1 / diff_prev の「比較先」列ラベル。日次かつ label→dateKey があれば暦の前日、なければ左隣列 */
+/**
+ * lag1 / diff_prev の比較先ラベル。
+ * - 日次かつ label→dateKey あり: 暦の前日に対応する列（表に無くても dateKey→label でフォールバック）
+ * - それ以外: 左隣列
+ */
 function resolveComparisonPrevLabel(
   label: string,
   timeHeaders: string[],
   dayLabelToDateKey: ReadonlyMap<string, string> | null | undefined,
+  dateKeyToLabel: ReadonlyMap<string, string> | null | undefined,
 ): string | null {
   const dk = dayLabelToDateKey?.get(label)
   if (dk) {
@@ -39,7 +44,7 @@ function resolveComparisonPrevLabel(
     for (const h of timeHeaders) {
       if (dayLabelToDateKey.get(h) === prevKey) return h
     }
-    return null
+    return dateKeyToLabel?.get(prevKey) ?? null
   }
   const idx = timeHeaders.indexOf(label)
   if (idx <= 0) return null
@@ -54,6 +59,7 @@ function readOperand(
   operandIsConst: boolean | undefined,
   operandTimeOp: FormulaStep['operandTimeOp'] | undefined,
   dayLabelToDateKey: ReadonlyMap<string, string> | null | undefined,
+  dateKeyToLabel: ReadonlyMap<string, string> | null | undefined,
 ): number | null {
   if (operandIsConst) {
     const n = Number(operandId)
@@ -62,7 +68,7 @@ function readOperand(
   const v = readMetric(rawData, operandId, label)
   const op = operandTimeOp ?? 'none'
   if (op === 'none') return v
-  const prevLabel = resolveComparisonPrevLabel(label, timeHeaders, dayLabelToDateKey)
+  const prevLabel = resolveComparisonPrevLabel(label, timeHeaders, dayLabelToDateKey, dateKeyToLabel)
   if (prevLabel === null) {
     if (op === 'lag1' || op === 'diff_prev') return null
     return v
@@ -82,6 +88,7 @@ function readBase(
   label: string,
   formula: FormulaNode,
   dayLabelToDateKey: ReadonlyMap<string, string> | null | undefined,
+  dateKeyToLabel: ReadonlyMap<string, string> | null | undefined,
 ): number | null {
   if (formula.baseOperandIsConst) {
     const n = Number(formula.baseOperandId)
@@ -90,7 +97,7 @@ function readBase(
   const v = readMetric(rawData, formula.baseOperandId, label)
   const op = formula.baseTimeOp ?? 'none'
   if (op === 'none') return v
-  const prevLabel = resolveComparisonPrevLabel(label, timeHeaders, dayLabelToDateKey)
+  const prevLabel = resolveComparisonPrevLabel(label, timeHeaders, dayLabelToDateKey, dateKeyToLabel)
   if (prevLabel === null) {
     if (op === 'lag1' || op === 'diff_prev') return null
     return v
@@ -123,11 +130,11 @@ function evalNAry(
 /**
  * フォーミュラを 1 期間ラベルについて評価する。
  * + / − は欠損（null）を 0 として足し引き（既存 UI と同じ）。
- * 例外: 減算の右辺が lag1 で値が欠損のときは null（前日／左列が取れない差分を 0 扱いしない）。
+ * 例外: 減算の右辺が lag1 で値が欠損のときは null（差分を 0 扱いしない）。
  * × / ÷ / min / max / coalesce は厳密な null 伝播（coalesce は先頭の非 null）
  *
- * @param dayLabelToDateKey 日次テンプレのとき、表ヘッダラベル → JST の YYYY-MM-DD。
- *   渡すと lag1 / diff_prev は「左の列」ではなく暦の前日で比較する（取得範囲外の前日は null）。
+ * @param dayLabelToDateKey 日次: 表ヘッダラベル → JST YYYY-MM-DD。あると lag1/diff_prev は暦の前日基準。
+ * @param dateKeyToLabel 日次: YYYY-MM-DD → 列ラベル。表に出さない「前日だけ多く取った」列を指す（最古列の前日比用）。
  */
 export function evalSummaryFormula(
   formula: FormulaNode,
@@ -135,6 +142,7 @@ export function evalSummaryFormula(
   label: string,
   timeHeaders: string[],
   dayLabelToDateKey?: ReadonlyMap<string, string> | null,
+  dateKeyToLabel?: ReadonlyMap<string, string> | null,
 ): number | null {
   const dataRef = resolveSummaryFormulaDataRef(formula)
   if (dataRef) {
@@ -145,7 +153,14 @@ export function evalSummaryFormula(
   let sawNumeric = false
   const asPlusMinus = (v: number | null) => (v === null ? 0 : v)
 
-  let result: number | null = readBase(rawData, timeHeaders, label, formula, dayLabelToDateKey)
+  let result: number | null = readBase(
+    rawData,
+    timeHeaders,
+    label,
+    formula,
+    dayLabelToDateKey,
+    dateKeyToLabel,
+  )
   if (result !== null && result !== undefined) sawNumeric = true
 
   for (const step of formula.steps) {
@@ -164,6 +179,7 @@ export function evalSummaryFormula(
           constFlags[j],
           step.operandTimeOp,
           dayLabelToDateKey,
+          dateKeyToLabel,
         ),
       )
       if (args.some((a) => a !== null && a !== undefined)) sawNumeric = true
@@ -183,6 +199,7 @@ export function evalSummaryFormula(
       step.operandIsConst,
       step.operandTimeOp,
       dayLabelToDateKey,
+      dateKeyToLabel,
     )
     if (operand !== null && operand !== undefined) sawNumeric = true
     if (result !== null && result !== undefined) sawNumeric = true

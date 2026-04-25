@@ -66,6 +66,27 @@ describe('evalSummaryFormula', () => {
     expect(evalSummaryFormula(f, rawDay, periods[2]!.label, headersDay, labelToKey)).toBe(8)
   })
 
+  it('day mode: oldest column resolves prev via dateKeyToLabel when extra day is fetched', () => {
+    const display = generateJstDayPeriodsFromRange('2026-04-02', '2026-04-03')
+    const fetchPeriods = generateJstDayPeriodsFromRange('2026-04-01', '2026-04-03')
+    const labelToKey = new Map(display.map(p => [p.label, p.dateKey]))
+    const dateKeyToLabel = new Map(fetchPeriods.map(p => [p.dateKey, p.label]))
+    const rawDay: Record<string, Record<string, number | null>> = {
+      'm.a': {
+        [fetchPeriods[0]!.label]: 3,
+        [fetchPeriods[1]!.label]: 10,
+        [fetchPeriods[2]!.label]: 20,
+      },
+    }
+    const f: FormulaNode = {
+      baseOperandId: 'm.a',
+      baseTimeOp: 'diff_prev',
+      steps: [],
+    }
+    const firstDisplay = display[0]!.label
+    expect(evalSummaryFormula(f, rawDay, firstDisplay, display.map(p => p.label), labelToKey, dateKeyToLabel)).toBe(7)
+  })
+
   it('divides by constant', () => {
     const f: FormulaNode = {
       baseOperandId: 'm.a',
