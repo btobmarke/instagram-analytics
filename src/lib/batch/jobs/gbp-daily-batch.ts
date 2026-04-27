@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getAccessTokenFromCredential, type GbpCredentialRow } from '@/lib/gbp/auth'
 import {
+  dedupeGbpSearchKeywordMonthlyUpsertRows,
   fetchPerformance,
   fetchReviews,
   fetchSearchKeywordImpressionsMonthly,
@@ -294,15 +295,17 @@ export async function runGbpDailyBatch(
               const CHUNK = 200
               for (let j = 0; j < items.length; j += CHUNK) {
                 const slice = items.slice(j, j + CHUNK)
-                const kwUpsert = slice.map(it => ({
-                  gbp_site_id:    siteId,
-                  year,
-                  month,
-                  search_keyword: it.searchKeyword,
-                  impressions:    it.impressions,
-                  threshold:      it.threshold,
-                  updated_at:     new Date().toISOString(),
-                }))
+                const kwUpsert = dedupeGbpSearchKeywordMonthlyUpsertRows(
+                  slice.map(it => ({
+                    gbp_site_id:    siteId,
+                    year,
+                    month,
+                    search_keyword: it.searchKeyword,
+                    impressions:    it.impressions,
+                    threshold:      it.threshold,
+                    updated_at:     new Date().toISOString(),
+                  })),
+                )
                 const { error: kwErr } = await admin
                   .from('gbp_search_keyword_monthly')
                   .upsert(kwUpsert, { onConflict: 'gbp_site_id,year,month,search_keyword' })
