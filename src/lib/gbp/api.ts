@@ -53,6 +53,21 @@ export interface GbpSearchKeywordMonthlyItem {
 }
 
 /**
+ * UNIQUE(gbp_site_id, year, month, search_keyword) と同一視するキーワード表現。
+ * API が同一キーワードを表記ゆれ・互換文字列で複数行返すと、1 文の upsert で Postgres が
+ * 「ON CONFLICT DO UPDATE command cannot affect row a second time」を返す。
+ */
+export function gbpSearchKeywordMonthlyCanonical(raw: string): string {
+  const t = raw.trim()
+  if (!t) return ''
+  try {
+    return t.normalize('NFKC')
+  } catch {
+    return t
+  }
+}
+
+/**
  * GBP API が同一月・同一キーワードを複数行返すことがある。
  * 1 文の upsert で ON CONFLICT ... が同じ行に 2 回当たると Postgres が 21000 を返すためマージする。
  */
@@ -60,7 +75,7 @@ function mergeSearchKeywordMonthly(
   a: GbpSearchKeywordMonthlyItem,
   b: GbpSearchKeywordMonthlyItem
 ): GbpSearchKeywordMonthlyItem {
-  const kw = a.searchKeyword.trim()
+  const kw = gbpSearchKeywordMonthlyCanonical(a.searchKeyword)
   const ai = a.impressions
   const bi = b.impressions
   if (ai != null && bi != null) {
@@ -74,10 +89,41 @@ function mergeSearchKeywordMonthly(
 function dedupeSearchKeywordMonthlyItems(items: GbpSearchKeywordMonthlyItem[]): GbpSearchKeywordMonthlyItem[] {
   const map = new Map<string, GbpSearchKeywordMonthlyItem>()
   for (const it of items) {
-    const kw = it.searchKeyword.trim()
-    if (!kw) continue
-    const prev = map.get(kw)
-    map.set(kw, prev ? mergeSearchKeywordMonthly(prev, it) : { ...it, searchKeyword: kw })
+    const key = gbpSearchKeywordMonthlyCanonical(it.searchKeyword)
+    if (!key) continue
+    const canonical: GbpSearchKeywordMonthlyItem = { ...it, searchKeyword: key }
+    const prev = map.get(key)
+    map.set(key, prev ? mergeSearchKeywordMonthly(prev, canonical) : canonical)
+  }
+  return [...map.values()]
+}
+
+/** gbp_search_keyword_monthly へ渡す直前の最終重複除去（防御的） */
+export function dedupeGbpSearchKeywordMonthlyUpsertRows<
+  T extends {
+    search_keyword: string
+    impressions: number | null
+    threshold: string | null
+  },
+>(rows: T[]): T[] {
+  const map = new Map<string, T>()
+  for (const r of rows) {
+    const key = gbpSearchKeywordMonthlyCanonical(r.search_keyword)
+    if (!key) continue
+    const prev = map.get(key)
+    if (!prev) {
+      map.set(key, { ...r, search_keyword: key } as T)
+      continue
+    }
+    const ai = prev.impressions
+    const bi = r.impressions
+    let impressions: number | null
+    if (ai != null && bi != null) impressions = Math.max(ai, bi)
+    else if (ai != null) impressions = ai
+    else if (bi != null) impressions = bi
+    else impressions = null
+    const threshold = prev.threshold ?? r.threshold
+    map.set(key, { ...prev, search_keyword: key, impressions, threshold } as T)
   }
   return [...map.values()]
 }
