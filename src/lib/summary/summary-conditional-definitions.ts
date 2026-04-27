@@ -194,7 +194,7 @@ async function fetchLineOamRewardcardTableCondAggRows(
     .gte('date', minKey)
     .lte('date', maxKey)
 
-  return (rawRows ?? []) as Array<Record<string, unknown>>
+  return (rawRows ?? []) as unknown as Array<Record<string, unknown>>
 }
 
 type FetchOneDef = (

@@ -382,7 +382,11 @@ function AnalysisContent() {
               <div className={`grid ${colClass} divide-x divide-gray-100`}>
                 {results.map((result, idx) => {
                   const post = result.post
-                  const children = post.children_json as Array<{ media_url?: string; thumbnail_url?: string }> | null
+                  const children =
+                    (post.children_json as Array<{ media_url?: string; thumbnail_url?: string }> | null)?.map((c) => ({
+                      mediaUrl: c.media_url,
+                      thumbnailUrl: c.thumbnail_url,
+                    })) ?? null
 
                   return (
                     <div key={post.id} className="p-5">

@@ -306,7 +306,11 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
       ? ((latest_insights.saved / latest_insights.reach) * 100).toFixed(2)
       : null
 
-  const children = post.children_json as Array<{ media_url?: string; thumbnail_url?: string }> | null
+  const children =
+    (post.children_json as Array<{ media_url?: string; thumbnail_url?: string }> | null)?.map((c) => ({
+      mediaUrl: c.media_url,
+      thumbnailUrl: c.thumbnail_url,
+    })) ?? null
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6">

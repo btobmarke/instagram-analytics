@@ -21,6 +21,7 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json())
 interface ServiceDetail {
   id: string
   service_name: string
+  service_type?: string
   project: { id: string; project_name: string }
   client: { id: string; client_name: string }
 }

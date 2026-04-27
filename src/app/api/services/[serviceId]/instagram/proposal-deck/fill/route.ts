@@ -114,7 +114,7 @@ export async function POST(
     const { text } = await generateText({
       model,
       system: SYSTEM,
-      prompt: userPrompt(parsedOutline.data, body.digest!.trim(), body.since!, body.until!) + hint,
+      prompt: userPrompt(parsedOutline.data, body.digest!.trim(), body.since!, body.until!, plans) + hint,
       maxOutputTokens: 12000,
     })
     return text

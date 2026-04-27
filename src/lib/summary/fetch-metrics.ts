@@ -486,7 +486,8 @@ export async function fetchGoogleAdsDailyAggregate(
   periods: Period[],
 ): Promise<Record<string, Record<string, number | null>>> {
   const result: Record<string, Record<string, number | null>> = {}
-  const nullRow = () => Object.fromEntries(periods.map((p) => [p.label, null] as const))
+  const nullRow = (): Record<string, number | null> =>
+    Object.fromEntries(periods.map((p) => [p.label, null])) as Record<string, number | null>
 
   const specs = entries
     .map(({ logicalTable, field }) => {
@@ -515,6 +516,16 @@ export async function fetchGoogleAdsDailyAggregate(
 
   const rollsByGroup = new Map<string, Map<string, GoogleAdsRoll>>()
 
+  type GoogleAdsDailyRow = {
+    date: string
+    impressions?: number | null
+    clicks?: number | null
+    cost_micros?: number | null
+    conversions?: number | null
+    conversion_value_micros?: number | null
+    quality_score?: unknown
+  }
+
   for (const spec of uniqueGroups.values()) {
     const gk = groupKey(spec)
     const selectCols =
@@ -539,8 +550,9 @@ export async function fetchGoogleAdsDailyAggregate(
       continue
     }
 
+    const rows = (rawRows ?? []) as unknown as GoogleAdsDailyRow[]
     const byLabel = new Map<string, GoogleAdsRoll>()
-    for (const row of rawRows ?? []) {
+    for (const row of rows) {
       const label = bucketDate(new Date(`${String(row.date).slice(0, 10)}T12:00:00+09:00`), periods)
       if (!label) continue
       let roll = byLabel.get(label)
@@ -554,7 +566,7 @@ export async function fetchGoogleAdsDailyAggregate(
       roll.conversions += Number(row.conversions ?? 0)
       roll.conversion_value_micros += Number(row.conversion_value_micros ?? 0)
       if (spec.dbTable === 'google_ads_keyword_daily' && 'quality_score' in row) {
-        const qs = (row as { quality_score?: unknown }).quality_score
+        const qs = row.quality_score
         if (qs != null && Number.isFinite(Number(qs))) {
           roll.qualitySum += Number(qs)
           roll.qualityCnt += 1

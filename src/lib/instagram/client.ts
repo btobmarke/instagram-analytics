@@ -30,6 +30,7 @@ export function graphRequestUrlForLog(url: URL): string {
 export type InstagramRequestStep =
   | 'getMe'
   | 'getProfileBusinessDiscovery'
+  | 'getProfileCounts'
   | 'getProfileCountsDirect'
   | 'getProfileDisplayFields'
   | 'getMediaList'

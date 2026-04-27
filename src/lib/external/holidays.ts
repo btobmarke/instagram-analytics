@@ -20,7 +20,7 @@ export function getHolidayInfo(date: string): HolidayInfo {
   // JST の正午を基準にして判定（タイムゾーンずれを防ぐ）
   const d = new Date(`${date}T12:00:00+09:00`)
   const result = hd.isHoliday(d)
-  if (!result || result === false) {
+  if (result === false || result == null || (Array.isArray(result) && result.length === 0)) {
     return { isHoliday: false }
   }
   // result は HolidayObject | HolidayObject[] の可能性あり

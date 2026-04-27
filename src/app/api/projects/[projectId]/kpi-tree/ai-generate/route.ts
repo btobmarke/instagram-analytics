@@ -237,7 +237,7 @@ export async function POST(
 
   // ── 6. プロンプト構築 ────────────────────────────────────────────────────────
   const svcSection = svcList
-    .map(s => `- サービス名="${s.name}"（タイプ: ${s.service_type}）`)
+    .map(s => `- サービス名="${s.service_name}"（タイプ: ${s.service_type}）`)
     .join('\n') || '（なし）'
 
   const metricsWithDataSection = withData.length > 0

@@ -42,7 +42,7 @@ function resolveComparisonPrevLabel(
   if (dk) {
     const prevKey = addDaysToJstDateKey(dk, -1)
     for (const h of timeHeaders) {
-      if (dayLabelToDateKey.get(h) === prevKey) return h
+      if (dayLabelToDateKey?.get(h) === prevKey) return h
     }
     return dateKeyToLabel?.get(prevKey) ?? null
   }

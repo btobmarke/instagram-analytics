@@ -153,7 +153,7 @@ export default function InstagramAiReportPage({
             <p className="text-sm text-gray-400">{service?.service_name}</p>
           </div>
         </div>
-        <InstagramFollowerImportButtonModal accountId={accountId} onImported={() => mutateService()} />
+        <InstagramFollowerImportButtonModal accountId={accountId} onImported={() => { void mutateService() }} />
       </div>
 
       <InstagramServiceSubnav projectId={projectId} serviceId={serviceId} active="ai" />

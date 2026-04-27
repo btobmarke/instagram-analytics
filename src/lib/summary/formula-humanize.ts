@@ -3,7 +3,7 @@ import { NARY_OPERATOR_LABELS, OPERATOR_SYMBOLS } from '@/lib/summary/formula-ty
 import { parseLineShopcardCumulativeUsersRef } from '@/lib/summary/line-shopcard-cumulative-users-ref'
 import { humanizeConditionalAggregate } from '@/lib/summary/summary-conditional-definitions'
 
-function isNAry(op: FormulaStep['operator']): boolean {
+function isNAry(op: FormulaStep['operator']): op is FormulaNAryOperator {
   return op === 'min' || op === 'max' || op === 'coalesce'
 }
 

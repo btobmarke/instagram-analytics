@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import { InstagramFollowerImportButtonModal } from '@/components/instagram/InstagramFollowerImportButtonModal'
 import type { ServiceDetail, SummaryTemplate } from './_lib/types'
+import { TIME_UNIT_LABELS } from './_lib/types'
 import { listTemplates, createTemplate, deleteTemplate } from './_lib/store'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
@@ -181,7 +182,7 @@ export default function SummaryTemplatePage({
           {serviceType === 'instagram' && (
             <InstagramFollowerImportButtonModal
               accountId={igAccountRefId}
-              onImported={() => mutateService()}
+              onImported={() => { void mutateService() }}
             />
           )}
         </div>
@@ -328,7 +329,7 @@ export default function SummaryTemplatePage({
                     {tmpl.rows.length}項目
                     {tmpl.customCards.length > 0 && ` · カスタム指標${tmpl.customCards.length}件`}
                     {' · '}横軸: {
-                      { hour: '1時間', day: '1日', week: '1週間', month: '1ヶ月' }[tmpl.timeUnit]
+                      TIME_UNIT_LABELS[tmpl.timeUnit]
                     }
                     {' · '}更新: {new Date(tmpl.updatedAt).toLocaleDateString('ja-JP')}
                   </p>

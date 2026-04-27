@@ -288,7 +288,7 @@ export type OverlayHourlyRow = {
   elapsed_hours: number
   elapsed_label: string
   time: string
-} & Record<string, number | null>
+} & Record<`s_${string}`, number | null>
 
 /** dataKey は `s_${postId}`（累積） */
 export function buildOverlayCumulativeHourlyRows(

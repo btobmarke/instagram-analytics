@@ -31,8 +31,9 @@ export async function downloadHtmlAsPdf(
         backgroundColor: '#ffffff',
       },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      // html2pdf.js のオプション（型定義が追随していないため any で渡す）
       pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
-    })
+    } as any)
     .from(element)
     .save()
 }

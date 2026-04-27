@@ -40,7 +40,7 @@ export async function getAiModelIdForServiceId(
     .maybeSingle()
 
   if (error || !data) return normalizeAiModelId(null)
-  return pickClientAiModel((data as ServiceJoinRow).projects)
+  return pickClientAiModel((data as unknown as ServiceJoinRow).projects)
 }
 
 type AccountJoinRow = {
@@ -73,5 +73,5 @@ export async function getAiModelIdForAccountId(
   const row = data as AccountJoinRow
   if (!row.service_id || !row.services) return normalizeAiModelId(null)
 
-  return pickClientAiModel(row.services.projects)
+  return pickClientAiModel((row.services as unknown as ServiceJoinRow).projects)
 }
