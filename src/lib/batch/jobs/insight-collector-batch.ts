@@ -1,4 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { addCalendarDaysFromYmd } from '@/lib/google-ads/reporting-dates'
+import {
+  eachInstagramBusinessYmdInclusive,
+  getInstagramBusinessTodayYmd,
+  getInstagramBusinessYesterdayYmd,
+  igAccountInsightValueDateFromEndTime,
+} from '@/lib/instagram/business-calendar'
 import { InstagramApiError, InstagramClient, isRateLimitExceeded } from "@/lib/instagram/client"
 import { legacyStoryMetricCodeFromNavigationDimension } from "@/lib/instagram/story-navigation-legacy-metric"
 import { resolveClientIdFromServiceJoin } from "@/lib/batch/resolve-service-client-id"
@@ -312,9 +319,10 @@ export async function runInsightCollectorForAccounts(
       }
 
       // アカウントインサイト収集（直近7日分: データ遅延に備えて広めに取得）
+      // since/until / value_date は Asia/Tokyo の暦日（UTC サーバでも JST の「昨日」基準）
       try {
-        const until   = new Date(Date.now() - 1  * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-        const since   = new Date(Date.now() - 7  * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+        const until = getInstagramBusinessYesterdayYmd()
+        const since = addCalendarDaysFromYmd(until, -6)
         console.info('[insight-collector] fetching account insights', {
           account_id: account.id,
           since,
@@ -383,9 +391,8 @@ export async function runInsightCollectorForAccounts(
           for (const metric of tsArr) {
             if (!metric.values?.length) continue
             for (const v of metric.values) {
-              const endDate = new Date(v.end_time)
-              endDate.setDate(endDate.getDate() - 1)
-              const valueDate = endDate.toISOString().slice(0, 10)
+              const valueDate = igAccountInsightValueDateFromEndTime(v.end_time)
+              if (!valueDate) continue
               const { error: upsertErr } = await admin.from('ig_account_insight_fact').upsert({
                 account_id: account.id,
                 metric_code: metric.name,
@@ -411,13 +418,8 @@ export async function runInsightCollectorForAccounts(
 
         // --- (B) total_value メトリクス: 1日ずつ取得 ---
         // metric_type=total_value + period=day は複数日レンジだと data:[] になるため1日ずつ
-        const sinceDate = new Date(since + 'T00:00:00Z')
-        const untilDate = new Date(until + 'T00:00:00Z')
-        for (let d = new Date(sinceDate); d <= untilDate; d.setDate(d.getDate() + 1)) {
-          const daySince = d.toISOString().slice(0, 10)
-          const nextDay = new Date(d)
-          nextDay.setDate(nextDay.getDate() + 1)
-          const dayUntil = nextDay.toISOString().slice(0, 10)
+        for (const daySince of eachInstagramBusinessYmdInclusive(since, until)) {
+          const dayUntil = addCalendarDaysFromYmd(daySince, 1)
           try {
             const { data: tvData } = await igClient.getAccountInsightsTotalValueExtended(daySince, dayUntil)
             const tvArr = (tvData as { data: AcctRow[] })?.data ?? []
@@ -598,9 +600,8 @@ export async function runInsightCollectorForAccounts(
             const metric = olArr.find(m => m.name === 'online_followers')
             if (metric?.values?.length) {
               for (const v of metric.values) {
-                const endDate = new Date(v.end_time)
-                endDate.setDate(endDate.getDate() - 1)
-                const valueDate = endDate.toISOString().slice(0, 10)
+                const valueDate = igAccountInsightValueDateFromEndTime(v.end_time)
+                if (!valueDate) continue
                 const scalar = coerceOnlineFollowersScalar(v.value)
                 if (scalar == null) continue
                 const { error: upsertErr } = await admin.from('ig_account_insight_fact').upsert({
@@ -655,7 +656,7 @@ export async function runInsightCollectorForAccounts(
           const pd = profileData as Record<string, unknown>
           const followerCount = typeof pd.followers_count === 'number' ? pd.followers_count : null
           if (followerCount !== null) {
-            const today = new Date().toISOString().slice(0, 10)
+            const today = getInstagramBusinessTodayYmd()
             const { error: upsertErr } = await admin.from('ig_account_insight_fact').upsert({
               account_id: account.id,
               metric_code: 'follower_count',

@@ -1,26 +1,23 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { IgMedia } from '@/types'
 import { buildInstagramServiceKpiPromptBlock } from '@/lib/ai/instagram-service-kpis-for-prompt'
+import { addCalendarDaysFromYmd } from '@/lib/google-ads/reporting-dates'
+import { getInstagramBusinessTodayYmd } from '@/lib/instagram/business-calendar'
 
 export type ProposalPeriodPreset = '7d' | '30d' | '90d' | 'custom'
-
-function addDays(isoDate: string, delta: number): string {
-  const d = new Date(isoDate + 'T12:00:00Z')
-  d.setUTCDate(d.getUTCDate() + delta)
-  return d.toISOString().slice(0, 10)
-}
 
 export function resolveProposalDateRange(
   preset: ProposalPeriodPreset,
   customSince?: string,
   customUntil?: string,
+  now: Date = new Date(),
 ): { since: string; until: string } {
-  const until = new Date().toISOString().slice(0, 10)
+  const until = getInstagramBusinessTodayYmd(now)
   if (preset === 'custom' && customSince && customUntil) {
     return { since: customSince.slice(0, 10), until: customUntil.slice(0, 10) }
   }
   const days = preset === '7d' ? 7 : preset === '30d' ? 30 : 90
-  return { since: addDays(until, -days), until }
+  return { since: addCalendarDaysFromYmd(until, -days), until }
 }
 
 function foldLatestInsights(
