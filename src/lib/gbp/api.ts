@@ -263,15 +263,14 @@ export async function fetchPerformance(params: {
     query.append('dailyMetrics', metric)
   }
 
-  // 開始日
-  query.set('dailyRange.startDate.year',  String(params.startDate.getFullYear()))
-  query.set('dailyRange.startDate.month', String(params.startDate.getMonth() + 1))
-  query.set('dailyRange.startDate.day',   String(params.startDate.getDate()))
+  // カレンダー日は UTC 成分で送る（呼び出し側は UTC 午前0時の Date を渡すこと）
+  query.set('dailyRange.startDate.year',  String(params.startDate.getUTCFullYear()))
+  query.set('dailyRange.startDate.month', String(params.startDate.getUTCMonth() + 1))
+  query.set('dailyRange.startDate.day',   String(params.startDate.getUTCDate()))
 
-  // 終了日
-  query.set('dailyRange.endDate.year',  String(params.endDate.getFullYear()))
-  query.set('dailyRange.endDate.month', String(params.endDate.getMonth() + 1))
-  query.set('dailyRange.endDate.day',   String(params.endDate.getDate()))
+  query.set('dailyRange.endDate.year',  String(params.endDate.getUTCFullYear()))
+  query.set('dailyRange.endDate.month', String(params.endDate.getUTCMonth() + 1))
+  query.set('dailyRange.endDate.day',   String(params.endDate.getUTCDate()))
 
   const url = `${GBP_API_BASE}/v1/${params.locationName}:fetchMultiDailyMetricsTimeSeries?${query}`
   console.log('[fetchPerformance] URL:', url)
@@ -323,7 +322,17 @@ export async function fetchPerformance(params: {
 
       if (!byDate.has(dateStr)) byDate.set(dateStr, {})
       const row = byDate.get(dateStr)!
-      row[colName] = dv.value != null ? Number(dv.value) : null
+      const next = dv.value != null && dv.value !== '' ? Number(dv.value) : null
+      const prev = row[colName] ?? null
+      // 同一 dailyMetric の複数 DailyMetricTimeSeries（sub-entity 等）をマージ。
+      // 上書きだと「一方だけ 0 の系列」で実数が消えるため、非 null 同士は max（重複系列の二重計上も避ける）。
+      if (prev == null) {
+        row[colName] = next
+      } else if (next == null) {
+        /* keep prev */
+      } else {
+        row[colName] = Math.max(prev, next)
+      }
     }
   }
 
