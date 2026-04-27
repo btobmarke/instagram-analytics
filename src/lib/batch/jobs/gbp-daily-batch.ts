@@ -8,19 +8,9 @@ import {
   listLocations,
 } from '@/lib/gbp/api'
 import { METRIC_TO_COLUMN } from '@/lib/gbp/constants'
+import { addCalendarDaysIso, jstTodayYmd, utcDateFromYmd } from '@/lib/gbp/jst-calendar'
 import { syncGbpReviewStarCountsDaily } from '@/lib/gbp/sync-review-star-counts-daily'
 import { notifyBatchError, notifyBatchSuccess } from '@/lib/batch-notify'
-
-// JSTで「今日」の日付文字列を返す
-function jstToday(): Date {
-  const now = new Date()
-  // UTC+9
-  return new Date(now.getTime() + 9 * 60 * 60 * 1000)
-}
-
-function dateToString(d: Date): string {
-  return d.toISOString().split('T')[0]
-}
 
 /** JST の「先月」（検索キーワード月次は翌月初旬まで遅延しがちなため、当月は取らない） */
 function previousCalendarMonthJst(now = new Date()): { year: number; month: number } {
@@ -85,13 +75,12 @@ export async function runGbpDailyBatch(
   const offsetDays = Number(process.env.GBP_DATE_OFFSET_DAYS ?? '1')
   const days       = 7
 
-  const today     = jstToday()
-  const targetDate = new Date(today)
-  targetDate.setDate(today.getDate() - offsetDays)
-  const startDate = new Date(targetDate)
-  startDate.setDate(targetDate.getDate() - (days - 1))
-
-  const targetDateStr = dateToString(targetDate)
+  const todayYmd = jstTodayYmd()
+  const targetYmd = addCalendarDaysIso(todayYmd, -offsetDays)
+  const startYmd = addCalendarDaysIso(targetYmd, -(days - 1))
+  const targetDateStr = targetYmd
+  const startDate = utcDateFromYmd(startYmd)
+  const endDate = utcDateFromYmd(targetYmd)
 
   // batch_job_logs INSERT
   const { data: jobLog } = await admin.from('batch_job_logs').insert({
@@ -250,7 +239,7 @@ export async function runGbpDailyBatch(
             accessToken,
             locationName,
             startDate,
-            endDate: targetDate,
+            endDate,
           })
 
           if (rows.length > 0) {
